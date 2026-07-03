@@ -8,6 +8,7 @@
       lang: "zh-CN",
       navProjects: "项目",
       navRepos: "仓库",
+      navRec: "推荐",
       greet: "Hello, world. 我是",
       bilibili: "B站",
       bilibiliAria: "B站",
@@ -16,6 +17,12 @@
       pagesSub: "可直接访问的在线 Demo",
       reposTitle: "更多仓库",
       reposSub: "其他开源项目 · 点击前往 GitHub",
+      recTitle: "推荐",
+      recSub: "值得一看的站点",
+      recBadge: "推荐",
+      ctaTitle: "想出现在这里?",
+      ctaText: "欢迎联系我,把你的站点或主页加进来。",
+      ctaBtn: "联系我",
       backTop: "回到顶部 ↑",
       skip: "跳到主内容",
       footerBuilt: "Built with HTML / CSS / JS",
@@ -29,6 +36,7 @@
       lang: "en",
       navProjects: "Projects",
       navRepos: "Repos",
+      navRec: "Recommend",
       greet: "Hello, world. I'm",
       bilibili: "Bilibili",
       bilibiliAria: "Bilibili",
@@ -37,6 +45,12 @@
       pagesSub: "Live demos you can try right away",
       reposTitle: "More Repositories",
       reposSub: "Other open-source projects \u00b7 open on GitHub",
+      recTitle: "Recommend",
+      recSub: "Sites worth visiting",
+      recBadge: "Recommend",
+      ctaTitle: "Want to be here?",
+      ctaText: "Feel free to contact me to add your site or homepage.",
+      ctaBtn: "Contact me",
       backTop: "Back to top \u2191",
       skip: "Skip to main content",
       footerBuilt: "Built with HTML / CSS / JS",
@@ -172,6 +186,49 @@
     }
   ];
 
+  var recommend = [
+    {
+      title: "Starki",
+      desc: "Starki 的个人主页。",
+      descEn: "Starki's personal homepage.",
+      url: "https://starkij.github.io/",
+      tags: ["Homepage"],
+      glow: "#f472b6",
+      icon: "SK",
+      recommend: true
+    },
+    {
+      title: "Yfs's Box",
+      desc: "Yfs 的个人主页。",
+      descEn: "Yfs's personal homepage.",
+      url: "https://yfsbox.github.io/",
+      tags: ["Homepage"],
+      glow: "#2dd4bf",
+      icon: "YB",
+      recommend: true
+    },
+    {
+      title: "icecoins",
+      desc: "技术仙人",
+      descEn: "Tech immortal",
+      url: "https://github.com/icecoins",
+      tags: ["GitHub"],
+      glow: "#38bdf8",
+      icon: "IC",
+      recommend: true
+    },
+    {
+      title: "Gensoul",
+      desc: "Life is about to rain.",
+      descEn: "Life is about to rain.",
+      url: "https://github.com/LeisureGensoul",
+      tags: ["GitHub"],
+      glow: "#a78bfa",
+      icon: "GS",
+      recommend: true
+    }
+  ];
+
   var lang = detectLang();
   var dict = I18N[lang];
   var phrases = dict.phrases;
@@ -230,6 +287,9 @@
     if (item.contrib) {
       header.appendChild(el("span", { class: "badge contrib" }, t("contrib")));
     }
+    if (item.recommend) {
+      header.appendChild(el("span", { class: "badge recommend" }, t("recBadge")));
+    }
     var desc = el("p", { class: "card-desc" }, descOf(item));
 
     var tags = el("div", { class: "card-tags" }, (item.tags || []).map(tagChip));
@@ -250,13 +310,32 @@
     return card;
   }
 
+  function buildCtaCard() {
+    var card = el("a", {
+      class: "card cta-card",
+      href: "mailto:davidchenms@hotmail.com",
+      "aria-label": t("ctaBtn")
+    });
+    card.appendChild(el("span", { class: "cta-plus", "aria-hidden": "true" }, "+"));
+    card.appendChild(el("span", { class: "cta-title" }, t("ctaTitle")));
+    card.appendChild(el("span", { class: "cta-text" }, t("ctaText")));
+    card.appendChild(el("span", { class: "cta-btn" }, t("ctaBtn")));
+    return card;
+  }
+
   function renderCards(forceReveal) {
     var pagesGrid = document.getElementById("pages-grid");
     var reposGrid = document.getElementById("repos-grid");
+    var recGrid = document.getElementById("rec-grid");
     pagesGrid.innerHTML = "";
     reposGrid.innerHTML = "";
+    if (recGrid) recGrid.innerHTML = "";
     pagesProjects.forEach(function (p) { pagesGrid.appendChild(buildCard(p)); });
     otherRepos.forEach(function (r) { reposGrid.appendChild(buildCard(r)); });
+    if (recGrid) {
+      recommend.forEach(function (r) { recGrid.appendChild(buildCard(r)); });
+      recGrid.appendChild(buildCtaCard());
+    }
     if (forceReveal) {
       document.querySelectorAll(".card").forEach(function (c) { c.classList.add("reveal"); });
     } else {
