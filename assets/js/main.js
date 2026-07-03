@@ -126,15 +126,6 @@
       icon: "UT"
     },
     {
-      title: "cxx2flow",
-      desc: "\u5c06 C/C++ \u4ee3\u7801\u8f6c\u6362\u4e3a\u6d41\u7a0b\u56fe / Turn your C/C++ code into flowchart\u3002",
-      descEn: "Turn your C/C++ code into flowcharts.",
-      url: GITHUB + "/cxx2flow",
-      tags: ["C++", "Flowchart"],
-      glow: "#c084fc",
-      icon: "C2"
-    },
-    {
       title: "gobang-minmax-algorithm",
       desc: "\u57fa\u4e8e\u6781\u5c0f\u6781\u5927\u7b97\u6cd5(Minimax + Alpha-Beta \u526a\u679d)\u7684\u4e94\u5b50\u68cb AI\u3002",
       descEn: "A Gomoku (five-in-a-row) AI using Minimax with Alpha-Beta pruning.",
