@@ -1,0 +1,26 @@
+[
+  {
+    "title": "WASM",
+    "slug": "wasm",
+    "description": "WASM简介",
+    "descriptionEn": "Introduction to WASM."
+  },
+  {
+    "title": "cpp_review",
+    "slug": "cpp_review",
+    "description": "C++复习笔记",
+    "descriptionEn": "C++ review notes."
+  },
+  {
+    "title": "JVM notes",
+    "slug": "jvm_notes",
+    "description": "JVM复习笔记",
+    "descriptionEn": "JVM review notes."
+  },
+  {
+    "title": "Hello World",
+    "slug": "hello-world",
+    "description": "我的第一篇博客文章。",
+    "descriptionEn": "My first blog post."
+  }
+]

@@ -10,8 +10,6 @@
       navRepos: "仓库",
       navRec: "推荐",
       greet: "Hello, world. 我是",
-      bilibili: "B站",
-      bilibiliAria: "B站",
       scroll: "向下探索",
       pagesTitle: "GitHub Pages 项目",
       pagesSub: "可直接访问的在线 Demo",
@@ -23,14 +21,17 @@
       ctaTitle: "想出现在这里?",
       ctaText: "欢迎联系我,把你的站点或主页加进来。",
       ctaBtn: "联系我",
+      navBlog: "博客",
+      blogTitle: "博客",
+      blogSub: "所思所写",
+      blogReadMore: "阅读全文",
       backTop: "回到顶部 ↑",
       skip: "跳到主内容",
-      footerBuilt: "Built with HTML / CSS / JS",
       contrib: "贡献",
       langBtn: "EN",
       langBtnAria: "Switch to English",
       scrollAria: "向下滚动查看项目",
-      phrases: ["C++ Compiler Runtime", "游戏爱好者", "宇宙畅想者"]
+      phrases: ["C++", "Compiler", "Runtime"]
     },
     en: {
       lang: "en",
@@ -38,8 +39,6 @@
       navRepos: "Repos",
       navRec: "Recommend",
       greet: "Hello, world. I'm",
-      bilibili: "Bilibili",
-      bilibiliAria: "Bilibili",
       scroll: "Scroll down",
       pagesTitle: "GitHub Pages Projects",
       pagesSub: "Live demos you can try right away",
@@ -51,18 +50,39 @@
       ctaTitle: "Want to be here?",
       ctaText: "Feel free to contact me to add your site or homepage.",
       ctaBtn: "Contact me",
+      navBlog: "Blog",
+      blogTitle: "Blog",
+      blogSub: "Thoughts and writings",
+      blogReadMore: "Read more",
       backTop: "Back to top \u2191",
       skip: "Skip to main content",
-      footerBuilt: "Built with HTML / CSS / JS",
       contrib: "Contrib",
       langBtn: "\u4e2d",
       langBtnAria: "\u5207\u6362\u5230\u4e2d\u6587",
       scrollAria: "Scroll down to see projects",
-      phrases: ["C++ Compiler Runtime", "Gamer", "Cosmos Dreamer"]
+      phrases: ["C++", "Compiler", "Runtime"]
     }
   };
 
   var pagesProjects = [
+    {
+      title: "CodeRedundancyDetector",
+      desc: "\u57fa\u4e8e\u4e8c\u8fdb\u5236\u53cd\u6c47\u7f16\u7684\u91cd\u590d\u4ee3\u7801\u7247\u6bb5\u68c0\u6d4b\u5de5\u5177\uff0c\u8bc6\u522b\u514b\u9686\u4ee3\u7801\u5757\u3002",
+      descEn: "Repeat code-fragment detection on binary disassembly, identifying cloned code blocks.",
+      url: "https://fizgrad.github.io/CodeRedundancyDetector/",
+      tags: ["C++", "Binary", "Disasm"],
+      glow: "#fb7185",
+      icon: "CR"
+    },
+    {
+      title: "NebulaIM-Web",
+      desc: "NebulaIM \u5206\u5e03\u5f0f\u5373\u65f6\u901a\u8baf\u7cfb\u7edf\u7684 React Web \u5ba2\u6237\u7aef\u3002",
+      descEn: "React web client for the NebulaIM distributed instant messaging system.",
+      url: "https://fizgrad.github.io/NebulaIM-Web/",
+      tags: ["React", "TypeScript", "IM"],
+      glow: "#7c8cff",
+      icon: "NW"
+    },
     {
       title: "BlackHoleSimulation",
       desc: "\u57fa\u4e8e\u539f\u751f WebGL2 \u6e32\u67d3\u7684\u53f2\u74e6\u897f\u9ed1\u6d1e\u6a21\u62df\uff0c\u5149\u7ebf\u5f2f\u66f2\u4e0e\u5438\u79ef\u76d8\u6548\u679c\u3002",
@@ -73,15 +93,6 @@
       icon: "BH"
     },
     {
-      title: "WebRacingCar",
-      desc: "\u6781\u7b80\u7684\u6d4f\u89c8\u5668 3D \u8d5b\u8f66\u6a21\u62df\u5668\uff0c\u57fa\u4e8e Babylon.js + Rapier3D \u7269\u7406\u5f15\u64ce\u3002",
-      descEn: "A minimal browser-based 3D racing simulator built with Babylon.js + Rapier3D physics.",
-      url: "https://fizgrad.github.io/WebRacingCar/",
-      tags: ["Babylon.js", "Rapier3D", "Vite"],
-      glow: "#22d3ee",
-      icon: "RC"
-    },
-    {
       title: "leetcode_graph_visualizer",
       desc: "\u5c06 LeetCode \u6d4b\u8bd5\u7528\u4f8b\u7ed8\u5236\u6210\u56fe\u7ed3\u6784\u7684\u53ef\u89c6\u5316\u5de5\u5177\uff0c\u65b9\u4fbf\u8c03\u8bd5\u56fe\u8bba\u9898\u76ee\u3002",
       descEn: "A tool that visualizes LeetCode test cases as graph structures, handy for debugging graph problems.",
@@ -89,15 +100,6 @@
       tags: ["LeetCode", "Graph", "Web"],
       glow: "#34d399",
       icon: "LG"
-    },
-    {
-      title: "NebulaIM-Web",
-      desc: "NebulaIM \u5206\u5e03\u5f0f\u5373\u65f6\u901a\u8baf\u7cfb\u7edf\u7684 React Web \u5ba2\u6237\u7aef\u3002",
-      descEn: "React web client for the NebulaIM distributed instant messaging system.",
-      url: "https://fizgrad.github.io/NebulaIM-Web/",
-      tags: ["React", "TypeScript", "IM"],
-      glow: "#7c8cff",
-      icon: "NW"
     },
     {
       title: "Mermaid2PowerPoint",
@@ -117,6 +119,15 @@
       glow: "#60a5fa",
       icon: "CS",
       contrib: true
+    },
+    {
+      title: "WebRacingCar",
+      desc: "\u6781\u7b80\u7684\u6d4f\u89c8\u5668 3D \u8d5b\u8f66\u6a21\u62df\u5668\uff0c\u57fa\u4e8e Babylon.js + Rapier3D \u7269\u7406\u5f15\u64ce\u3002",
+      descEn: "A minimal browser-based 3D racing simulator built with Babylon.js + Rapier3D physics.",
+      url: "https://fizgrad.github.io/WebRacingCar/",
+      tags: ["Babylon.js", "Rapier3D", "Vite"],
+      glow: "#22d3ee",
+      icon: "RC"
     }
   ];
 
@@ -174,15 +185,6 @@
       tags: ["C++", "CFG", "Analysis"],
       glow: "#38bdf8",
       icon: "CF"
-    },
-    {
-      title: "repeat_code_detect",
-      desc: "\u57fa\u4e8e\u4e8c\u8fdb\u5236\u53cd\u6c47\u7f16\u7684\u91cd\u590d\u4ee3\u7801\u7247\u6bb5\u68c0\u6d4b\u5de5\u5177\uff0c\u8bc6\u522b\u514b\u9686\u4ee3\u7801\u5757\u3002",
-      descEn: "Repeat code-fragment detection on binary disassembly, identifying cloned code blocks.",
-      url: GITHUB + "/repeat_code_detect",
-      tags: ["C++", "Binary", "Disasm"],
-      glow: "#fb7185",
-      icon: "RD"
     }
   ];
 
@@ -233,6 +235,7 @@
   var dict = I18N[lang];
   var phrases = dict.phrases;
   var typePi = 0, typeCi = 0, typeDeleting = false, typeTimer = null;
+  var blogPosts = null;
 
   function detectLang() {
     var stored = localStorage.getItem("lang");
@@ -321,6 +324,55 @@
     card.appendChild(el("span", { class: "cta-text" }, t("ctaText")));
     card.appendChild(el("span", { class: "cta-btn" }, t("ctaBtn")));
     return card;
+  }
+
+  function buildBlogCard(post) {
+    var card = el("article", { class: "card blog-card" });
+    card.style.setProperty("--card-glow", "#c084fc");
+
+    var top = el("div", { class: "card-top" }, [
+      el("div", { class: "card-icon" }, post.slug.charAt(0).toUpperCase()),
+      el("time", { class: "card-date", datetime: post.date }, post.date)
+    ]);
+
+    var title = el("h3", { class: "card-title" }, post.title);
+    var descText = lang === "en" ? (post.descriptionEn || post.description) : post.description;
+    var desc = el("p", { class: "card-desc" }, descText);
+
+    var tags = el("div", { class: "card-tags" }, [
+      el("span", { class: "tag blog-tag" }, t("blogReadMore"))
+    ]);
+
+    var link = el("a", {
+      class: "card-link",
+      href: "blog/post.html?slug=" + post.slug,
+      target: "_blank",
+      rel: "noopener",
+      "aria-label": post.title + " (opens in new tab)"
+    });
+
+    card.appendChild(top);
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(tags);
+    card.appendChild(link);
+    return card;
+  }
+
+  function loadBlogPosts(callback) {
+    if (blogPosts) return callback(blogPosts);
+    fetch("blog/posts.json")
+      .then(function (r) { return r.json(); })
+      .then(function (data) { blogPosts = data; callback(blogPosts); });
+  }
+
+  function renderBlogCards() {
+    var grid = document.getElementById("blog-grid");
+    if (!grid || !blogPosts) return;
+    grid.innerHTML = "";
+    blogPosts.forEach(function (post) {
+      grid.appendChild(buildBlogCard(post));
+    });
   }
 
   function renderCards(forceReveal) {
@@ -414,6 +466,10 @@
     document.documentElement.lang = dict.lang;
     updStaticText();
     renderCards(!isInitial);
+    if (!isInitial) {
+      renderBlogCards();
+      document.querySelectorAll(".card").forEach(function (c) { c.classList.add("reveal"); });
+    }
     startTyping();
     localStorage.setItem("lang", lang);
   }
@@ -529,6 +585,10 @@
     navScroll();
     footerYear();
     bgCanvas();
+    loadBlogPosts(function () {
+      renderBlogCards();
+      observeCards();
+    });
     var toggle = document.getElementById("lang-toggle");
     if (toggle) {
       toggle.addEventListener("click", function () {

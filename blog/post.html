@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>博客 - Fizgrad</title>
+  <link rel="icon" href="https://github.com/Fizgrad.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css" crossorigin="anonymous" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div class="grid-overlay" aria-hidden="true"></div>
+
+  <header class="nav scrolled">
+    <a href="../" class="nav-logo">&lt;fizgrad/&gt;</a>
+    <nav class="nav-links">
+      <a href="../">← 主页 / Home</a>
+    </nav>
+  </header>
+
+  <main id="main" class="post-page">
+    <article class="markdown-body post-wrap" id="post-content">
+      <p class="post-loading">加载中 / Loading...</p>
+    </article>
+  </main>
+
+  <footer class="footer">
+    <p>&copy; <span id="year"></span> Fizgrad · Built with GLM-5.2</p>
+    <a href="../" class="back-top">← 返回主页 / Back to home</a>
+  </footer>
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var slug = params.get("slug");
+      document.getElementById("year").textContent = new Date().getFullYear();
+
+      if (!slug) {
+        document.getElementById("post-content").innerHTML = '<p class="post-loading">没有找到文章 / Post not found</p>';
+        return;
+      }
+
+      fetch("posts.json")
+        .then(function (r) { return r.json(); })
+        .then(function (posts) {
+          var post = posts.find(function (p) { return p.slug === slug; });
+          if (post) document.title = post.title + " - Fizgrad";
+          return fetch(slug + ".md");
+        })
+        .then(function (r) {
+          if (!r.ok) throw new Error("Not found");
+          return r.text();
+        })
+        .then(function (md) {
+          if (typeof marked !== "undefined" && marked.parse) {
+            document.getElementById("post-content").innerHTML = marked.parse(md);
+          } else {
+            document.getElementById("post-content").innerHTML = "<pre>" + md.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</pre>";
+          }
+        })
+        .catch(function () {
+          document.getElementById("post-content").innerHTML = '<p class="post-loading">加载失败 / Failed to load</p>';
+        });
+    })();
+  </script>
+</body>
+</html>

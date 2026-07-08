@@ -1,8 +1,6 @@
 :root {
   --bg: #08080c;
-  --bg-2: #0d0d14;
   --surface: rgba(20, 20, 30, 0.6);
-  --surface-solid: #11111a;
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
   --text: #e9e9f2;
@@ -469,6 +467,32 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .cta-card:hover .cta-btn {
   color: #08080c;
   background: var(--accent-2);
+}
+
+.card-date {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+.blog-card { cursor: pointer; }
+.blog-tag {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.post-wrap {
+  max-width: 800px;
+  margin: 0 auto;
+  padding-bottom: 4rem;
+}
+.post-page { padding-top: 5rem; }
+.post-wrap.markdown-body {
+  background: transparent;
+}
+.post-loading {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 4rem 0;
 }
 
 .footer {
