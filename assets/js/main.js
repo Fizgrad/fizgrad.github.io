@@ -228,6 +228,16 @@
       glow: "#a78bfa",
       icon: "GS",
       recommend: true
+    },
+    {
+      title: "AndroidRuntime",
+      desc: "comsoft@WHU 的 AndroidRuntime 知识页面。",
+      descEn: "AndroidRuntime knowledge page by comsoft@WHU.",
+      url: "https://comsoftwhu.github.io/aosp/AndroidRuntime/",
+      tags: ["Android", "ART"],
+      glow: "#34d399",
+      icon: "AR",
+      recommend: true
     }
   ];
 
