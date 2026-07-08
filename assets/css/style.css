@@ -469,11 +469,6 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   background: var(--accent-2);
 }
 
-.card-date {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-faint);
-}
 .blog-card { cursor: pointer; }
 .blog-tag {
   color: var(--accent-2);

@@ -332,7 +332,7 @@
 
     var top = el("div", { class: "card-top" }, [
       el("div", { class: "card-icon" }, post.slug.charAt(0).toUpperCase()),
-      el("time", { class: "card-date", datetime: post.date }, post.date)
+      arrow()
     ]);
 
     var title = el("h3", { class: "card-title" }, post.title);
