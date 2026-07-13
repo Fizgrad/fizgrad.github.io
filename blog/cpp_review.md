@@ -328,6 +328,25 @@ s = "world"; // OK
 
 # 5. 对象生命周期与特殊成员函数
 
+```mermaid
+flowchart LR
+    A["创建对象"] --> B{"来源"}
+    B -->|无现有对象| C["默认构造"]
+    B -->|左值对象| D["拷贝构造"]
+    B -->|右值对象| E["移动构造"]
+    C --> F["对象存活"]
+    D --> F
+    E --> F
+    F --> G{"给已存在对象赋值"}
+    G -->|左值| H["拷贝赋值"]
+    G -->|右值| I["移动赋值"]
+    F --> J["离开生命周期"]
+    H --> J
+    I --> J
+    J --> K["析构"]
+```
+
+
 ## 5.1 六大特殊成员函数
 
 C++ 中常说的特殊成员函数包括：
@@ -419,6 +438,17 @@ T make() {
 ---
 
 # 6. Rule of Three / Five / Zero
+
+```mermaid
+flowchart TD
+    A["类是否直接拥有裸资源"] -->|否| B["Rule of Zero"]
+    A -->|是| C["需要自定义析构"]
+    C --> D["考虑拷贝构造与拷贝赋值"]
+    D --> E["Rule of Three"]
+    E --> F["再考虑移动构造与移动赋值"]
+    F --> G["Rule of Five"]
+```
+
 
 ## 6.1 Rule of Three
 
@@ -556,6 +586,19 @@ private:
 
 # 7. RAII
 
+```mermaid
+sequenceDiagram
+    participant Scope as 作用域
+    participant Obj as RAII 对象
+    participant Res as 外部资源
+    Scope->>Obj: 构造
+    Obj->>Res: 获取资源
+    Note over Scope,Obj: 正常返回或异常退出
+    Scope->>Obj: 离开作用域
+    Obj->>Res: 析构并释放资源
+```
+
+
 ## 7.1 RAII 是什么
 
 RAII：Resource Acquisition Is Initialization。
@@ -618,6 +661,17 @@ RAII 可以管理：
 ---
 
 # 8. 智能指针
+
+```mermaid
+flowchart TD
+    A["资源所有权"] --> B{"是否独占"}
+    B -->|是| C["unique_ptr"]
+    B -->|否| D{"是否共同拥有"}
+    D -->|是| E["shared_ptr"]
+    D -->|只观察| F["weak_ptr 或非拥有指针/引用"]
+    E --> G["控制块：强计数、弱计数、删除器"]
+```
+
 
 ## 8.1 unique_ptr
 
@@ -903,6 +957,16 @@ std::free(mem);
 
 # 10. 虚函数、虚表、多态
 
+```mermaid
+flowchart LR
+    P["Base* p"] --> O["实际对象 Derived"]
+    O --> V["vptr"]
+    V --> T["Derived vtable"]
+    T --> F["Derived::foo"]
+    P -. "p->foo()" .-> F
+```
+
+
 ## 10.1 虚函数实现原理
 
 典型实现：
@@ -980,6 +1044,18 @@ public:
 ---
 
 # 11. 构造析构中的虚函数行为
+
+```mermaid
+flowchart LR
+    A["开始构造 Derived"] --> B["先构造 Base 子对象"]
+    B --> C["Base 构造函数中的虚调用<br/>分派到 Base 版本"]
+    C --> D["再构造 Derived 部分"]
+    D --> E["Derived 完整存活期<br/>虚调用可分派到 Derived"]
+    E --> F["先析构 Derived 部分"]
+    F --> G["Base 析构函数中的虚调用<br/>仍分派到 Base 版本"]
+    G --> H["对象生命周期结束"]
+```
+
 
 高频陷阱：
 
@@ -1096,6 +1172,17 @@ public:
 
 # 13. 对象模型与内存布局
 
+```mermaid
+flowchart TD
+    A["对象大小"] --> B["非静态成员"]
+    A --> C["基类子对象"]
+    A --> D["vptr 或虚继承信息"]
+    A --> E["对齐与 padding"]
+    A --> F["空类最小大小"]
+    A -. "通常不计入每个对象" .-> G["静态成员与成员函数代码"]
+```
+
+
 ## 13.1 类对象大小由什么决定
 
 影响因素：
@@ -1198,6 +1285,18 @@ total: 8
 
 # 14. STL 容器：vector、deque、list
 
+```mermaid
+flowchart TD
+    A["选择顺序容器"] --> B{"需要连续存储和高效遍历"}
+    B -->|是| C["vector"]
+    B -->|否| D{"需要头尾高效插入"}
+    D -->|是| E["deque"]
+    D -->|否| F{"需要稳定节点和已知位置 O(1) 插删"}
+    F -->|是| G["list"]
+    F -->|否| C
+```
+
+
 ## 14.1 vector
 
 底层：连续动态数组。
@@ -1255,6 +1354,21 @@ total: 8
 ---
 
 ## 14.4 vector 扩容
+
+```mermaid
+sequenceDiagram
+    participant V as vector
+    participant A as 分配器
+    participant E as 元素
+    V->>V: size 达到 capacity
+    V->>A: 申请更大连续内存
+    loop 搬迁每个旧元素
+        V->>E: 优先移动，必要时拷贝
+    end
+    V->>A: 释放旧内存
+    V->>V: 插入新元素并更新容量
+```
+
 
 当 size 达到 capacity，再插入元素时：
 
@@ -1364,6 +1478,19 @@ std::unordered_map<Point, int, PointHash> mp;
 ---
 
 # 16. 迭代器失效
+
+```mermaid
+flowchart TD
+    A["容器发生修改"] --> B{"容器类型"}
+    B -->|vector| C{"是否扩容或移动后续元素"}
+    C -->|扩容| D["全部迭代器、指针、引用失效"]
+    C -->|erase| E["被删位置及其后失效"]
+    B -->|list 或 map| F["通常只使被删除节点失效"]
+    B -->|unordered_map| G{"是否 rehash"}
+    G -->|是| H["全部迭代器失效"]
+    G -->|否| I["通常只影响被删元素"]
+```
+
 
 ## 16.1 vector
 
@@ -1617,6 +1744,18 @@ struct TypeName<T*> {
 
 # 19. 完美转发、万能引用、引用折叠
 
+```mermaid
+flowchart TD
+    A["wrapper(T&& arg)"] --> B{"实参值类别"}
+    B -->|左值| C["T 推导为 U&"]
+    C --> D["T&& 折叠为 U&"]
+    B -->|右值| E["T 推导为 U"]
+    E --> F["T&& 为 U&&"]
+    D --> G["std::forward 保持左值"]
+    F --> H["std::forward 保持右值"]
+```
+
+
 ## 19.1 万能引用 / 转发引用
 
 ```cpp
@@ -1717,6 +1856,16 @@ v.push_back(std::move(obj));   // 已经有对象
 
 # 20. SFINAE、type traits、concepts
 
+```mermaid
+flowchart LR
+    A["模板能力约束"] --> B["SFINAE"]
+    B --> C["enable_if / type traits"]
+    C --> D["if constexpr"]
+    D --> E["C++20 concepts"]
+    E --> F["接口更清楚，错误诊断更直接"]
+```
+
+
 ## 20.1 SFINAE 是什么
 
 SFINAE：Substitution Failure Is Not An Error。
@@ -1809,6 +1958,16 @@ void print_size(const T& t) {
 ---
 
 # 21. 异常安全与 noexcept
+
+```mermaid
+flowchart TD
+    A["异常安全保证"] --> B["基本保证：对象仍有效且不泄漏"]
+    A --> C["强保证：失败后状态不变"]
+    A --> D["不抛保证：noexcept"]
+    D --> E["若实际抛出异常则 terminate"]
+    C --> F["常用先构造新状态，再提交替换"]
+```
+
 
 ## 21.1 C++ 异常 vs 错误码
 
@@ -1912,6 +2071,17 @@ struct A {
 ---
 
 # 22. 并发基础：thread、mutex、lock
+
+```mermaid
+flowchart TD
+    A["多个线程访问共享状态"] --> B{"是否至少一个写"}
+    B -->|否| C["只读并发通常安全"]
+    B -->|是| D{"是否建立同步关系"}
+    D -->|否| E["数据竞争，未定义行为"]
+    D -->|是| F["mutex 或 atomic"]
+    F --> G["保护临界区或单变量原子操作"]
+```
+
 
 ## 22.1 数据竞争
 
@@ -2031,6 +2201,25 @@ lock(m1);
 
 # 23. condition_variable
 
+```mermaid
+sequenceDiagram
+    participant C as 消费者线程
+    participant M as mutex
+    participant CV as condition_variable
+    participant P as 生产者线程
+    C->>M: unique_lock 加锁
+    C->>C: 检查谓词
+    C->>CV: wait
+    CV->>M: 原子释放 mutex 并阻塞
+    P->>M: 加锁并修改共享条件
+    P->>M: 解锁
+    P->>CV: notify_one
+    CV->>C: 唤醒
+    C->>M: 重新获得 mutex
+    C->>C: 再次检查谓词
+```
+
+
 ## 23.1 wait 为什么要配合谓词
 
 条件变量可能出现：
@@ -2100,6 +2289,20 @@ void producer() {
 ---
 
 # 24. atomic 与内存模型
+
+```mermaid
+sequenceDiagram
+    participant P as 生产者
+    participant A as 原子变量 ready
+    participant C as 消费者
+    P->>P: 写入普通数据 data
+    P->>A: store(true, release)
+    C->>A: load(acquire)
+    A-->>C: 读到 true
+    Note over P,C: release 之前的写入对 acquire 之后可见
+    C->>C: 安全读取 data
+```
+
 
 ## 24.1 atomic 和 mutex 的区别
 
@@ -2448,6 +2651,16 @@ process(v);
 
 # 27. 编译、链接、ODR、inline
 
+```mermaid
+flowchart LR
+    A["源文件 .cpp"] --> B["预处理 .i"]
+    B --> C["编译生成汇编 .s 或 IR"]
+    C --> D["汇编生成目标文件 .o"]
+    D --> E["链接器解析符号与重定位"]
+    E --> F["可执行文件或动态库"]
+```
+
+
 ## 27.1 编译流程
 
 大致流程：
@@ -2457,8 +2670,9 @@ process(v);
 3. 汇编：生成目标文件 `.o`。
 4. 链接：解析符号，合并目标文件和库，生成可执行文件。
 
-```text
-.cpp -> .i -> .s -> .o -> executable
+```mermaid
+flowchart LR
+    A[".cpp"] --> B[".i"] --> C[".s 或 IR"] --> D[".o"] --> E["executable / library"]
 ```
 
 ---
@@ -2642,6 +2856,18 @@ public:
 
 # 29. ABI 与动态库二进制兼容
 
+```mermaid
+flowchart LR
+    A["调用方二进制"] --> B["ABI 契约"]
+    C["动态库二进制"] --> B
+    B --> D["调用约定"]
+    B --> E["名字修饰"]
+    B --> F["对象与 vtable 布局"]
+    B --> G["异常和标准库类型布局"]
+    H["任一契约变化"] --> I["无需重编译的调用方可能失效"]
+```
+
+
 ## 29.1 ABI 是什么
 
 ABI：Application Binary Interface。
@@ -2688,6 +2914,18 @@ C++ 比 C 更容易出 ABI 问题，因为 C++ 有：
 ---
 
 # 30. 性能优化
+
+```mermaid
+flowchart TD
+    A["观察性能问题"] --> B["使用 profiler 定位热点"]
+    B --> C["建立可验证假设"]
+    C --> D["只修改一个主要因素"]
+    D --> E["基准测试或压测"]
+    E --> F{"指标是否改善且无副作用"}
+    F -->|否| B
+    F -->|是| G["保留结果并继续下一轮"]
+```
+
 
 ## 30.1 先测量再优化
 
@@ -3081,6 +3319,22 @@ private:
 
 # 35. 高频手写：线程安全队列
 
+```mermaid
+sequenceDiagram
+    participant P as 生产者
+    participant Q as 线程安全队列
+    participant CV as 条件变量
+    participant C as 消费者
+    C->>Q: wait_and_pop
+    Q->>CV: 队列为空则等待
+    P->>Q: push(value)
+    Q->>Q: 加锁并入队
+    Q->>CV: notify_one
+    CV-->>C: 唤醒
+    C->>Q: 加锁、出队并返回值
+```
+
+
 ```cpp
 #include <condition_variable>
 #include <mutex>
@@ -3149,6 +3403,22 @@ private:
 ---
 
 # 36. 高频手写：有停止机制的生产者消费者队列
+
+```mermaid
+flowchart TD
+    O["队列 Open"] --> P{"生产者 push"}
+    P -->|队列未满| I["入队并 notify not_empty"]
+    P -->|队列已满| PW["等待 not_full"]
+    O --> C{"消费者 pop"}
+    C -->|队列非空| R["出队并 notify not_full"]
+    C -->|队列为空| CW["等待 not_empty"]
+    PW --> I
+    CW --> R
+    O --> X["close"]
+    X --> N["设置 closed 并 notify_all"]
+    N --> Z["等待者退出，后续 push 失败"]
+```
+
 
 ```cpp
 #include <condition_variable>
@@ -3228,6 +3498,17 @@ private:
 ---
 
 # 37. 高频手写：LRU Cache
+
+```mermaid
+flowchart LR
+    K["key"] --> H["unordered_map"]
+    H --> I["定位 list 迭代器"]
+    I --> N["双向链表节点"]
+    N --> M["splice 到链表头：最近使用"]
+    T["链表尾：最久未使用"] --> E["容量满时淘汰"]
+    E --> H
+```
+
 
 ## 37.1 思路
 

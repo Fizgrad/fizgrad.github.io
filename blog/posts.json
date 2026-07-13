@@ -1,5 +1,11 @@
 [
   {
+    "title": "OS Review",
+    "slug": "os_review",
+    "description": "操作系统复习笔记",
+    "descriptionEn": "Operating Systems review notes."
+  },
+  {
     "title": "WASM",
     "slug": "wasm",
     "description": "WASM简介",

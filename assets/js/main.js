@@ -373,7 +373,8 @@
     if (blogPosts) return callback(blogPosts);
     fetch("blog/posts.json")
       .then(function (r) { return r.json(); })
-      .then(function (data) { blogPosts = data; callback(blogPosts); });
+      .then(function (data) { blogPosts = data; callback(blogPosts); })
+      .catch(function () { callback(null); });
   }
 
   function renderBlogCards() {

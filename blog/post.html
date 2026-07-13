@@ -8,9 +8,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../assets/css/style.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
   <div class="grid-overlay" aria-hidden="true"></div>
@@ -56,10 +59,123 @@
           return r.text();
         })
         .then(function (md) {
+          var container = document.getElementById("post-content");
           if (typeof marked !== "undefined" && marked.parse) {
-            document.getElementById("post-content").innerHTML = marked.parse(md);
+            container.innerHTML = marked.parse(md);
           } else {
-            document.getElementById("post-content").innerHTML = "<pre>" + md.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</pre>";
+            container.innerHTML = "<pre>" + md.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</pre>";
+            return;
+          }
+          if (typeof hljs !== "undefined") {
+            container.querySelectorAll("pre code:not(.language-mermaid)").forEach(function (block) {
+              hljs.highlightElement(block);
+            });
+          }
+          container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
+            if (pre.querySelector(".copy-btn")) return;
+            var btn = document.createElement("button");
+            btn.className = "copy-btn";
+            btn.textContent = "Copy";
+            btn.addEventListener("click", function () {
+              var code = pre.querySelector("code");
+              var text = code ? code.textContent : "";
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                  btn.textContent = "Copied!";
+                  setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                }).catch(function () {
+                  btn.textContent = "Failed";
+                  setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                });
+              } else {
+                btn.textContent = "Failed";
+                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+              }
+            });
+            pre.appendChild(btn);
+          });
+          var mermaidBlocks = container.querySelectorAll("pre code.language-mermaid");
+          if (mermaidBlocks.length > 0 && typeof mermaid !== "undefined") {
+            mermaid.initialize({ startOnLoad: false, theme: "dark" });
+            mermaidBlocks.forEach(function (code) {
+              var div = document.createElement("div");
+              div.className = "mermaid";
+              div.textContent = code.textContent;
+              code.parentElement.replaceWith(div);
+            });
+            mermaid.run();
+          }
+          var slugSet = {};
+          container.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach(function (h) {
+            var text = h.textContent.trim();
+            var slug = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5\s-]/g, "").replace(/\s+/g, "-");
+            if (!slug) slug = "heading";
+            if (slugSet[slug]) { slugSet[slug]++; slug = slug + "-" + slugSet[slug]; }
+            else { slugSet[slug] = 1; }
+            h.id = slug;
+            var link = document.createElement("a");
+            link.className = "heading-anchor";
+            link.href = "#" + slug;
+            link.textContent = "#";
+            link.setAttribute("aria-label", "Anchor: " + text);
+            h.appendChild(link);
+          });
+          container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
+            var code = pre.querySelector("code");
+            if (!code) return;
+            var lines = code.textContent.replace(/\n$/, "").split("\n").length;
+            if (lines <= 15) return;
+            var wrapper = document.createElement("div");
+            wrapper.className = "code-block-wrapper";
+            wrapper.dataset.expanded = "false";
+            var existingBtn = pre.querySelector(".copy-btn");
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(pre);
+            if (existingBtn) wrapper.appendChild(existingBtn);
+            var expandBtn = document.createElement("button");
+            expandBtn.className = "code-expand-btn";
+            expandBtn.textContent = "展开 (共 " + lines + " 行)";
+            expandBtn.addEventListener("click", function () {
+              if (wrapper.dataset.expanded === "true") {
+                wrapper.dataset.expanded = "false";
+                expandBtn.textContent = "展开 (共 " + lines + " 行)";
+              } else {
+                wrapper.dataset.expanded = "true";
+                expandBtn.textContent = "收起";
+              }
+            });
+            wrapper.appendChild(expandBtn);
+          });
+          container.querySelectorAll("h2, h3").forEach(function (heading) {
+            var toggle = document.createElement("button");
+            toggle.className = "section-toggle";
+            toggle.textContent = "▼";
+            toggle.setAttribute("aria-label", "Toggle section");
+            toggle.addEventListener("click", function () {
+              var collapsed = heading.classList.toggle("collapsed");
+              toggle.textContent = collapsed ? "▶" : "▼";
+              var node = heading.nextElementSibling;
+              var level = parseInt(heading.tagName.charAt(1), 10);
+              while (node) {
+                var nodeLevel = parseInt(node.tagName.charAt(1), 10);
+                if (nodeLevel && nodeLevel <= level) break;
+                node.style.display = collapsed ? "none" : "";
+                node = node.nextElementSibling;
+              }
+            });
+            heading.insertBefore(toggle, heading.firstChild);
+          });
+          if (window.location.hash) {
+            var hashId;
+            try { hashId = decodeURIComponent(window.location.hash.slice(1)); }
+            catch (e) { hashId = window.location.hash.slice(1); }
+            var target = document.getElementById(hashId);
+            if (target) {
+              setTimeout(function () {
+                var top = target.getBoundingClientRect().top + window.scrollY - 70;
+                window.scrollTo({ top: top, behavior: "smooth" });
+              }, 300);
+            }
           }
         })
         .catch(function () {

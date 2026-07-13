@@ -2,47 +2,47 @@
 
 JVM 的知识大体可以分为八条主线：
 
-```text
-Java 程序运行流程
-  ↓
-类加载机制
-  ↓
-运行时数据区
-  ↓
-对象创建与对象内存布局
-  ↓
-垃圾回收与内存分配
-  ↓
-JMM 与并发底层
-  ↓
-JIT 与运行时优化
-  ↓
-线上 JVM 排障
+```mermaid
+flowchart TD
+    A["Java 程序运行流程"] --> B["类加载机制"]
+    B --> C["运行时数据区"]
+    C --> D["对象创建与内存布局"]
+    D --> E["垃圾回收与内存分配"]
+    E --> F["JMM 与并发底层"]
+    F --> G["JIT 与运行时优化"]
+    G --> H["线上 JVM 排障"]
 ```
 
 要能把它们串起来：
 
-```text
-.java 源码
-  ↓ javac
-.class 字节码
-  ↓ 类加载器
-加载、验证、准备、解析、初始化
-  ↓
-运行时数据区：堆、栈、方法区、PC、本地方法栈
-  ↓
-解释执行 + JIT 编译
-  ↓
-对象不断分配到堆中
-  ↓
-GC 发现不可达对象并回收
-  ↓
-JVM 参数、GC 日志、dump、jstack 用于排障
+```mermaid
+flowchart TD
+    A[".java 源码"] -->|javac| B[".class 字节码"]
+    B --> C["类加载：加载、验证、准备、解析、初始化"]
+    C --> D["运行时数据区：堆、栈、方法区、PC、本地方法栈"]
+    D --> E["解释执行与 JIT 编译"]
+    E --> F["对象持续分配"]
+    F --> G["GC 回收不可达对象"]
+    G --> H["日志、dump、jstack 与参数用于诊断"]
 ```
 
 
 
 # 1. JVM、JRE、JDK 的关系
+
+```mermaid
+flowchart TD
+    JDK["JDK：开发工具包"]
+    JRE["JRE：运行环境"]
+    JVM["JVM：字节码执行与运行时管理"]
+    LIB["核心类库"]
+    TOOLS["javac、jcmd、jstack、jmap 等工具"]
+    JDK --> JRE
+    JDK --> TOOLS
+    JRE --> JVM
+    JRE --> LIB
+```
+
 
 ## 1.1 JVM 是什么
 
@@ -122,6 +122,23 @@ JVM = 执行字节码、管理运行时的核心
 
 # 2. Java 程序运行流程
 
+```mermaid
+sequenceDiagram
+    participant Dev as 开发者
+    participant Javac as javac
+    participant Loader as 类加载器
+    participant JVM as JVM 执行引擎
+    participant GC as GC
+    Dev->>Javac: 编译 .java
+    Javac-->>Dev: 生成 .class
+    JVM->>Loader: 按需加载类
+    Loader-->>JVM: 验证、准备、解析、初始化
+    JVM->>JVM: 解释执行
+    JVM->>JVM: 热点代码 JIT 编译
+    JVM->>GC: 堆压力触发回收
+```
+
+
 一个 Java 程序从源码到运行，大致经历：
 
 1. 编写 .java 文件
@@ -192,6 +209,21 @@ JVM 执行字节码有两种方式：
 
 # 3. JVM 运行时数据区
 
+```mermaid
+flowchart TD
+    JVM["JVM 运行时"] --> TS["线程私有"]
+    JVM --> SH["线程共享"]
+    JVM --> NM["重要的堆外区域"]
+    TS --> PC["程序计数器"]
+    TS --> VS["Java 虚拟机栈"]
+    TS --> NS["本地方法栈"]
+    SH --> HEAP["Java 堆"]
+    SH --> MA["方法区 / 元空间"]
+    MA --> CP["运行时常量池"]
+    NM --> DM["直接内存"]
+```
+
+
 JVM 运行时数据区可以分为线程私有和线程共享。
 
 - 线程私有：
@@ -232,6 +264,19 @@ JVM 运行时数据区可以分为线程私有和线程共享。
 
 
 ## 3.2 Java 虚拟机栈
+
+```mermaid
+flowchart LR
+    T["线程"] --> S["Java 虚拟机栈"]
+    S --> F3["栈帧：method C"]
+    F3 --> F2["栈帧：method B"]
+    F2 --> F1["栈帧：method A"]
+    F3 --> L["局部变量表"]
+    F3 --> O["操作数栈"]
+    F3 --> D["动态链接"]
+    F3 --> R["返回地址"]
+```
+
 
 Java 虚拟机栈是线程私有的。
 
@@ -340,6 +385,17 @@ private native void start0();
 
 ## 3.4 Java 堆
 
+```mermaid
+flowchart LR
+    H["Java 堆"] --> Y["新生代"]
+    H --> O["老年代"]
+    Y --> E["Eden"]
+    Y --> S0["Survivor From"]
+    Y --> S1["Survivor To"]
+    H -. "G1 中由 Region 动态扮演各角色" .-> R["Region 集合"]
+```
+
+
 Java 堆是 JVM 管理的最大一块内存区域。
 
 主要存放：
@@ -439,6 +495,17 @@ java.lang.OutOfMemoryError: Direct buffer memory
 
 # 4. 对象创建过程
 
+```mermaid
+flowchart TD
+    A["执行 new"] --> B["检查类是否已加载、解析、初始化"]
+    B --> C["分配对象内存"]
+    C --> D["写入字段零值"]
+    D --> E["设置 Mark Word 与 Klass Pointer"]
+    E --> F["执行构造方法 init"]
+    F --> G["引用指向完整对象"]
+```
+
+
 执行：
 
 ```java
@@ -514,6 +581,18 @@ JVM 需要维护一个列表，记录哪些内存块可用。
 
 ## 4.4 TLAB
 
+```mermaid
+flowchart TD
+    A["线程申请新对象"] --> B{"对象是否适合 TLAB"}
+    B -->|是| C{"当前 TLAB 空间是否足够"}
+    C -->|是| D["指针碰撞快速分配"]
+    C -->|否| E["申请新 TLAB 或进入慢路径"]
+    B -->|大对象等情况| F["直接走共享堆分配路径"]
+    E --> G["必要时 CAS 竞争或触发 GC"]
+    F --> G
+```
+
+
 TLAB，全称**Thread Local Allocation Buffer**
 
 即线程本地分配缓冲区。
@@ -536,6 +615,18 @@ TLAB，全称**Thread Local Allocation Buffer**
 
 
 # 5. 对象内存布局
+
+```mermaid
+flowchart LR
+    O["普通对象"] --> H["对象头"]
+    O --> D["实例数据"]
+    O --> P["对齐填充"]
+    H --> M["Mark Word"]
+    H --> K["Klass Pointer"]
+    A["数组对象"] --> O
+    A --> L["数组长度"]
+```
+
 
 HotSpot 中，一个普通 Java 对象通常由三部分组成：
 
@@ -647,6 +738,17 @@ HotSpot 通常要求对象大小按一定字节对齐，例如 8 字节对齐。
 
 # 6. 对象是否一定在堆上分配
 
+```mermaid
+flowchart TD
+    A["源码中 new 对象"] --> B["JIT 逃逸分析"]
+    B --> C{"对象是否逃逸"}
+    C -->|是| D["保留真实对象分配"]
+    C -->|否| E["可能标量替换"]
+    E --> F["字段拆成局部标量"]
+    F --> G["完整堆对象可能被消除"]
+```
+
+
 > 从 JVM 规范和语义上看，对象是堆上的概念；但 HotSpot JIT 经过逃逸分析后，可能进行标量替换、锁消除等优化，使对象不以完整对象形式真实分配到堆上。
 
 例如：
@@ -671,6 +773,16 @@ int y = 2
 
 
 # 7. 方法区、永久代、元空间
+
+```mermaid
+flowchart LR
+    M["方法区：JVM 规范概念"] --> P["Java 8 前 HotSpot：PermGen"]
+    M --> S["Java 8 后 HotSpot：Metaspace"]
+    P --> H["位于 JVM 管理区域，大小较固定"]
+    S --> N["使用 native memory"]
+    S --> C["ClassLoader 泄漏会阻止类卸载"]
+```
+
 
 ## 7.1 方法区
 
@@ -821,6 +933,18 @@ Java 7 之后：
 
 
 # 9. 类加载机制
+
+```mermaid
+flowchart LR
+    A["加载"] --> B["验证"]
+    B --> C["准备"]
+    C --> D["解析"]
+    D --> E["初始化"]
+    E --> F["使用"]
+    F --> G["满足条件后卸载"]
+    D -. "解析也可能延后" .-> F
+```
+
 
 类加载过程：
 
@@ -977,6 +1101,25 @@ System.out.println(A.CONST); // 编译期常量可能不初始化 A
 
 # 10. 双亲委派模型
 
+```mermaid
+sequenceDiagram
+    participant App as Application Loader
+    participant Plat as Platform Loader
+    participant Boot as Bootstrap Loader
+    App->>App: findLoadedClass
+    App->>Plat: 委托加载
+    Plat->>Boot: 继续向上委托
+    alt Bootstrap 能加载
+        Boot-->>Plat: 返回核心类
+        Plat-->>App: 返回 Class
+    else 父加载器都无法加载
+        Boot-->>Plat: ClassNotFound
+        Plat-->>App: ClassNotFound
+        App->>App: findClass 自己加载
+    end
+```
+
+
 ## 10.1 类加载器层级
 
 Java 8 常见类加载器：
@@ -1096,6 +1239,17 @@ Thread.currentThread().getContextClassLoader()
 
 
 # 11. 类相等与类卸载
+
+```mermaid
+flowchart TD
+    A["类身份"] --> B["全限定类名"]
+    A --> C["定义它的 ClassLoader"]
+    D["同名 class"] --> E{"ClassLoader 是否相同"}
+    E -->|是| F["可能是同一个运行时类"]
+    E -->|否| G["JVM 视为不同类型"]
+    G --> H["instanceof 失败或 ClassCastException"]
+```
+
 
 ## 11.1 类相等
 
@@ -1219,6 +1373,15 @@ Runnable r = () -> System.out.println("hello");
 
 # 13. 垃圾回收基础
 
+```mermaid
+flowchart TD
+    R["GC Roots"] --> A["直接可达对象"]
+    A --> B["继续沿引用链搜索"]
+    B --> C["全部可达对象"]
+    D["未被遍历到的对象"] --> E["可回收候选"]
+```
+
+
 GC 要解决三个问题：
 
 - 哪些对象可以回收
@@ -1316,6 +1479,15 @@ public class Demo {
 
 # 14. Java 引用类型
 
+```mermaid
+flowchart LR
+    S["强引用"] -->|对象存活约束最强| SO["不会因内存压力被回收"]
+    SF["软引用"] -->|内存紧张时| SF2["可能回收"]
+    W["弱引用"] -->|下一次 GC 时| W2["通常回收"]
+    P["虚引用"] -->|配合 ReferenceQueue| P2["跟踪回收与资源清理"]
+```
+
+
 Java 中有四种引用强度：
 
 - 强引用
@@ -1398,6 +1570,18 @@ PhantomReference<Object> ref =
 
 # 15. 垃圾回收算法
 
+```mermaid
+flowchart TD
+    A["GC 算法"] --> B["标记-清除"]
+    A --> C["标记-复制"]
+    A --> D["标记-整理"]
+    B --> B1["不移动对象，但产生碎片"]
+    C --> C1["复制存活对象，适合低存活率区域"]
+    D --> D1["向一端移动存活对象，减少碎片"]
+    A --> E["分代收集：不同区域组合不同算法"]
+```
+
+
 ## 15.1 标记-清除
 
 过程：
@@ -1457,6 +1641,17 @@ PhantomReference<Object> ref =
 
 
 # 16. 新生代与老年代
+
+```mermaid
+flowchart LR
+    N["新对象"] --> E["Eden"]
+    E -->|Minor GC 存活| T["Survivor To"]
+    F["Survivor From"] -->|仍存活| T
+    T -->|年龄增加| F2["下一轮角色互换"]
+    T -->|达到阈值或空间不足| O["老年代"]
+    N -->|大对象或特殊策略| O
+```
+
 
 ## 16.1 新生代结构
 
@@ -1546,6 +1741,16 @@ Eden : From : To = 8 : 1 : 1
 
 # 17. Minor GC、Major GC、Full GC
 
+```mermaid
+flowchart TD
+    A["发生 GC"] --> B{"主要回收范围"}
+    B -->|新生代| C["Minor / Young GC"]
+    B -->|老年代| D["Major GC：术语可能有歧义"]
+    B -->|整个堆及相关区域| E["Full GC"]
+    E --> F["通常停顿更长，应结合日志判断原因"]
+```
+
+
 ## 17.1 Minor GC
 
 Minor GC 通常回收新生代。
@@ -1604,6 +1809,17 @@ Full GC 通常回收整个 Java 堆和方法区相关数据。
 
 # 18. 常见垃圾收集器
 
+```mermaid
+flowchart LR
+    A["GC 目标"] --> B{"优先考虑什么"}
+    B -->|简单与小堆| C["Serial"]
+    B -->|高吞吐| D["Parallel"]
+    B -->|可控停顿与较大堆| E["G1"]
+    B -->|超低延迟与大堆| F["ZGC / Shenandoah"]
+    G["CMS"] --> H["历史低停顿方案，已退出主流"]
+```
+
+
 ## 18.1 Serial GC
 
 特点**单线程, Stop-The-World, 简单, 适合小堆、客户端场景**
@@ -1660,6 +1876,19 @@ CMS 已经逐渐退出主流，新项目一般不再优先使用。
 
 
 ## 18.4 G1 GC
+
+```mermaid
+flowchart TD
+    H["堆"] --> R["多个等大小 Region"]
+    R --> E["Eden Region"]
+    R --> S["Survivor Region"]
+    R --> O["Old Region"]
+    R --> U["Humongous Region"]
+    X["Remembered Set"] --> C["避免回收单个 Region 时扫描整个堆"]
+    P["预测回收收益与停顿"] --> CS["选择 Collection Set"]
+    CS --> M["Young GC 或 Mixed GC"]
+```
+
 
 G1，全称 Garbage First。
 
@@ -1725,6 +1954,16 @@ G1 复制存活对象时，找不到足够空间容纳这些对象。
 
 ## 18.5 ZGC
 
+```mermaid
+flowchart LR
+    A["应用线程并发运行"] --> B["Load Barrier / Colored Pointer"]
+    B --> C["并发标记"]
+    C --> D["并发转移与重定位"]
+    D --> E["访问时修正引用"]
+    E --> F["尽量缩短 STW 阶段"]
+```
+
+
 ZGC 的目标：
 
 - 超低停顿
@@ -1760,6 +1999,22 @@ Shenandoah 目标也类似：
 
 # 19. Stop-The-World
 
+```mermaid
+sequenceDiagram
+    participant App as 应用线程
+    participant GC as GC 线程
+    App->>App: 正常运行
+    GC->>App: STW：初始标记
+    Note over App,GC: 应用线程短暂停止
+    GC->>GC: 并发标记
+    App->>App: 与 GC 并发运行
+    GC->>App: STW：重新标记或根处理
+    Note over App,GC: 再次短暂停止
+    GC->>GC: 继续并发清理或转移
+    App->>App: 恢复运行
+```
+
+
 STW，Stop-The-World，指 JVM 暂停所有用户线程，只让 GC 线程或 JVM 内部线程工作。
 
 为什么需要 STW？
@@ -1785,6 +2040,15 @@ STW，Stop-The-World，指 JVM 暂停所有用户线程，只让 GC 线程或 JV
 
 
 # 20. 三色标记与并发标记
+
+```mermaid
+flowchart LR
+    W["白色：尚未访问"] -->|从 GC Roots 首次发现| G["灰色：对象已发现，引用未扫描完"]
+    G -->|扫描完全部引用| B["黑色：对象及其引用已扫描"]
+    B -->|并发修改被写屏障记录| G
+    W -->|标记结束仍为白色| R["可回收候选"]
+```
+
 
 三色标记把对象分为：
 
@@ -1942,6 +2206,16 @@ G1 并发标记使用 SATB 思想。
 
 # 23. Java 内存模型 JMM
 
+```mermaid
+flowchart LR
+    M["主内存中的共享变量"] --> W1["线程 A 工作内存"]
+    M --> W2["线程 B 工作内存"]
+    W1 -->|写回| M
+    M -->|读取或刷新| W2
+    W1 -. "缺少同步时修改不一定及时可见" .-> W2
+```
+
+
 JMM 主要解决多线程下的三个问题：
 
 - 原子性
@@ -2098,6 +2372,18 @@ Lock
 
 # 25. synchronized
 
+```mermaid
+flowchart LR
+    A["进入 synchronized"] --> B["monitorenter 或方法 ACC_SYNCHRONIZED"]
+    B --> C{"竞争程度"}
+    C -->|低竞争| D["CAS / 轻量级路径"]
+    C -->|竞争激烈| E["重量级 monitor 与线程阻塞"]
+    D --> F["临界区"]
+    E --> F
+    F --> G["monitorexit / 解锁并建立可见性"]
+```
+
+
 `synchronized` 可以保证：
 
 - 原子性
@@ -2219,6 +2505,17 @@ JDK 15 之后偏向锁被禁用并逐渐废弃。
 
 # 26. happens-before
 
+```mermaid
+flowchart TD
+    A["happens-before"] --> B["程序顺序规则"]
+    A --> C["解锁先于后续同锁加锁"]
+    A --> D["volatile 写先于后续读"]
+    A --> E["Thread.start 规则"]
+    A --> F["Thread.join 规则"]
+    A --> G["传递性"]
+```
+
+
 happens-before 是 JMM 中判断可见性和有序性的规则。
 
 如果 A happens-before B，则 A 的结果对 B 可见，并且 A 的执行顺序先于 B。
@@ -2328,6 +2625,18 @@ class User {
 
 # 28. CAS、ABA 与 LongAdder
 
+```mermaid
+flowchart TD
+    A["读取当前值 V"] --> B{"V 是否等于期望值 A"}
+    B -->|是| C["原子更新为 B"]
+    B -->|否| D["CAS 失败"]
+    D --> E{"是否重试"}
+    E -->|是| A
+    E -->|否| F["返回失败"]
+    G["ABA：A→B→A"] --> H["加入版本号或 AtomicStampedReference"]
+```
+
+
 ## 28.1 CAS 是什么
 
 CAS，全称 Compare And Swap。
@@ -2401,6 +2710,15 @@ CAS 失败后通常会重试。
 
 # 29. 伪共享
 
+```mermaid
+flowchart LR
+    T1["线程 1 写变量 a"] --> L["同一 64B cache line"]
+    T2["线程 2 写变量 b"] --> L
+    L --> I["缓存行在核心之间反复失效与转移"]
+    P["padding 或 Contended"] --> S["把热点变量放到不同缓存行"]
+```
+
+
 CPU 缓存按缓存行加载数据，常见缓存行大小是 64 字节。
 
 如果两个线程频繁修改同一个缓存行中的不同变量，就会互相导致缓存失效。
@@ -2432,6 +2750,17 @@ CPU 缓存按缓存行加载数据，常见缓存行大小是 64 字节。
 
 
 # 30. JIT 编译
+
+```mermaid
+flowchart LR
+    A["字节码初始解释执行"] --> B["收集方法调用与回边计数"]
+    B --> C["C1 快速编译"]
+    C --> D["继续收集 profiling"]
+    D --> E["C2 激进优化"]
+    E --> F["本地机器码"]
+    E --> G["内联、逃逸分析、锁消除、标量替换"]
+```
+
 
 JIT，全称 Just-In-Time Compilation，即即时编译。
 
@@ -2745,6 +3074,19 @@ Java 8：
 
 # 33. 线上 CPU 100% 排查
 
+```mermaid
+flowchart TD
+    A["top / jps 找 Java 进程"] --> B["top -Hp 找高 CPU 线程"]
+    B --> C["线程 ID 转十六进制"]
+    C --> D["jstack 导出线程栈"]
+    D --> E["搜索对应 nid"]
+    E --> F{"线程状态和栈位置"}
+    F -->|RUNNABLE 固定热点| G["死循环或 CPU 密集代码"]
+    F -->|大量 BLOCKED| H["锁竞争"]
+    F -->|GC 线程高| I["频繁 GC 或堆压力"]
+```
+
+
 典型步骤：
 
 ## 33.1 找到 Java 进程
@@ -2825,6 +3167,19 @@ nid=0x3039
 
 
 # 34. 频繁 Full GC 排查
+
+```mermaid
+flowchart TD
+    A["确认 Full GC 频率、耗时与原因"] --> B["观察 Full GC 后老年代"]
+    B --> C{"是否明显下降"}
+    C -->|否且持续上涨| D["优先怀疑内存泄漏"]
+    C -->|能下降但快速回升| E["分配速率高、缓存过大或流量异常"]
+    D --> F["生成 heap dump"]
+    E --> F
+    F --> G["MAT：Dominator Tree 与 Path to GC Roots"]
+    G --> H["定位引用链并修复根因"]
+```
+
 
 ## 34.1 先看现象
 
@@ -3073,6 +3428,18 @@ jstack <pid>
 
 # 40. ThreadLocal 内存泄漏
 
+```mermaid
+flowchart LR
+    T["线程池线程长期存活"] --> M["ThreadLocalMap"]
+    M --> E["Entry"]
+    E --> K["key：ThreadLocal 弱引用"]
+    E --> V["value：业务对象强引用"]
+    K -->|ThreadLocal 被回收| N["key 变为 null"]
+    V --> L["value 仍被线程强引用，可能泄漏"]
+    R["finally 中 remove"] --> X["断开引用链"]
+```
+
+
 ## 40.1 ThreadLocalMap 结构
 
 每个 Thread 内部有一个 ThreadLocalMap。
@@ -3122,6 +3489,17 @@ try {
 
 
 # 41. 类加载器泄漏
+
+```mermaid
+flowchart LR
+    T["长期存活线程或静态变量"] --> C["contextClassLoader / 业务对象"]
+    C --> L["WebAppClassLoader"]
+    L --> CL["其加载的全部 Class"]
+    CL --> S["静态字段和业务对象"]
+    S -. "形成引用闭环" .-> L
+    L --> O["无法卸载，Metaspace 持续增长"]
+```
+
 
 类加载器泄漏常见于：
 
@@ -3207,6 +3585,16 @@ System.gc();
 
 # 43. 低延迟与高吞吐的 GC 取舍
 
+```mermaid
+flowchart TD
+    A["选择 GC"] --> B{"主要目标"}
+    B -->|单位时间处理更多任务| C["吞吐优先：Parallel GC"]
+    B -->|在线请求停顿可控| D["平衡：G1"]
+    B -->|极低停顿和大堆| E["ZGC / Shenandoah"]
+    F["共同约束"] --> G["CPU 开销、内存占用、吞吐、延迟"]
+```
+
+
 ## 43.1 高吞吐
 
 目标单位时间内处理更多任务
@@ -3258,6 +3646,18 @@ Shenandoah
 
 
 # 44. JVM 调优方法论
+
+```mermaid
+flowchart LR
+    A["明确目标"] --> B["收集 GC、堆、线程、业务指标"]
+    B --> C["建立假设"]
+    C --> D["一次小步调整"]
+    D --> E["压测或灰度验证"]
+    E --> F{"目标改善且副作用可接受"}
+    F -->|否| B
+    F -->|是| G["固化配置并保留回滚方案"]
+```
+
 
 不要一上来就改参数。
 
@@ -3755,82 +4155,24 @@ JVM 调优方法论
 
 # 49. 最后一张 JVM 思维导图
 
-```text
-JVM
-├── 运行流程
-│   ├── javac 编译
-│   ├── class 字节码
-│   ├── 类加载
-│   ├── 解释执行
-│   └── JIT 编译
-│
-├── 运行时数据区
-│   ├── 程序计数器
-│   ├── 虚拟机栈
-│   ├── 本地方法栈
-│   ├── 堆
-│   ├── 方法区
-│   ├── 运行时常量池
-│   └── 直接内存
-│
-├── 对象
-│   ├── 创建过程
-│   ├── 内存分配
-│   ├── TLAB
-│   ├── 对象头
-│   ├── Mark Word
-│   ├── Klass Pointer
-│   └── 指针压缩
-│
-├── 类加载
-│   ├── 加载
-│   ├── 验证
-│   ├── 准备
-│   ├── 解析
-│   ├── 初始化
-│   ├── 双亲委派
-│   └── 类卸载
-│
-├── GC
-│   ├── 可达性分析
-│   ├── GC Roots
-│   ├── 引用类型
-│   ├── 标记-清除
-│   ├── 标记-复制
-│   ├── 标记-整理
-│   ├── 分代收集
-│   ├── CMS
-│   ├── G1
-│   ├── ZGC
-│   └── Shenandoah
-│
-├── 并发
-│   ├── JMM
-│   ├── volatile
-│   ├── synchronized
-│   ├── happens-before
-│   ├── CAS
-│   ├── ABA
-│   ├── LongAdder
-│   └── 伪共享
-│
-├── JIT
-│   ├── 热点代码
-│   ├── C1/C2
-│   ├── 方法内联
-│   ├── 逃逸分析
-│   ├── 锁消除
-│   ├── 标量替换
-│   └── 死代码消除
-│
-└── 排障
-    ├── CPU 100%
-    ├── Full GC
-    ├── Java heap space
-    ├── Metaspace
-    ├── StackOverflowError
-    ├── Direct buffer memory
-    ├── native thread OOM
-    ├── ThreadLocal 泄漏
-    └── ClassLoader 泄漏
+```mermaid
+flowchart TD
+    JVM["JVM"] --> RUN["运行流程"]
+    JVM --> MEM["运行时数据区"]
+    JVM --> OBJ["对象与分配"]
+    JVM --> LOAD["类加载"]
+    JVM --> GC["垃圾回收"]
+    JVM --> JMM["并发与 JMM"]
+    JVM --> JIT["JIT 优化"]
+    JVM --> OPS["线上排障"]
+    RUN --> R1["javac、字节码、解释与编译"]
+    MEM --> M1["PC、栈、堆、方法区、直接内存"]
+    OBJ --> O1["TLAB、对象头、指针压缩"]
+    LOAD --> L1["生命周期、双亲委派、类卸载"]
+    GC --> G1["Roots、算法、G1、ZGC、Shenandoah"]
+    JMM --> J1["volatile、锁、HB、CAS、伪共享"]
+    JIT --> T1["内联、逃逸分析、标量替换、锁消除"]
+    OPS --> P1["CPU、Full GC、OOM 与泄漏"]
 ```
+
+
