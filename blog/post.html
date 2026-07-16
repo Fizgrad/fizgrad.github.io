@@ -98,12 +98,70 @@
           if (mermaidBlocks.length > 0 && typeof mermaid !== "undefined") {
             mermaid.initialize({ startOnLoad: false, theme: "dark" });
             mermaidBlocks.forEach(function (code) {
+              var wrapper = document.createElement("div");
+              wrapper.className = "mermaid-wrapper";
+              var scrollDiv = document.createElement("div");
+              scrollDiv.className = "mermaid-scroll";
               var div = document.createElement("div");
               div.className = "mermaid";
               div.textContent = code.textContent;
-              code.parentElement.replaceWith(div);
+              scrollDiv.appendChild(div);
+              wrapper.appendChild(scrollDiv);
+              var controls = document.createElement("div");
+              controls.className = "mermaid-controls";
+              var scale = 1;
+              var baseW = null, baseH = null;
+              function applyMermaidZoom() {
+                var svg = div.querySelector("svg");
+                if (!svg) return;
+                if (baseW === null) {
+                  var rect = svg.getBoundingClientRect();
+                  baseW = rect.width || 500;
+                  baseH = rect.height || 300;
+                }
+                svg.removeAttribute("width");
+                svg.removeAttribute("height");
+                svg.style.maxWidth = "none";
+                svg.style.width = (baseW * scale) + "px";
+                svg.style.height = (baseH * scale) + "px";
+              }
+              var zoomIn = document.createElement("button");
+              zoomIn.className = "mermaid-zoom-btn";
+              zoomIn.textContent = "+";
+              zoomIn.setAttribute("aria-label", "Zoom in");
+              zoomIn.addEventListener("click", function () {
+                scale = Math.min(scale + 0.1, 3);
+                applyMermaidZoom();
+              });
+              var zoomOut = document.createElement("button");
+              zoomOut.className = "mermaid-zoom-btn";
+              zoomOut.textContent = "\u2212";
+              zoomOut.setAttribute("aria-label", "Zoom out");
+              zoomOut.addEventListener("click", function () {
+                scale = Math.max(scale - 0.1, 0.5);
+                applyMermaidZoom();
+              });
+              controls.appendChild(zoomIn);
+              controls.appendChild(zoomOut);
+              wrapper.appendChild(controls);
+              code.parentElement.replaceWith(wrapper);
             });
-            mermaid.run();
+            try { mermaid.run().catch(function () {}); } catch (e) {}
+            setTimeout(function () {
+              container.querySelectorAll(".mermaid svg").forEach(function (svg) {
+                var vb = svg.getAttribute("viewBox");
+                if (!vb) return;
+                var parts = vb.split(/\s+/);
+                var w = parseFloat(parts[2]);
+                var h = parseFloat(parts[3]);
+                if (!w || !h) return;
+                svg.removeAttribute("width");
+                svg.removeAttribute("height");
+                svg.style.maxWidth = "none";
+                svg.style.width = (w * 0.8) + "px";
+                svg.style.height = (h * 0.8) + "px";
+              });
+            }, 800);
           }
           var slugSet = {};
           container.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach(function (h) {

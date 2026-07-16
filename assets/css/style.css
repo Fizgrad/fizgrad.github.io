@@ -485,10 +485,47 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   background: transparent;
 }
 .post-wrap .mermaid {
-  display: flex;
-  justify-content: center;
-  overflow-x: auto;
+  display: inline-block;
+}
+.mermaid-wrapper {
+  position: relative;
   margin: 1rem 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+}
+.mermaid-scroll {
+  overflow: auto;
+  max-height: 600px;
+  padding: 1rem;
+  text-align: center;
+}
+.mermaid-controls {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.3rem;
+  z-index: 2;
+}
+.mermaid-zoom-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.mermaid-zoom-btn:hover {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
 }
 
 .markdown-body pre {

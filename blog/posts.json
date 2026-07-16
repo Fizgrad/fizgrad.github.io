@@ -1,5 +1,11 @@
 [
   {
+    "title": "LLVM",
+    "slug": "llvm_review",
+    "description": "LLVM编译器基础设施",
+    "descriptionEn": "The LLVM Compiler Infrastructure Project."
+  },
+  {
     "title": "OS Review",
     "slug": "os_review",
     "description": "操作系统复习笔记",
