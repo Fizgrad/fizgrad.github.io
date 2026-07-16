@@ -1,1451 +1,1602 @@
+# Linux 系统基础与并发编程知识体系
+
 # 一、进程、线程、协程
+
+> 说明：本章以现代通用操作系统为背景，涉及信号、文件描述符和调度时主要采用 Linux/POSIX 语境。不同操作系统、CPU 架构和语言运行时的实现可能不同，因此文中使用“通常”“一般”等限定词。
 
 ## 1. 进程是什么？
 
-**进程是程序的一次运行实例。**
+**进程是程序的一次运行实例，也是操作系统组织地址空间、资源和隔离边界的基本容器。**
 
-一个可执行文件放在磁盘上时，只是一个静态文件；当它被操作系统加载到内存中运行后，就成为一个进程。
+磁盘上的可执行文件只是静态代码和数据。程序被加载后，操作系统会为其建立运行所需的地址空间和内核管理对象，并创建至少一条可执行线程，由此形成一个运行中的进程。
 
-一个进程通常包含：
+需要区分两个概念：
 
-* 代码段：程序指令。
-* 数据段：全局变量、静态变量。
-* 堆：动态申请的内存，例如 `malloc/new`。
-* 栈：函数调用、局部变量、返回地址。
-* 文件描述符表：打开的文件、socket 等。
-* 页表：虚拟地址到物理地址的映射。
-* PCB：进程控制块，操作系统用它管理进程。
+- **程序**：磁盘上的静态文件。
+- **进程**：程序运行时形成的动态实体。
 
-> 进程是操作系统资源分配的基本单位。每个进程拥有独立的虚拟地址空间、文件描述符表、信号处理方式等资源。操作系统通过 PCB 管理进程状态、调度信息、寄存器上下文和内存映射关系。
+> CPU 最终执行的是线程中的指令。进程主要提供资源、地址空间和隔离边界，线程负责实际执行。
 
+### 1.1 虚拟地址空间
 
+一个用户进程通常拥有独立的虚拟地址空间。不同进程可以在相同虚拟地址上保存不同内容，也可以通过共享内存等机制显式映射同一组物理页。
+
+典型虚拟地址空间包括：
+
+- **代码映射**：程序机器指令，通常具有只读和可执行权限。
+- **只读数据映射**：字符串常量、只读全局对象等。
+- **数据段**：已初始化的全局变量和静态变量。
+- **BSS 区域**：未显式初始化或初始化为零的全局变量和静态变量。
+- **堆及匿名映射**：供 `malloc`、`new`、运行时和内存分配器使用。
+- **文件映射和共享库映射**：由 `mmap` 或动态加载器建立。
+- **线程栈**：每个线程通常拥有独立的用户栈区域。
+
+多线程进程不是“只有一个栈”。每个线程都有自己的用户栈，但这些栈都位于同一个进程的虚拟地址空间中，因此并不形成线程间的硬隔离。
+
+### 1.2 进程级资源
+
+进程通常拥有或引用：
+
+- 文件描述符表；
+- 当前工作目录和根目录视图；
+- 环境变量；
+- 用户身份、组身份和权限信息；
+- 进程级信号处置方式；
+- 地址空间与内存映射；
+- 定时器、资源限制和统计信息；
+- IPC、命名空间、cgroup 等关联关系。
+
+这里的“拥有”不一定表示对象完全私有。文件对象、共享内存、页缓存和内核对象都可能被多个进程共同引用。
+
+### 1.3 内核管理信息
+
+教材常用 **PCB（Process Control Block，进程控制块）** 抽象描述操作系统保存的进程信息，例如：
+
+- PID 和父子关系；
+- 进程或线程状态；
+- 调度策略与统计信息；
+- 地址空间引用；
+- 文件、信号、凭据等资源引用；
+- 所包含线程的信息。
+
+实际内核实现通常不会把所有内容放进一个名为 PCB 的结构中。以 Linux 为例，进程和线程都以可调度任务的形式表示，核心结构是 `task_struct`，再通过指针引用内存描述符、文件表、信号结构等对象。
+
+### 1.4 Linux 中的 task 模型
+
+Linux 内核不会用两套完全不同的对象分别表示“进程”和“线程”。二者都属于 **task**，都由调度器调度。
+
+概念上可以这样理解：
+
+```text
+task_struct
+├─ 调度状态
+├─ 寄存器与内核栈相关信息
+├─ 地址空间引用 mm
+├─ 文件表引用 files
+├─ 信号结构引用 signal/sighand
+└─ 凭据、命名空间等引用
+```
+
+不同 task 是否构成同一进程，主要取决于它们共享哪些资源：
+
+```text
+多个 task
+├─ 共享地址空间
+├─ 共享文件表
+├─ 共享信号处置
+└─ 共享线程组标识
+        ↓
+通常被用户态视为同一进程中的多个线程
+```
+
+`fork()` 通常创建资源逐步独立的子进程；线程库通常通过 `clone()` 及一组共享标志创建共享地址空间和进程资源的新 task。
+
+> “进程是资源容器，线程是执行实体”是便于理解的抽象；在 Linux 内核内部，二者都落到可调度 task 上。
 
 ## 2. 线程是什么？
 
-**线程是进程内部的执行流，是 CPU 调度的基本单位。**
+**线程是进程内部的一条执行流，也是主流操作系统调度器直接调度的执行实体。**
 
-一个进程可以有多个线程。多个线程共享进程的大部分资源，但每个线程也有自己的执行上下文。
+一个进程至少有一个线程，也可以包含多个线程。线程共享进程级资源，但每个线程具有独立的执行上下文。
 
-线程共享：
+### 2.1 同一进程内线程通常共享的内容
 
-* 代码段
-* 数据段
-* 堆
-* 打开的文件描述符
-* 进程地址空间
-* 信号处理方式
+- 虚拟地址空间；
+- 代码、全局变量、静态变量和堆；
+- 内存映射和共享库；
+- 文件描述符表；
+- 当前工作目录；
+- 进程级信号处置方式；
+- 用户身份和大部分进程级资源。
 
-线程独有：
+因此，一个线程修改全局变量、释放堆内存或关闭共享文件描述符，可能直接影响同一进程中的其他线程。
 
-* 栈
-* 程序计数器 PC
-* 寄存器
-* 线程 ID
-* 线程局部存储 TLS
-* 调度状态
+### 2.2 每个线程独立或按线程维护的状态
 
-> 线程是 CPU 调度的基本单位，同一进程内的多个线程共享地址空间和进程资源，但每个线程有自己的栈、寄存器和程序计数器。线程之间通信比进程简单，但也更容易出现数据竞争和线程安全问题。
+- 用户栈；
+- 内核栈；
+- 程序计数器和寄存器上下文；
+- 调度状态、优先级和 CPU 亲和性；
+- 线程局部存储 TLS；
+- 线程信号屏蔽字；
+- 部分线程定向的挂起信号；
+- 线程 ID。
 
+在 Linux 中，内核 TID 可以通过 `gettid()` 获取；POSIX 的 `pthread_t` 是线程库层面的标识，两者不应直接视为同一类型。
 
+> “线程有自己的栈”是指它使用独立的栈区域和栈指针，不表示其他线程在权限上无法访问该栈。由于同一进程的线程共享地址空间，错误指针仍可能破坏其他线程的栈。
+
+### 2.3 为什么线程需要同步？
+
+共享地址空间使线程通信非常直接，但也引入了：
+
+- 数据竞争；
+- 竞态条件；
+- 可见性和重排序问题；
+- 死锁、活锁和饥饿；
+- 生命周期与所有权错误。
+
+常用同步工具包括互斥锁、读写锁、条件变量、信号量、原子操作和无锁数据结构。
 
 ## 3. 进程和线程的区别
 
-| 对比点  | 进程        | 线程         |
-| - | - | - |
-| 基本角色 | 资源分配单位    | CPU 调度单位   |
-| 地址空间 | 独立        | 同进程线程共享    |
-| 通信方式 | IPC，较复杂   | 共享内存，较方便   |
-| 切换开销 | 大         | 小          |
-| 崩溃影响 | 一般不影响其他进程 | 可能导致整个进程崩溃 |
-| 创建销毁 | 开销大       | 开销小        |
+| 对比点 | 进程 | 线程 |
+|---|---|---|
+| 核心角色 | 地址空间、资源和隔离容器 | 进程中的执行流 |
+| 调度关系 | 通常通过其线程参与调度 | 内核调度器直接调度 |
+| 地址空间 | 不同进程默认相互独立 | 同一进程内线程共享 |
+| 资源共享 | 需要显式 IPC 或共享映射 | 天然共享大部分进程资源 |
+| 栈 | 一个多线程进程包含多个线程栈 | 每个线程有自己的栈 |
+| 通信方式 | 管道、消息队列、共享内存、Socket 等 | 直接访问共享内存，但必须同步 |
+| 创建销毁 | 通常需要建立更多独立资源 | 通常比创建独立进程轻量 |
+| 故障隔离 | 通常较强 | 一个线程的越界写可能破坏整个进程 |
+| 并行能力 | 多个进程可在多核并行 | 多个内核线程也可在多核并行 |
+| 编程难点 | IPC、序列化、资源管理 | 数据竞争、锁、内存模型和生命周期 |
 
-**为什么线程切换比进程切换快？**
+这里的“通常”很重要。进程也可以通过共享内存共享大量数据；线程创建也不一定在所有运行时中都比进程创建便宜。
 
-因为线程切换通常不需要切换整个地址空间，也不需要切换页表；而进程切换通常涉及地址空间、页表、TLB 等切换，缓存命中率也可能下降。
+### 3.1 为什么同进程线程切换通常更轻量？
 
+无论切换发生在同一进程还是不同进程，都可能需要：
 
+- 保存和恢复寄存器；
+- 切换内核栈；
+- 更新调度器状态；
+- 恢复浮点、SIMD 等扩展状态；
+- 扰动分支预测器和 CPU Cache。
+
+如果两个线程属于同一进程，它们通常共享同一用户地址空间，因此不需要更换页表根或地址空间标识。
+
+跨进程切换通常还涉及：
+
+- 切换地址空间上下文；
+- 使用另一套页表映射；
+- 改变 ASID/PCID 等地址空间标识；
+- 更明显的 TLB 和缓存工作集扰动。
+
+现代处理器可通过 ASID、PCID 等机制保留不同地址空间的部分 TLB 项，所以“进程切换一定清空全部 TLB”是不准确的。
+
+> 同进程线程切换通常比跨地址空间切换便宜，但它仍是完整的任务切换，并不是零成本。
 
 ## 4. 协程是什么？
 
-**协程是用户态的轻量级执行流。**
+**协程是可以暂停并在之后恢复的计算过程。**
 
-线程由操作系统调度，协程通常由程序或运行时调度。
+协程通常不是内核直接调度的对象，而是由语言运行时、库、执行器或事件循环管理。协程执行时必须由某个操作系统线程承载，但它是否固定绑定该线程取决于运行时。
 
-协程特点：
+常见模型包括：
 
-* 用户态调度，不需要频繁进入内核。
-* 切换开销比线程更小。
-* 适合大量 IO 密集型任务。
-* 单线程协程不能天然利用多核。
-* 遇到阻塞系统调用时，如果没有异步 IO 支持，可能阻塞整个线程。
+- **1:N**：一个线程承载多个协程，例如单线程事件循环。
+- **M:N**：多个协程被调度到多个工作线程上。
+- **线程绑定模型**：协程恢复时必须回到指定线程。
+- **可迁移模型**：协程暂停后可以在其他工作线程恢复。
 
-**线程和协程区别：**
+把协程称为“用户态线程”可以帮助入门，但不属于严格定义。C++20 协程甚至只提供编译器层面的暂停与恢复机制，并不自带调度器、事件循环或线程池。
 
-| 对比点  | 线程             | 协程          |
-| - | -- | -- |
-| 调度者  | 操作系统内核         | 用户态运行时      |
-| 切换位置 | 内核态            | 用户态         |
-| 开销   | 较大             | 较小          |
-| 是否并行 | 多线程可多核并行       | 单线程协程不能多核并行 |
-| 适合场景 | CPU 密集 + IO 密集 | 高并发 IO      |
+### 4.1 有栈协程和无栈协程
 
-> 协程可以理解为用户态线程，由程序主动让出执行权。协程切换不需要内核调度，开销很小，因此适合高并发 IO 场景。但单线程协程本质上还是一个线程，不能同时在多个 CPU 核心上运行。
+**有栈协程**具有独立调用栈或可增长栈，挂起时需要保存栈上下文。
 
+**无栈协程**通常被编译为状态机，把跨挂起点仍需存活的局部变量、恢复位置等保存到协程帧中。
 
+因此，协程切换不应统一描述为“切换栈指针”：
+
+- 有栈协程主要保存和恢复栈上下文；
+- 无栈协程主要保存和恢复状态机及协程帧；
+- 具体成本取决于实现和挂起点行为。
+
+### 4.2 协程通常如何调度？
+
+多数协程系统以协作式调度为主，协程在以下位置主动或隐式挂起：
+
+- `await`；
+- `yield`；
+- 等待异步 I/O；
+- 等待定时器或同步原语；
+- 显式调度点。
+
+```mermaid
+sequenceDiagram
+    participant A as 协程 A
+    participant E as 执行器/事件循环
+    participant B as 协程 B
+    participant K as 内核 I/O
+
+    A->>K: 提交或等待 I/O
+    A->>E: 挂起
+    E->>B: 恢复协程 B
+    K-->>E: I/O 就绪或完成
+    E->>A: 恢复协程 A
+```
+
+`await` 并不保证一定挂起：如果等待对象已经完成，协程可以直接继续执行。部分运行时还会加入安全点或抢占机制，避免某个任务长期独占工作线程。
+
+### 4.3 为什么协程适合高并发 I/O？
+
+I/O 密集任务的大部分时间花在等待网络、磁盘、数据库或定时器。协程可以在等待期间挂起，把承载线程让给其他任务，从而用少量线程维持大量逻辑任务。
+
+典型场景包括：
+
+- 网络服务器和网关；
+- 大量 HTTP/RPC 请求；
+- 数据库和消息队列客户端；
+- 爬虫；
+- 长连接与定时任务。
+
+前提是等待过程能够与执行器协同，例如使用非阻塞 I/O、异步 I/O，或者把阻塞调用转移到专用线程池。
+
+### 4.4 阻塞调用会发生什么？
+
+如果协程直接执行阻塞系统调用或长时间 CPU 计算，阻塞的是当前承载线程：
+
+```text
+工作线程 T
+├─ 协程 A：进入阻塞调用
+├─ 协程 B：等待被调度
+└─ 协程 C：等待被调度
+```
+
+- 单线程事件循环中，线程 T 被阻塞会使该事件循环中的其他协程停顿。
+- 多线程执行器中，其他工作线程仍可运行。
+- 某些运行时会把已知阻塞操作转移到阻塞线程池，或在工作线程阻塞后进行补偿。
+
+运行时只能处理它能够识别或接管的阻塞点。任意第三方库中的阻塞函数不一定会被自动异步化。
+
+### 4.5 协程能否利用多核？
+
+需要区分并发与并行：
+
+- **并发**：多个任务在一段时间内都取得进展。
+- **并行**：多个任务同一时刻运行在不同计算核心上。
+
+所有协程都运行在一个线程时，只能交替并发，不能同时在多个 CPU 核心执行。
+
+如果执行器拥有多个工作线程，不同协程可以同时运行在不同核心：
+
+```text
+一个进程
+├─ 工作线程 1：协程 A
+├─ 工作线程 2：协程 B
+└─ 工作线程 3：协程 C
+```
+
+单个协程在某一时刻通常只由一个线程执行；暂停后恢复到原线程还是其他线程，由运行时和调度器决定。
+
+### 4.6 协程的典型风险
+
+- 在事件循环中执行阻塞调用；
+- 在协作式调度中运行长时间 CPU 循环而不挂起；
+- 协程恢复后发生线程迁移，错误依赖线程局部状态；
+- 协程对象或缓冲区在异步操作完成前失效；
+- 缺少取消、超时和背压；
+- 把“异步接口”误认为“底层一定没有线程或阻塞”。
+
+## 5. 线程和协程的区别
+
+| 对比点 | 操作系统线程 | 协程 |
+|---|---|---|
+| 调度者 | 内核调度器 | 运行时、执行器、事件循环或程序 |
+| 内核直接感知 | 是 | 通常否 |
+| 运行载体 | 可直接被调度到 CPU | 执行时依附于某个线程 |
+| 切换方式 | 内核任务切换 | 通常由用户态运行时暂停和恢复 |
+| 切换成本 | 通常较高 | 通常较低，但取决于实现 |
+| 栈 | 通常有用户栈和内核栈 | 可能有独立栈，也可能是无栈状态机 |
+| 调度方式 | 通常是抢占式 | 多数以协作式为主，也可能支持抢占 |
+| 阻塞调用影响 | 阻塞当前线程 | 阻塞当前承载线程 |
+| 多核并行 | 多线程可并行 | 需要多个承载线程 |
+| 常见用途 | CPU 并行、阻塞式 API、系统线程 | 大量异步任务和高并发 I/O |
+
+“线程适合 CPU 密集、协程适合 I/O 密集”只是常见经验，不是严格边界：
+
+- 协程也可以封装 CPU 任务，但若只运行在一个线程中仍不能多核并行；
+- 多线程是否能并行执行语言代码，还受运行时全局锁等机制影响；
+- 高并发系统经常组合使用协程、线程池和多进程。
+
+## 6. 三者之间的关系
+
+```mermaid
+flowchart TD
+    P["进程<br/>资源、地址空间和隔离边界"]
+    T1["内核线程 1"]
+    T2["内核线程 2"]
+    C1["协程 A"]
+    C2["协程 B"]
+    C3["协程 C"]
+
+    P --> T1
+    P --> T2
+    T1 --> C1
+    T1 --> C2
+    T2 --> C3
+```
+
+这只是概念图。协程是否固定在某个线程、线程是否共享全部资源、进程之间是否共享内存，都取决于具体配置和实现。
+
+## 7. 总结
+
+> **进程提供资源和隔离边界，线程承担内核可调度的执行，协程提供用户态可暂停和恢复的任务抽象。**
+
+- 不同进程默认拥有独立地址空间，但可以显式共享内存。
+- 同一进程中的线程共享大部分资源，但各自维护执行上下文。
+- 同进程线程切换通常不切换用户地址空间，但仍存在调度和缓存成本。
+- 协程执行时必须由线程承载，但不一定永久绑定某个线程。
+- 单线程协程只能并发；多线程执行器可以让多个协程多核并行。
+- 阻塞调用阻塞的是承载线程，不是抽象意义上的“协程调度器”。
+- 协程不会自动把同步阻塞代码变成异步代码。
 
 # 二、进程间通信 IPC
 
-进程之间地址空间相互隔离，因此不能像线程一样直接访问对方的变量。进程间通信需要操作系统提供机制。
+不同进程默认拥有相互隔离的虚拟地址空间，因此不能像同一进程中的线程那样直接访问对方的普通变量。进程间通信需要借助内核对象、共享映射或显式的数据交换协议。
 
-常见 IPC 对比：
+## 1. 常见 IPC 方式对比
 
-| IPC 方式 | 通信范围 | 数据格式 | 传输方向 | 速度 | 容量 | 生命周期 | 适用场景 |
-|----------|----------|----------|----------|------|------|----------|----------|
-| 管道（Pipe） | 父子进程 | 字节流 | 半双工 | 中 | 有限（内核缓冲区，通常 64KB） | 随进程关闭 | 父子进程简单数据传递 |
-| 命名管道（FIFO） | 任意进程 | 字节流 | 半双工 | 中 | 有限 | 持久（文件系统中的路径） | 无亲缘关系进程间简单通信 |
-| 消息队列 | 任意进程 | 消息（有边界） | 双向 | 中 | 有限 | 随内核重启清除 | 需要消息边界的异步通信 |
-| 共享内存 | 任意进程 | 原始内存 | 双向 | **最快** | 大 | 随进程释放 | 大数据量、高频读写 |
-| 信号量 | 任意进程 | 计数器 | — | 快 | 小 | 随内核重启清除 | 同步与互斥（配合共享内存） |
-| 信号（Signal） | 任意进程 | 固定编号 | 单向 | 快 | 极小 | 瞬时 | 异步事件通知（如 `SIGKILL`、`SIGCHLD`） |
-| Socket | 任意进程/跨机器 | 字节流/数据报 | 双向 | 较慢 | 大 | 随进程关闭 | 网络通信、本地 UDS |
+| IPC 方式 | 数据语义 | 常见通信范围 | 是否保留消息边界 | 主要特点 |
+|---|---|---|---|---|
+| 匿名管道 Pipe | 字节流 | 通常是具有继承或传递 fd 关系的进程 | 否 | 简单、单向数据通道 |
+| 命名管道 FIFO | 字节流 | 同一主机、可通过路径找到 FIFO 的进程 | 否 | 有文件系统名称，适合简单本地通信 |
+| 消息队列 | 离散消息 | 同一主机 | 是 | 内核保存消息，可按消息或类型读取 |
+| 共享内存 | 共享字节区域 | 同一主机 | 由应用自行定义 | 建立映射后无需每次通信都复制载荷 |
+| 信号量 | 计数与同步状态 | 线程或进程 | 不适用 | 用于同步和资源计数，不是大数据通道 |
+| 信号 Signal | 异步事件 | 同一主机 | 信号编号 | 适合事件通知，不适合传输复杂数据 |
+| Unix Domain Socket | 字节流或数据报 | 同一主机 | 取决于 Socket 类型 | 双向、接口统一，还可传递文件描述符 |
+| TCP/UDP Socket | 字节流或数据报 | 本机或跨主机 | TCP 否，UDP 是 | 最通用的网络通信方式 |
 
-> - **最快的是共享内存**：直接映射同一物理页，零拷贝，无需内核中转。但需要信号量同步。
-> - **管道 vs 消息队列**：管道是无边界的字节流，消息队列有消息边界（按消息单位读取）。
-> - **信号不是 IPC 的数据通道**：它只能传递一个编号，用于通知事件，不能传数据。
-> - **Socket 最通用**：既可用于本地（Unix Domain Socket），也可跨网络通信。
+几点需要注意：
 
+1. **管道容量不是固定 64 KiB。** Linux 中默认容量和可调整范围受内核版本、页大小和系统配置影响，不能把某个常见默认值当成协议保证。
+2. **FIFO 的路径可以长期存在，但数据不会持久保存。** 没有进程打开 FIFO 时，不存在一个永久保存消息的文件内容。
+3. **共享内存通常适合大数据量和高频通信，但不保证在所有场景都最快。** 缓存一致性、伪共享、锁竞争、NUMA 和协议设计都可能成为瓶颈。
+4. **共享内存不强制必须使用信号量。** 也可以使用进程共享互斥锁、条件变量、原子操作、事件 fd 等同步机制。
+5. **信号可以附带极少量信息。** `sigqueue()` 和实时信号可携带整数或指针值，但信号仍不适合作为通用数据通道。
+6. **“双向”不代表一次系统调用同时双向传输。** 应用仍需要设计请求、响应、半关闭和错误处理协议。
 
+## 2. 匿名管道 Pipe
 
-## 1. 管道
+管道提供一个内核维护的字节流：
 
-管道是一种半双工通信方式，数据像字节流一样从一端流向另一端。
+```text
+写端 fd[1]  ─────>  内核管道缓冲区  ─────>  读端 fd[0]
+```
 
 特点：
 
-* 通常用于有亲缘关系的进程，比如父子进程。
-* 半双工，单向通信。
-* 本质上是内核缓冲区。
-* 数据没有明确消息边界，是字节流。
+- `pipe()` 返回读端 `fd[0]` 和写端 `fd[1]`；
+- 数据没有消息边界，一次 `write()` 不一定对应一次 `read()`；
+- 通常用于 `fork()` 后的父子进程；
+- 只要文件描述符能够被继承或通过 Unix Domain Socket 等方式传递，匿名管道并非理论上只能用于父子进程；
+- 管道是单向通道，需要两个管道才能建立传统的全双工请求与响应；
+- 当所有写端关闭后，读端读完剩余数据会得到 EOF，即 `read()` 返回 0；
+- 没有任何读端时继续写入，默认可能收到 `SIGPIPE`，同时 `write()` 返回 `EPIPE`。
 
-例如：
+下面的示例处理了部分写入、读取长度和子进程回收：
 
 ```c
+#include <errno.h>
 #include <stdio.h>
-#include <unistd.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
-int main()
-{
-    int fd[2];
-    // 创建管道
-    // 执行后：
-    // fd[0] --> 读端
-    // fd[1] --> 写端
-    if (pipe(fd) == -1) {
-        perror("pipe");
-        exit(1);
+static int write_all(int fd, const void *buffer, size_t size) {
+    const char *p = (const char *)buffer;
+
+    while (size > 0) {
+        ssize_t n = write(fd, p, size);
+
+        if (n > 0) {
+            p += n;
+            size -= (size_t)n;
+            continue;
+        }
+
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+
+        return -1;
     }
-    // 创建子进程
-    pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork");
-        exit(1);
-    }
-    // 父进程
-    if (pid > 0) {
-        // 父进程只负责写
-        close(fd[0]);   // 关闭读端
-        char msg[] = "hello child process";
-        printf("Parent: send message: %s\n", msg);
-        // 写入管道
-        write(fd[1], msg, strlen(msg) + 1);
-        // 写完关闭写端
-        close(fd[1]);
-    }
-    // 子进程
-    else {
-        // 子进程只负责读
-        close(fd[1]);   // 关闭写端
-        char buffer[100];
-        // 从管道读取
-        int n = read(fd[0], buffer, sizeof(buffer));
-        printf("Child: received message: %s\n", buffer);
-        printf("Child: message length = %d\n", n);
-        close(fd[0]);
-    }
+
     return 0;
+}
+
+int main(void) {
+    int pipefd[2];
+
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        return EXIT_FAILURE;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        perror("fork");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return EXIT_FAILURE;
+    }
+
+    if (pid == 0) {
+        close(pipefd[1]);
+
+        char buffer[128];
+        ssize_t n;
+
+        do {
+            n = read(pipefd[0], buffer, sizeof(buffer));
+        } while (n == -1 && errno == EINTR);
+
+        if (n > 0) {
+            printf("child received %zd bytes: %.*s\n",
+                   n,
+                   (int)n,
+                   buffer);
+        } else if (n == 0) {
+            puts("child: EOF");
+        } else {
+            perror("read");
+        }
+
+        close(pipefd[0]);
+        _exit(n >= 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+    }
+
+    close(pipefd[0]);
+
+    const char message[] = "hello child process";
+
+    if (write_all(pipefd[1], message, sizeof(message) - 1) == -1) {
+        perror("write");
+    }
+
+    close(pipefd[1]);
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) == -1) {
+        perror("waitpid");
+        return EXIT_FAILURE;
+    }
+
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0
+        ? EXIT_SUCCESS
+        : EXIT_FAILURE;
 }
 ```
 
-`fd[0]` 用于读，`fd[1]` 用于写。
+`PIPE_BUF` 还涉及一个重要保证：多个写者并发向管道写入时，长度不超过 `PIPE_BUF` 的单次写入具有原子性，不会与其他此类写入交错；这不等于管道总容量就是 `PIPE_BUF`。
 
+## 3. 命名管道 FIFO
 
+FIFO 是在文件系统中具有名称的管道对象。路径使无亲缘关系的进程能够找到同一通信端点。
 
-## 2. 命名管道 FIFO
-
-普通管道一般只能用于父子进程。命名管道有文件路径，因此无亲缘关系的进程也可以通过它通信。
-
-特点：
-
-* 存在于文件系统中。
-* 本质仍然是内核缓冲区。
-* 适合本机进程间简单通信。
-
-
-先创建一个命名管道：
 ```bash
 mkfifo /tmp/myfifo
 ls -l /tmp/myfifo
 ```
-可能看到：
-```bash
+
+输出中第一个字符通常是 `p`：
+
+```text
 prw-r--r-- 1 user user 0 Jul 9 10:00 /tmp/myfifo
 ```
-注意第一个字符p表示pipe, 只是文件系统中的一个名字，指向内核中的一个管道缓冲区。只能单向字节流通信，功能比较有限。
 
+需要注意：
 
-程序1：发送消息 sender.c
+- FIFO 路径是名称，不是普通文件内容；
+- 默认情况下，只读打开可能等待写者，只写打开可能等待读者；
+- 使用 `O_NONBLOCK` 时，打开和读写行为会发生变化；
+- FIFO 仍是无消息边界字节流；
+- 若需要天然双向连接、连接管理或多客户端支持，Unix Domain Socket 通常更合适。
+
+发送端：
 
 ```c
-#include <stdio.h>
+#include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
+#include <stdio.h>
 #include <string.h>
-
-int main()
-{
-    char *fifo = "/tmp/myfifo";
-    // 打开FIFO，只写
-    int fd = open(fifo, O_WRONLY);
-    char msg[] = "hello from sender";
-    // 写入管道
-    write(fd, msg, strlen(msg) + 1);
-    printf("sender sent: %s\n", msg);
-    // 写端关闭 = 数据发送结束。
-    close(fd);
-    return 0;
-}
-```
-
-程序2：接收消息receiver.c
-```c
-#include <stdio.h>
-#include <fcntl.h>
 #include <unistd.h>
 
-int main()
-{
-    char *fifo = "/tmp/myfifo";
-    // 打开FIFO，只读
-    int fd = open(fifo, O_RDONLY);
-    char buffer[100];
-    // 读取消息
-    read(fd, buffer, sizeof(buffer));
-    printf("receiver got: %s\n", buffer);
-    close(fd);
-    return 0;
-}
-```
-
-
-
-## 3. 消息队列
-
-消息队列以“消息”为单位通信。
-
-特点：
-
-* 有消息边界。
-* 可以按照消息类型读取。
-* 内核维护队列。
-* 适合传递结构化的小数据。
-* 数据需要从用户态复制到内核态，再从内核态复制到另一个进程，性能不如共享内存。
-
-
-发送端 sender.c
-```c
-#include <stdio.h>
-#include <sys/msg.h>
-#include <string.h>
-#include <stdlib.h>
-
-
-// 消息结构
-struct msgbuf
-{
-    // 必须有 type，因为消息队列靠 type 分类。
-    long type;      // 消息类型
-    char text[100]; // 消息内容
-};
-
-
-int main()
-{
-    key_t key;
-    int msgid;
-
-    // 创建key 
-    // ftok 的作用：把一个文件路径 + 一个数字，转换成一个唯一标识符，让多个进程能够找到同一个 IPC 对象。
-    key = ftok(".", 100);
-    // IPC_CREAT，如果消息队列不存在，就创建一个。
-    // 0666 代表 -rw-rw-rw-
-    msgid = msgget(key, IPC_CREAT | 0666);
-    if(msgid == -1)
-    {
-        perror("msgget");
-        exit(1);
+int main(void) {
+    int fd = open("/tmp/myfifo", O_WRONLY);
+    if (fd == -1) {
+        perror("open");
+        return 1;
     }
-    struct msgbuf msg;
-    msg.type = 1;
-    strcpy(msg.text, "hello message queue");
-    // 发送消息
-    // int msgsnd(
-    //     int msgid,
-    //     const void *msgp,
-    //     size_t msgsz,
-    //     int msgflg
-    // );
-    
-    msgsnd(
-        msgid,
-        &msg,
-        sizeof(msg.text), // 不包含type字段的大小
-        0
-    );
-    printf("sender: send message\n");
-    return 0;
+
+    const char message[] = "hello from sender";
+    ssize_t n;
+
+    do {
+        n = write(fd, message, sizeof(message) - 1);
+    } while (n == -1 && errno == EINTR);
+
+    if (n == -1) {
+        perror("write");
+    }
+
+    close(fd);
+    return n == -1;
 }
 ```
-receiver.c
+
+接收端：
+
+```c
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void) {
+    int fd = open("/tmp/myfifo", O_RDONLY);
+    if (fd == -1) {
+        perror("open");
+        return 1;
+    }
+
+    char buffer[128];
+    ssize_t n;
+
+    do {
+        n = read(fd, buffer, sizeof(buffer));
+    } while (n == -1 && errno == EINTR);
+
+    if (n > 0) {
+        printf("receiver got %zd bytes: %.*s\n",
+               n,
+               (int)n,
+               buffer);
+    } else if (n == -1) {
+        perror("read");
+    }
+
+    close(fd);
+    return n == -1;
+}
+```
+
+## 4. 消息队列
+
+消息队列以离散消息为单位通信，能够保留消息边界。Linux 中常见两类接口：
+
+- **System V 消息队列**：`msgget`、`msgsnd`、`msgrcv`、`msgctl`；
+- **POSIX 消息队列**：`mq_open`、`mq_send`、`mq_receive`、`mq_unlink`。
+
+两套接口的命名、权限、生命周期和通知机制不同，不能混为一谈。
+
+System V 消息队列的特点：
+
+- 消息结构第一个字段必须是正的 `long` 类型消息类型；
+- `msgsz` 不包括消息类型字段；
+- 可以按类型选择消息；
+- 队列对象在创建进程退出后仍可能存在，必须显式 `IPC_RMID`，或由系统重启清理；
+- `ftok()` 不保证全局唯一，可能发生键冲突，返回值也必须检查。
+
+发送端示例：
 
 ```c
 #include <stdio.h>
-#include <sys/msg.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 
-
-struct msgbuf
-{
+struct message {
     long type;
     char text[100];
 };
 
-int main()
-{
+int main(void) {
+    key_t key = ftok("/tmp", 'Q');
+    if (key == (key_t)-1) {
+        perror("ftok");
+        return EXIT_FAILURE;
+    }
 
-    key_t key;
-    int msgid;
-    key = ftok(".",100);
-    // 获取已有队列
-    msgid = msgget(key,0666);
-    struct msgbuf msg;
+    int msgid = msgget(key, IPC_CREAT | 0600);
+    if (msgid == -1) {
+        perror("msgget");
+        return EXIT_FAILURE;
+    }
 
-    // 接收 type=1 的消息
-    msgrcv(
-        msgid,
-        &msg,
-        sizeof(msg.text), 
-        1, // type
-        0
-    );
+    struct message msg = {
+        .type = 1
+    };
+    strcpy(msg.text, "hello message queue");
 
-    printf(
-        "receiver got: %s\n",
-        msg.text
-    );
-    return 0;
+    size_t payload_size = strlen(msg.text) + 1;
+
+    if (msgsnd(msgid, &msg, payload_size, 0) == -1) {
+        perror("msgsnd");
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
 }
 ```
 
-
-
-
-## 4. 共享内存
-
-共享内存允许多个进程映射同一块物理内存。
-
-特点：
-
-* 最快的 IPC 方式。
-* 避免大量内核态和用户态之间的数据复制。
-* 需要额外同步机制，例如信号量、互斥锁。
-* 容易产生并发安全问题。
-
-**为什么共享内存最快？**
-
-因为进程可以直接读写同一块内存，不需要每次通信都经过内核拷贝数据。
-
-**问题：**
-
-共享内存只解决“数据放在哪里”，不解决“什么时候读写”。所以必须配合同步机制。
+接收端示例：
 
 ```c
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <sys/shm.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+
+struct message {
+    long type;
+    char text[100];
+};
+
+int main(void) {
+    key_t key = ftok("/tmp", 'Q');
+    if (key == (key_t)-1) {
+        perror("ftok");
+        return EXIT_FAILURE;
+    }
+
+    int msgid = msgget(key, 0600);
+    if (msgid == -1) {
+        perror("msgget");
+        return EXIT_FAILURE;
+    }
+
+    struct message msg;
+    ssize_t n = msgrcv(msgid, &msg, sizeof(msg.text), 1, 0);
+
+    if (n == -1) {
+        perror("msgrcv");
+        return EXIT_FAILURE;
+    }
+
+    printf("receiver got %zd bytes: %.*s\n", n, (int)n, msg.text);
+
+    if (msgctl(msgid, IPC_RMID, NULL) == -1) {
+        perror("msgctl IPC_RMID");
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+```
+
+消息队列适合较小的结构化消息。对于大块数据，常见设计是“消息队列传控制信息，共享内存传载荷”。
+
+## 5. 共享内存
+
+共享内存允许多个进程把同一组内存页映射到各自地址空间。映射建立后，进程可以像访问普通内存一样读写共享区域，无需每次消息都经过“发送到内核、再复制给接收进程”的路径。
+
+需要强调：
+
+- 共享的是底层内存页，两个进程中的虚拟地址不必相同；
+- 共享内存只解决数据放置，不自动提供协议、互斥、可见性或生命周期管理；
+- 进程间原子操作还需要满足类型、对齐和平台支持要求；
+- 错误同步可能导致数据竞争、缓存行争用和内存破坏；
+- 共享内存对象的生命周期取决于所使用的 System V、POSIX 或匿名共享映射接口。
+
+下面使用 System V 共享内存，并在共享区域中放置一个进程共享 POSIX 信号量，避免用 `sleep()` 猜测执行顺序：
+
+```c
+#include <semaphore.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-
-int main()
-{
-    /*
-        第一步：创建一个 key
-        IPC 通信对象（消息队列、共享内存、信号量）都需要一个 key 来标识。
-        不同进程只要使用相同的 key，就可以找到同一个 IPC 资源。
-    */
-    key_t key = ftok(".", 100);
-
-    /*
-        第二步：创建共享内存
-        shmget 参数：
-            - key  共享内存的唯一标识
-            - 共享内存大小 这里创建 1024 字节
-            - 权限和创建标志 
-        返回值：shmid 类似文件描述符 fd, 后面操作共享内存都靠它
-    */
-    int shmid = shmget(
-        key,
-        1024,
-        IPC_CREAT | 0666
-    );
-
-
-    if(shmid == -1)
-    {
-        perror("shmget");
-        exit(1);
-    }
-
-    /*
-        第三步：
-        将共享内存映射到当前进程地址空间
-        共享内存创建后, 进程不能直接访问。
-        shmat(): 把共享内存映射到进程虚拟地址空间。
-        返回addr, 代表这块共享内存。
-    */
-    char *addr = (char *)shmat(
-        shmid,
-        NULL,
-        0
-    );
-
-    if(addr == (char *)-1)
-    {
-        perror("shmat");
-        exit(1);
-    }
-
-    /*
-        创建子进程
-        fork之后两个进程访问的是同一块共享内存。
-    */
-    pid_t pid = fork();
-
-    if(pid > 0)
-    {
-        strcpy(
-            addr,
-            "hello shared memory"
-        );
-
-        printf(
-            "Parent write: %s\n",
-            addr
-        );
-
-        /*
-            等待子进程读取
-            如果没有同步机制：
-            父进程可能刚写完，子进程还没来得及读。
-            真实项目不能用 sleep，
-            应该使用：
-            - 信号量 semaphore
-            - mutex
-            - 条件变量
-        */
-        sleep(5);
-
-        /*
-            解除映射
-            shmat: 建立映射
-            shmdt: 删除当前进程和共享内存的映射关系
-        */
-        shmdt(addr);
-        /*
-            删除共享内存
-            注意：
-            IPC_RMID 不会马上删除。当所有进程都解除连接后，内核才真正释放。
-        */
-        shmctl(
-            shmid,
-            IPC_RMID,
-            NULL
-        );
-    }
-    else
-    {
-        /*
-            子进程负责读取数据,等待父进程写入。
-            这里用 sleep 简化。
-            实际应该使用同步机制。
-        */
-        sleep(1);
-        printf(
-            "Child read: %s\n",
-            addr
-        );
-        /*
-            子进程解除共享内存映射
-        */
-        shmdt(addr);
-
-    }
-    return 0;
-}
-```
-
-
-
-## 5. 信号量
-
-信号量主要用于同步和互斥。
-
-它本质上是一个计数器：
-
-* `P` 操作：申请资源，计数减一。
-* `V` 操作：释放资源，计数加一。
-
-信号量可以用于：
-
-* 控制多个进程访问有限资源。
-* 保护共享内存。
-* 实现生产者消费者模型。
-
-
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
-/*
-    信号量操作需要用到的联合体
-    semctl()需要
-*/
-union semun
-{
-    int val;
+#include <unistd.h>
+
+struct shared_block {
+    sem_t ready;
+    char text[128];
 };
-/*
-    P操作,申请资源,semaphore--;
-    如果资源不足:阻塞等待
-*/
-void P(int semid)
-{
-    struct sembuf op;
-    op.sem_num = 0;   // 第0个信号量
-    op.sem_op = -1;   // 减1
-    op.sem_flg = 0;
-    semop(
-        semid,
-        &op,
-        1
-    );
-}
 
-/*
-    V操作,释放资源,semaphore++;
-*/
-void V(int semid)
-{
-    struct sembuf op;
-
-    op.sem_num = 0;
-    op.sem_op = 1;
-    op.sem_flg = 0;
-    semop(
-        semid,
-        &op,
-        1
-    );
-}
-
-int main()
-{
-
-    /*
-        创建共享内存 保存 count
-    */
+int main(void) {
     int shmid = shmget(
         IPC_PRIVATE,
-        sizeof(int),
-        IPC_CREAT | 0666
+        sizeof(struct shared_block),
+        IPC_CREAT | 0600
     );
 
-    // 映射共享内存
-    int *count = (int *)shmat(
-        shmid,
-        NULL,
-        0
-    );
+    if (shmid == -1) {
+        perror("shmget");
+        return EXIT_FAILURE;
+    }
 
-    // 初始值
-    *count = 0;
+    struct shared_block *block = shmat(shmid, NULL, 0);
+    if (block == (void *)-1) {
+        perror("shmat");
+        shmctl(shmid, IPC_RMID, NULL);
+        return EXIT_FAILURE;
+    }
+
     /*
-        创建信号量
-        1: 表示只有一个进程可以进入临界区,类似一把锁
-    */
-    int semid = semget(
-        IPC_PRIVATE,
-        1,
-        IPC_CREAT | 0666
-    );
-    union semun arg;
-    arg.val = 1;
-    /*
-        初始化信号量 semaphore = 1
-        表示资源可用
-    */
-    semctl(
-        semid,
-        0,
-        SETVAL,
-        arg
-    );
+     * pshared = 1，表示该信号量位于进程间共享内存中。
+     * 初始值为 0，子进程将等待父进程发布数据。
+     */
+    if (sem_init(&block->ready, 1, 0) == -1) {
+        perror("sem_init");
+        shmdt(block);
+        shmctl(shmid, IPC_RMID, NULL);
+        return EXIT_FAILURE;
+    }
 
     pid_t pid = fork();
-    if(pid > 0)
-    {
-        P(semid);  
-        printf("Parent enter\n");
-        (*count)++;
-        sleep(2);
-        printf(
-            "Parent count=%d\n",
-            *count
-        );
-        V(semid);   // 解锁
-        wait(NULL);
+
+    if (pid == -1) {
+        perror("fork");
+        sem_destroy(&block->ready);
+        shmdt(block);
+        shmctl(shmid, IPC_RMID, NULL);
+        return EXIT_FAILURE;
     }
-    else
-    {
-        P(semid);   // 加锁
-        printf("Child enter\n");
-        (*count)++;
-        printf(
-            "Child count=%d\n",
-            *count
-        );
-        V(semid);   // 解锁
+
+    if (pid == 0) {
+        if (sem_wait(&block->ready) == -1) {
+            perror("sem_wait");
+            _exit(EXIT_FAILURE);
+        }
+
+        printf("child read: %s\n", block->text);
+        shmdt(block);
+        _exit(EXIT_SUCCESS);
     }
-    return 0;
+
+    strcpy(block->text, "hello shared memory");
+
+    if (sem_post(&block->ready) == -1) {
+        perror("sem_post");
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    sem_destroy(&block->ready);
+    shmdt(block);
+
+    /*
+     * IPC_RMID 标记对象删除。
+     * System V 共享内存会在最后一个映射解除后真正释放。
+     */
+    shmctl(shmid, IPC_RMID, NULL);
+
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0
+        ? EXIT_SUCCESS
+        : EXIT_FAILURE;
 }
 ```
 
+生产代码还应处理 `sem_wait()` 被信号中断、父进程异常退出、对象初始化一致性和健壮互斥等问题。
 
+## 6. 信号量
 
-## 6. 信号
+信号量是同步原语，本质上维护一个非负计数：
 
-信号是一种异步通知机制。
+- **等待/P/down**：计数大于零时减一并继续；否则等待；
+- **发布/V/up**：计数加一，并可能唤醒等待者。
+
+常见用途：
+
+- 限制同时使用资源的任务数量；
+- 实现生产者—消费者中的空槽和数据计数；
+- 进程间或线程间事件通知；
+- 作为二值同步原语。
+
+信号量与互斥锁的关键区别是**所有权**：
+
+- 互斥锁通常要求由获得锁的线程解锁；
+- 信号量没有同样的所有者语义，可以由另一个线程或进程发布；
+- 因此不能把所有二值信号量都等同于互斥锁。
+
+Linux 中还要区分：
+
+- POSIX 未命名信号量 `sem_init`；
+- POSIX 命名信号量 `sem_open`；
+- System V 信号量 `semget/semop/semctl`；
+- 内核内部信号量。
+
+它们的接口、语义细节和生命周期不同。
+
+## 7. 信号 Signal
+
+信号是内核向进程或线程发送的异步事件通知。
 
 常见信号：
 
-* `SIGINT`：终端中断，通常是 Ctrl+C。
-* `SIGKILL`：强制杀死进程，不能被捕获。
-* `SIGTERM`：请求进程终止。
-* `SIGCHLD`：子进程退出时通知父进程。
-* `SIGSEGV`：段错误。
+- `SIGINT`：终端中断，通常由 `Ctrl+C` 触发；
+- `SIGTERM`：请求进程有序终止；
+- `SIGKILL`：强制终止，不能捕获、阻塞或忽略；
+- `SIGCHLD`：子进程状态变化；
+- `SIGSEGV`：无效内存访问等错误；
+- `SIGPIPE`：向没有读者的管道或已关闭连接写入。
 
-信号适合做通知，不适合传递大量数据。
+需要注意：
+
+- 信号处置方式通常是进程级共享的；
+- 信号屏蔽字按线程维护；
+- 信号可以是进程定向或线程定向；
+- 普通信号可能合并，多次到达不一定排队为多份；
+- 实时信号具有排队和顺序语义；
+- 信号处理函数运行在被打断线程的上下文中，必须遵守异步信号安全约束。
+
+`printf()`、`malloc()`、`std::cout` 等通常不能安全地在异步信号处理函数中调用。常见做法是让处理函数只设置 `volatile sig_atomic_t` 标志，再由正常执行路径完成清理：
 
 ```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include <errno.h>
 #include <signal.h>
-/*
-    信号处理函数
-    当进程收到 SIGTERM 时，内核会调用这个函数。
-    注意：
-    信号处理函数不是我们主动调用的，而是内核异步调用。
-*/
-void handler(int sig){
-    printf("收到信号: %d\n", sig);
-    printf("准备退出程序...\n");
-    exit(0);
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+static volatile sig_atomic_t stop_requested = 0;
+
+static void handle_signal(int signo) {
+    (void)signo;
+    stop_requested = 1;
 }
 
-int main(){
-    /*
-        注册信号处理函数
-        signal:
-        第1个参数: 监听哪个信号
-        第2个参数: 收到信号后执行哪个函数
-        这里表示收到 SIGTERM调用 handler()
-    */
-    signal(SIGTERM,handler);
-    printf("进程启动, PID=%d\n", getpid());
-    /*
-        模拟程序运行
-        例如：一个服务器一直等待请求
-    */
-    while(1)
-    {
-        printf("程序运行中...\n");
-        sleep(2);
+int main(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+
+    action.sa_handler = handle_signal;
+    sigemptyset(&action.sa_mask);
+
+    if (sigaction(SIGTERM, &action, NULL) == -1 ||
+        sigaction(SIGINT, &action, NULL) == -1) {
+        perror("sigaction");
+        return 1;
     }
+
+    printf("process started, pid=%ld\n", (long)getpid());
+
+    while (!stop_requested) {
+        /*
+         * 这里用短周期 sleep 保持示例简单。
+         * 生产事件循环更常使用 signalfd、自管道或
+         * sigprocmask + sigsuspend，避免信号竞态并统一事件源。
+         */
+        sleep(1);
+    }
+
+    puts("clean shutdown in normal execution context");
     return 0;
 }
 ```
 
+`volatile sig_atomic_t` 只解决信号处理函数与普通执行路径之间的最小标志传递，不应被当作一般多线程同步工具。
 
+## 8. Unix Domain Socket
 
-
-## 7. Socket
-
-Socket 不仅可以用于网络通信，也可以用于本机进程通信。
-
-本机 IPC 可以使用 Unix Domain Socket。
+Unix Domain Socket（UDS）使用 Socket 编程模型完成本机 IPC。
 
 特点：
 
-* 支持双向通信。
-* 可以用于无亲缘关系进程。
-* 编程模型和网络 socket 类似。
-* 比共享内存慢，但更通用、更易管理。
+- 支持 `SOCK_STREAM`、`SOCK_DGRAM`、`SOCK_SEQPACKET` 等类型；
+- 支持双向通信和多客户端连接；
+- 路径名或 Linux 抽象命名空间可用于寻址；
+- 可使用 `SCM_RIGHTS` 在进程间传递文件描述符；
+- 保留凭据、权限检查等本机特性；
+- 不经过 IP 路由，但仍有内核协议栈和缓冲管理成本。
 
+### 8.1 服务端
 
-服务端(省略部分错误处理)
 ```cpp
-// server.cpp
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <iostream>
+#include <string_view>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
-#include <cstring>
-#include <iostream>
+namespace {
+
+bool write_all(int fd, std::string_view data) {
+    while (!data.empty()) {
+        const ssize_t n = ::write(fd, data.data(), data.size());
+
+        if (n > 0) {
+            data.remove_prefix(static_cast<std::size_t>(n));
+            continue;
+        }
+
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+}  // namespace
 
 int main() {
-    const char* path = "/tmp/demo_socket";
+    constexpr const char* kPath = "/tmp/demo_socket";
 
-    /*
-     * socket(domain, type, protocol)
-     * domain：AF_UNIX，表示本机 Unix Domain Socket。
-     * type：SOCK_STREAM，表示可靠的字节流，类似 TCP。
-     * protocol：通常填 0。
-     * 返回值：成功返回文件描述符，失败返回 -1。
-     */
-    int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    const int server_fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (server_fd == -1) {
+        std::perror("socket");
+        return 1;
+    }
 
-    /* 
-     * 这里的 sockaddr_un 用来描述 Unix Domain Socket 的地址，socket address Unix
-     * 地址类型：AF_UNIX
-     * 地址路径：/tmp/demo_socket
-     */
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
 
-    // 其余的还有：
-    // sockaddr_in：IPv4 Socket 地址
-    // sockaddr_in6：IPv6 Socket 地址
+    if (std::strlen(kPath) >= sizeof(address.sun_path)) {
+        std::cerr << "socket path is too long\n";
+        ::close(server_fd);
+        return 1;
+    }
 
-    /*
-     * unlink(path)
-     * 删除指定路径。
-     * Socket 文件已存在时，bind() 会失败，因此先删除旧文件。
-     */
-    unlink(path);
+    std::strcpy(address.sun_path, kPath);
+    ::unlink(kPath);
 
-    /*
-     * bind(fd, address, address_length) 把已经由 fd 指向的 Socket，绑定到 /tmp/demo_socket 这个地址。
-     * sockaddr_un 需要转换成通用的 sockaddr*。
-     * 返回值只是表示操作是否成功
-     */
-    bind(
+    if (::bind(
+            server_fd,
+            reinterpret_cast<const sockaddr*>(&address),
+            sizeof(address)
+        ) == -1) {
+        std::perror("bind");
+        ::close(server_fd);
+        return 1;
+    }
+
+    if (::listen(server_fd, 16) == -1) {
+        std::perror("listen");
+        ::unlink(kPath);
+        ::close(server_fd);
+        return 1;
+    }
+
+    const int client_fd = ::accept4(
         server_fd,
-        reinterpret_cast<sockaddr*>(&addr),
-        sizeof(addr)
+        nullptr,
+        nullptr,
+        SOCK_CLOEXEC
     );
 
-    /*
-     * listen(fd, backlog)
-     * 将 Socket 设置为监听状态。
-     * backlog 表示等待连接队列的大致长度。
-     */
-    listen(server_fd, 5);
+    if (client_fd == -1) {
+        std::perror("accept4");
+        ::unlink(kPath);
+        ::close(server_fd);
+        return 1;
+    }
 
-    std::cout << "等待客户端连接...\n";
+    char buffer[128];
+    ssize_t n;
 
-    /*
-     * accept(fd, client_address, address_length)
-     * 从监听队列中取出一个客户端连接。
-     * 不需要客户端地址时，后两个参数可以填 nullptr。
-     * 默认会阻塞，成功后返回新的通信文件描述符。
-     */
-    int client_fd = accept(server_fd, nullptr, nullptr);
+    do {
+        n = ::read(client_fd, buffer, sizeof(buffer));
+    } while (n == -1 && errno == EINTR);
 
-    char buffer[128]{};
+    if (n > 0) {
+        std::cout.write(buffer, n);
+        std::cout << '\n';
 
-    /*
-     * read(fd, buffer, size)
-     * 从 fd 中读取最多 size 字节到 buffer。
-     * 返回实际读取的字节数，返回 0 表示对端已关闭连接。
-     */
-    read(client_fd, buffer, sizeof(buffer) - 1);
-    std::cout << "收到：" << buffer << '\n';
+        if (!write_all(
+                client_fd,
+                std::string_view{"Hello from server"}
+            )) {
+            std::perror("write");
+        }
+    } else if (n == -1) {
+        std::perror("read");
+    }
 
-    const char* reply = "Hello from server";
+    ::close(client_fd);
+    ::close(server_fd);
+    ::unlink(kPath);
 
-    /*
-     * write(fd, buffer, size)
-     * 将 buffer 中的 size 字节写入 fd。
-     * 返回实际写入的字节数。
-     */
-    write(client_fd, reply, std::strlen(reply));
-
-    /*
-     * close(fd)
-     * 关闭文件描述符并释放对应资源。
-     */
-    close(client_fd);
-    close(server_fd);
-
-    // 删除服务端创建的 Socket 文件。
-    unlink(path);
+    return n == -1 ? 1 : 0;
 }
 ```
-客户端
+
+### 8.2 客户端
 
 ```cpp
-// client.cpp
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <iostream>
+#include <string_view>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
-#include <cstring>
-#include <iostream>
+namespace {
+
+bool write_all(int fd, std::string_view data) {
+    while (!data.empty()) {
+        const ssize_t n = ::write(fd, data.data(), data.size());
+
+        if (n > 0) {
+            data.remove_prefix(static_cast<std::size_t>(n));
+            continue;
+        }
+
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+}  // namespace
 
 int main() {
-    const char* path = "/tmp/demo_socket";
+    constexpr const char* kPath = "/tmp/demo_socket";
 
-    /*
-     * 创建 Unix Domain 字节流 Socket。
-     * 成功返回文件描述符，失败返回 -1。
-     */
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd == -1) {
+        std::perror("socket");
+        return 1;
+    }
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    std::strcpy(address.sun_path, kPath);
 
-    /*
-     * connect(fd, server_address, address_length)
-     * 使用 fd 连接指定的服务端地址。
-     * 服务端必须已经执行 bind() 和 listen()。
-     */
-    connect(
-        fd,
-        reinterpret_cast<sockaddr*>(&addr),
-        sizeof(addr)
-    );
+    if (::connect(
+            fd,
+            reinterpret_cast<const sockaddr*>(&address),
+            sizeof(address)
+        ) == -1) {
+        std::perror("connect");
+        ::close(fd);
+        return 1;
+    }
 
-    const char* message = "Hello from client";
+    constexpr std::string_view message = "Hello from client";
 
-    // 向服务端发送字符串，不发送结尾的 '\0'。
-    write(fd, message, std::strlen(message));
+    if (!write_all(fd, message)) {
+        std::perror("write");
+        ::close(fd);
+        return 1;
+    }
 
-    char buffer[128]{};
+    char buffer[128];
+    ssize_t n;
 
-    // 阻塞等待并读取服务端回复。
-    read(fd, buffer, sizeof(buffer) - 1);
-    std::cout << "收到：" << buffer << '\n';
+    do {
+        n = ::read(fd, buffer, sizeof(buffer));
+    } while (n == -1 && errno == EINTR);
 
-    // 关闭客户端 Socket。
-    close(fd);
+    if (n > 0) {
+        std::cout.write(buffer, n);
+        std::cout << '\n';
+    } else if (n == -1) {
+        std::perror("read");
+    }
+
+    ::close(fd);
+    return n == -1 ? 1 : 0;
 }
 ```
 
-服务端：socket → unlink → bind → listen → accept → read/write → close
-客户端：socket → connect → write/read → close
+服务端典型流程：
 
+```text
+socket → unlink旧路径 → bind → listen → accept → read/write → close → unlink
+```
 
+客户端典型流程：
+
+```text
+socket → connect → read/write → close
+```
+
+上述示例只处理一个客户端。高并发场景通常需要非阻塞 Socket、I/O 多路复用、连接状态管理、部分读写处理和背压控制。
 
 # 三、进程调度与上下文切换
 
 ## 1. 什么是上下文切换？
 
-CPU 正在执行一个进程或线程时，需要切换去执行另一个进程或线程。操作系统必须保存当前执行现场，再恢复另一个执行现场，这个过程叫上下文切换。
+**上下文切换是 CPU 从一个可调度任务切换到另一个任务时，保存前者执行状态并恢复后者执行状态的过程。**
 
-保存和恢复的内容包括：
+在现代操作系统中，调度器直接处理的对象通常是线程或内核 task。常见的执行上下文包括：
 
-* 程序计数器 PC
-* 通用寄存器
-* 栈指针
-* 状态寄存器
-* 页表基地址
-* 进程状态
-* 调度信息
+- 程序计数器；
+- 通用寄存器；
+- 栈指针；
+- 状态寄存器；
+- 浮点、向量等扩展寄存器状态；
+- 内核栈和调度器维护的信息；
+- 必要时还包括地址空间上下文。
 
-> 上下文切换是操作系统在不同进程或线程之间切换 CPU 执行权的过程。它需要保存当前任务的寄存器、程序计数器、栈指针等上下文信息，并恢复下一个任务的上下文。上下文切换本身不执行用户业务逻辑，因此过多会降低系统性能。
+并非每次上下文切换都要切换页表。只有新任务使用不同地址空间时，才通常需要切换页表根或地址空间标识。
 
+### 1.1 模式切换不等于上下文切换
 
+需要区分：
 
-## 2. 进程切换和线程切换
+- **用户态/内核态切换**：同一线程因系统调用、异常或中断进入内核，再返回用户态；
+- **任务上下文切换**：CPU 从线程 A 改为执行线程 B。
 
-进程切换开销通常更大，因为它可能涉及：
+```mermaid
+flowchart LR
+    A["线程 A：用户态"] -->|"系统调用"| B["线程 A：内核态"]
+    B -->|"返回"| C["线程 A：用户态"]
+```
 
-* 地址空间切换
-* 页表切换
-* TLB 失效
-* 缓存局部性下降
-* 内核调度开销
+上图只有特权级变化，没有更换任务。
 
-线程切换通常只需要切换：
+```mermaid
+flowchart LR
+    A["线程 A"] -->|"保存 A 上下文"| S["调度器"]
+    S -->|"恢复 B 上下文"| B["线程 B"]
+```
 
-* 寄存器
-* 栈
-* 程序计数器
-* 线程状态
+系统调用可能返回原线程，也可能在内核中触发调度后返回另一个线程。因此两种切换可能同时发生，也可能只发生一种。
 
-同一进程内线程共享地址空间，因此切换成本较低。
+## 2. 同进程线程切换与跨进程切换
 
+两类切换都需要保存和恢复寄存器、切换内核栈、更新调度状态，并可能破坏缓存局部性。
 
+同一进程中的线程通常共享地址空间，因此：
+
+- 通常无需更换页表根；
+- 可继续使用同一地址空间标识；
+- 部分 TLB 项和共享代码、数据工作集更可能保持有效。
+
+跨进程切换通常还要切换地址空间上下文，并可能产生更明显的：
+
+- TLB 工作集变化；
+- Cache 工作集变化；
+- 分支预测状态扰动；
+- 地址空间安全检查和内核 bookkeeping。
+
+现代 CPU 使用 ASID、PCID 等机制降低地址空间切换时的 TLB 失效成本，所以不能简单表述为“进程切换必然清空 TLB”。
+
+> 同进程线程切换通常比跨进程切换便宜，但实际差异取决于硬件、工作集、调度器、NUMA 和运行负载。
 
 ## 3. 常见调度算法
 
-### FCFS：先来先服务
+以下算法主要用于理解调度思想。真实通用操作系统通常会组合公平性、优先级、实时性、负载均衡和能耗等多种目标。
 
-谁先来谁先执行。
+### 3.1 FCFS：先来先服务
 
-优点：
-
-* 简单。
-* 公平性直观。
-
-缺点：
-
-* 短任务可能被长任务阻塞。
-* 平均等待时间可能较长。
-
-
-
-### SJF：短作业优先
-
-优先执行运行时间短的任务。
+按任务到达顺序执行。
 
 优点：
 
-* 平均等待时间较短。
+- 实现简单；
+- 顺序直观。
 
 缺点：
 
-* 需要预估任务运行时间。
-* 长任务可能饥饿。
+- 长任务可能让大量短任务等待；
+- 容易出现 convoy effect，即“护航效应”；
+- 不适合需要快速响应的交互系统。
 
+### 3.2 SJF：短作业优先
 
-
-### RR：时间片轮转
-
-每个进程分配一个时间片，时间片用完就切换。
+优先执行预计运行时间最短的任务。
 
 优点：
 
-* 响应时间较好。
-* 适合分时系统。
+- 在运行时间已知且不可抢占等理想条件下，可最小化平均等待时间。
 
 缺点：
 
-* 时间片太小，上下文切换频繁。
-* 时间片太大，退化成 FCFS。
+- 实际系统难以准确预测运行时间；
+- 长任务可能饥饿。
 
+可抢占版本通常称为最短剩余时间优先 SRTF。
 
+### 3.3 RR：时间片轮转
 
-### 优先级调度
+每个可运行任务获得一个时间片，时间片耗尽后放回就绪队列。
 
-优先级高的任务先执行。
+优点：
 
-问题：
+- 响应时间相对稳定；
+- 适合分时系统。
 
-* 低优先级任务可能饥饿。
+缺点：
 
-解决：
+- 时间片太小会增加切换开销；
+- 时间片太大时行为接近 FCFS；
+- 不考虑任务权重和实时约束。
 
-* 老化机制：等待时间越长，优先级逐渐提高。
+### 3.4 优先级调度
 
+优先执行高优先级任务，可以是抢占式或非抢占式。
 
+风险：
 
-### 多级反馈队列 MLFQ
+- 低优先级任务可能长期得不到执行；
+- 持锁的低优先级任务可能阻塞高优先级任务，形成优先级反转。
 
-将任务放入多个优先级队列。
+常见机制：
 
-特点：
+- 老化；
+- 优先级继承；
+- 优先级上限协议。
 
-* 新任务先进入高优先级队列。
-* **用完时间片还没执行完，就降级。**
-* **等待太久可以提升优先级。**
-* 兼顾交互任务和长任务。
+### 3.5 多级反馈队列 MLFQ
 
-> 多级反馈队列通过动态调整任务优先级，让短任务和交互任务获得较好响应，同时避免长任务永久饥饿。
+MLFQ 使用多个优先级队列，并根据任务行为动态调整位置：
 
+- 新任务通常从高优先级队列开始；
+- 持续用满调度额度的 CPU 密集型任务可能降级；
+- 经常主动睡眠的交互任务倾向保留较高响应优先级；
+- 系统可周期性提升任务，缓解饥饿。
 
+> MLFQ 的核心是根据历史行为近似预测任务类型，而不是预先知道任务总运行时间。
 
-## 4. Linux 进程状态
+## 4. Linux 任务状态
 
-Linux 中每个进程都有一个状态，可以通过 `ps` 或 `top` 命令的 `STAT` 列查看：
+`ps`、`top` 展示的是用户可见状态码，它们是内核多个状态位的简化映射，不应认为每个字符都与一个唯一内核常量严格一一对应。
 
-| 状态码 | 内核常量 | 名称 | 说明 |
-|--------|----------|------|------|
-| `R` | `TASK_RUNNING` | 运行/就绪 | 正在运行或在运行队列中等待 CPU |
-| `S` | `TASK_INTERRUPTIBLE` | 可中断睡眠 | 等待事件（如 IO 完成、信号），**可被信号唤醒** |
-| `D` | `TASK_UNINTERRUPTIBLE` | 不可中断睡眠 | 等待 IO 完成，**不响应信号**，不能被 kill |
-| `Z` | `EXIT_ZOMBIE` | 僵尸进程 | 已退出但父进程尚未回收（wait） |
-| `T` | `TASK_STOPPED` | 停止/暂停 | 被 `SIGSTOP`/`SIGTSTP` 暂停，或被调试器断点 |
+| 状态码 | 常见含义 | 说明 |
+|---|---|---|
+| `R` | Running/Runnable | 正在某个 CPU 上运行，或在运行队列中等待 |
+| `S` | Interruptible Sleep | 可中断睡眠，等待事件且可被信号唤醒 |
+| `D` | Uninterruptible/Killable Sleep | 通常表示内核中的不可中断或特定可杀等待 |
+| `Z` | Zombie | 已退出，等待父进程读取退出状态 |
+| `T` | Stopped | 被作业控制信号暂停 |
+| `t` | Tracing Stop | 被调试器或 `ptrace` 停止 |
+| `I` | Idle Kernel Thread | 某些内核空闲线程的显示状态 |
 
-### D 状态详解
+### 4.1 R 状态
 
-D 状态（Disk Sleep / Uninterruptible Sleep）：
+`R` 同时包含：
 
-* 进程在**内核态**执行时等待某个 IO 操作完成（如磁盘读、NFS 请求）。
-* 处于 D 状态的进程**不响应任何信号**，包括 `SIGKILL`（`kill -9`）也无法杀死。
-* 只有 IO 完成或内核超时后，进程才会脱离 D 状态。
-* 常见原因：磁盘 IO 极慢、NFS 挂载卡住、内核 bug、驱动问题。
-* 排查方法：`cat /proc/<pid>/stack` 查看内核栈，定位卡在哪个内核函数。
+- 正在 CPU 上执行；
+- 已经可运行，但正在运行队列中等待 CPU。
 
-> D 状态存在的意义是保护内核数据结构的一致性。进程持有内核锁或正在修改关键数据时，如果被强制杀死会导致内核状态不一致甚至崩溃。
+单核 CPU 上同一时刻通常只有一个普通线程真正执行，但可以有多个线程同时处于 `R` 状态等待调度。
 
-### R 状态详解
+`R` 任务多于 CPU 核心数并不自动证明系统有问题。需要结合：
 
-R 状态（Running / Runnable）：
+- run queue 长度；
+- CPU 利用率；
+- 每任务等待时间；
+- 调度延迟；
+- 负载是否持续。
 
-* 进程正在 CPU 上执行，**或**在运行队列（runqueue）中等待被调度。
-* R 状态并不一定意味着"此刻正在使用 CPU"，而是"可被调度执行"。
-* 单核 CPU 上同一时刻只有一个进程真正在 R 状态执行；多核上可以有多个。
-* `top` 中 R 状态的进程多说明 CPU 繁忙；如果 R 状态进程数远超 CPU 核心数，说明 CPU 成为瓶颈。
+### 4.2 S 状态
 
-> R 状态包含"正在运行"和"就绪等待调度"两种情况。Linux 不区分 Running 和 Ready，统一用 `TASK_RUNNING` 表示。
+`S` 表示可中断睡眠，常见于：
 
-### S 状态详解
+- 等待网络数据；
+- `sleep()` 或定时器；
+- `accept()` 等待连接；
+- `wait()` 等待子进程；
+- 等待部分锁或事件。
 
-S 状态（Interruptible Sleep）：
+收到未被屏蔽且需要处理的信号后，系统调用可能：
 
-* 进程在等待某个事件（如 IO 完成、定时器到期、获取锁、子进程退出）。
-* 与 D 状态的关键区别：**S 状态可以被信号唤醒**。`kill` 可以终止 S 状态的进程。
-* 大部分等待 IO 的进程（如 `read()` 等待网络数据、`sleep()`、`wait()` 等待子进程）都处于 S 状态。
-* 被信号唤醒后，进程会先处理信号，再决定是否继续等待或返回。
+- 返回 `EINTR`；
+- 被内核自动重启；
+- 执行信号处理函数后继续等待。
 
-> S 是最常见的睡眠状态。`sleep()`、`read()` 阻塞、`accept()` 等待连接都是 S 状态。S 和 D 的区别是"能否被信号打断"。
+具体行为受系统调用、`sigaction` 标志和实现影响。
 
-### Z 状态详解
+### 4.3 D 状态
 
-Z 状态（Zombie / 僵尸进程）：
+`D` 常用于表示任务在内核中等待某个不能按普通方式中断的条件。常见原因包括：
 
-* 子进程已调用 `exit()` 退出，但父进程尚未调用 `wait()`/`waitpid()` 回收。
-* 僵尸进程**不再占用内存和 CPU**，但保留了一个 task_struct（含退出状态码、资源使用统计）。
-* 僵尸进程的 PID 仍被占用，大量僵尸进程可能耗尽 PID 资源。
-* 解决方法：
-  * 父进程调用 `wait()`/`waitpid()` 回收。
-  * 父进程注册 `SIGCHLD` 信号处理函数，在回调中调用 `waitpid()`。
-  * 杀死父进程，让 init（PID 1）接管并自动回收。
-* `kill -9` **无法杀死僵尸进程**，因为它已经死了，只是在等父进程收尸。
+- 块设备 I/O；
+- NFS 或其他远程文件系统；
+- 驱动等待；
+- 内核锁、内存回收或硬件响应；
+- 内核缺陷。
 
-> 僵尸进程的根因是父进程没有回收子进程。解决方案是让父进程 `wait()` 或注册 `SIGCHLD` 处理。如果父进程本身有 bug 不回收，杀掉父进程让 init 接管是终极手段。
+经典 `TASK_UNINTERRUPTIBLE` 等待期间不会处理普通信号，因此即使发送 `SIGKILL`，任务也通常要等等待条件结束后才能观察到并退出。部分“killable”内核等待也可能显示为 `D`，能够响应致命信号，所以“所有 D 状态绝对无法被杀死”过于绝对。
 
-### T 状态详解
+> `SIGKILL` 不会让内核在任意指令点粗暴删除一个 task。它只是建立不可忽略的终止请求，任务仍需到达可以处理退出的状态。
 
-T 状态（Stopped / Traced）：
-
-* 进程被暂停执行，不参与调度。
-* 两种触发方式：
-  * **信号暂停**：`SIGSTOP`（不可捕获）、`SIGTSTP`（Ctrl+Z，可捕获）使进程进入 T 状态。`SIGCONT` 恢复。
-  * **调试器跟踪**：被 `ptrace` 跟踪（如 GDB 断点），进程在断点处停止，状态为 `t`（小写，表示 traced）。
-* T 状态的进程不消耗 CPU，但仍占用内存。
-* 常见场景：`Ctrl+Z` 暂停前台任务后用 `bg`/`fg` 恢复；GDB 调试时进程停在断点。
-
-> `SIGSTOP` vs `SIGTSTP` 的区别——前者不可被捕获/忽略，后者可以。`Ctrl+Z` 发送的是 `SIGTSTP`。`SIGCONT` 让暂停的进程继续执行。
-
-### 如何查看进程状态
-
-```bash
-# 查看所有进程的状态码
-ps aux                   # STAT 列
-ps -eo pid,stat,comm     # 精简输出
-
-# 交互式查看
-top                      # 默认显示 S 列
-htop                     # 更友好的界面
-
-# 查找 D 状态进程
-ps aux | awk '$8 ~ /D/'
-```
-
-
-
-## 5. 如何查看进程的内核占用与调度信息
-
-### CPU 占用：用户态 vs 内核态
-
-进程的 CPU 时间分为两部分：
-
-* **utime**：用户态执行时间（运行用户代码）
-* **stime**：内核态执行时间（系统调用、缺页处理、驱动等）
+排查方法：
 
 ```bash
-# ps 显示 CPU 占用（默认含 utime + stime）
-ps aux                    # %CPU 列
-
-# 分开看用户态和内核态时间（单位：秒）
-ps -o pid,utime,stime,comm <pid>
-
-# time 命令测量进程的用户态和内核态耗时
-/usr/bin/time -v ./my_program
-# 输出包含：
-#   User time (seconds):     用户态时间
-#   System time (seconds):   内核态时间
-#   Elapsed (wall clock):    墙钟时间
-```
-
-### /proc 文件系统
-
-`/proc/<pid>/` 下有丰富的进程信息：
-
-```bash
-# 进程基本状态（state、utime、stime、优先级等）
-cat /proc/<pid>/stat
-
-# 内核栈（排查 D 状态卡在哪里）
+ps -eo pid,tid,stat,wchan:32,comm
 cat /proc/<pid>/stack
+cat /proc/<pid>/wchan
+```
 
-# 进程状态（人类可读）
+读取其他进程内核栈通常需要足够权限和内核配置支持。
+
+### 4.4 Z 状态
+
+子进程退出后，大部分资源已经释放，但内核仍保留：
+
+- PID；
+- 退出状态；
+- 资源使用统计；
+- 供父进程 `wait()` 读取的最小信息。
+
+在父进程回收之前，该进程显示为僵尸。僵尸不运行，也不持有原用户地址空间和普通文件描述符，但大量僵尸会占用 PID 和内核表项。
+
+`kill -9` 对僵尸无效，因为其执行已经结束。正确做法是修复父进程的回收逻辑。
+
+### 4.5 T 与 t 状态
+
+- `T`：作业控制停止，例如 `SIGSTOP` 或 `SIGTSTP`；
+- `t`：调试跟踪停止，例如 GDB 断点或 `ptrace`。
+
+`SIGSTOP` 不能捕获或忽略；`SIGTSTP` 可以由程序处理；`SIGCONT` 使停止任务继续。
+
+## 5. 查看调度和上下文切换信息
+
+### 5.1 基础状态
+
+```bash
+ps -eo pid,tid,stat,ni,pri,psr,pcpu,time,comm
+top
+top -H -p <pid>
+```
+
+字段含义：
+
+- `NI`：nice 值；
+- `PRI/PR`：工具根据调度策略显示的优先级表示；
+- `PSR`：最近运行的 CPU；
+- `STAT/S`：任务状态；
+- `TIME`：累计 CPU 时间。
+
+不要把 `top` 的 `PR` 永久简化成固定公式 `20 + NI`。显示方式和实时任务表示取决于工具及调度类。
+
+### 5.2 用户态和内核态 CPU 时间
+
+进程 CPU 时间通常可分为：
+
+- `utime`：用户态执行时间；
+- `stime`：为该任务执行内核代码的时间。
+
+```bash
+/usr/bin/time -v ./my_program
+pidstat -u -p <pid> 1
+cat /proc/<pid>/stat
+```
+
+`/proc/<pid>/stat` 中时间字段通常以时钟滴答数表示，需要结合 `_SC_CLK_TCK` 换算，且字段位置固定但格式不适合人工随意切分，因为进程名可包含空格和括号。
+
+### 5.3 上下文切换
+
+```bash
+pidstat -w -p <pid> 1
 cat /proc/<pid>/status
-# 关键字段：
-#   State:    D (uninterruptible sleep)
-#   voluntary_ctxt_switches:    主动让出 CPU 次数（如 sleep、IO 等待）
-#   nonvoluntary_ctxt_switches: 被调度器抢占次数
-
-# 调度策略和优先级
-chrt -p <pid>             # 查看调度策略（SCHED_NORMAL/FIFO/RR）和优先级
-nice -n <priority> <cmd>  # 设置 nice 值（-20 最高，19 最低）
+perf stat -e context-switches,cpu-migrations ./app
+perf sched record -- ./app
+perf sched timehist
 ```
 
-### top/htop 中的调度相关字段
+`/proc/<pid>/status` 常见字段：
 
+- `voluntary_ctxt_switches`：任务因等待、让出等原因主动离开 CPU 的次数；
+- `nonvoluntary_ctxt_switches`：任务被调度器抢占的次数。
+
+计数高不一定代表异常。事件驱动服务器、阻塞式程序和高并发线程池的正常模式不同，应结合吞吐和延迟判断。
+
+### 5.4 调度策略
+
+```bash
+chrt -p <pid>
+taskset -cp <pid>
+renice -n 5 -p <pid>
 ```
-top - 14:30:00 up 10 days
-  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
-1234 user      20   0  500000   8000   4000 R   5.0   0.2   1:23.45 myapp
-```
 
-| 列 | 含义 |
-|----|------|
-| `PR` | 调度优先级（内核内部值，越小越优先） |
-| `NI` | nice 值（用户可调，-20~19，影响 PR） |
-| `S` | 进程状态（R/S/D/Z/T） |
-| `%CPU` | CPU 占用率（含用户态 + 内核态） |
-| `TIME+` | 累计 CPU 时间（含用户态 + 内核态） |
+常见策略包括：
 
-> **要点**：`PR = 20 + NI`（普通进程）。`PR` 越小优先级越高。`nice` 值只影响普通进程（`SCHED_NORMAL`），实时进程（`SCHED_FIFO`/`SCHED_RT`）有独立的优先级范围（1~99）。
+- `SCHED_OTHER`：普通公平调度；
+- `SCHED_BATCH`；
+- `SCHED_IDLE`；
+- `SCHED_FIFO`；
+- `SCHED_RR`；
+- `SCHED_DEADLINE`。
 
-
+`nice` 主要影响普通公平调度类的权重，不等于实时优先级。
 
 # 四、同步、互斥与锁
 
 ## 1. 并发和并行
 
-并发：
+**并发**表示多个任务在同一时间段内都能取得进展。
 
-> 多个任务在同一时间段内交替推进。
+**并行**表示多个任务在同一时刻真正由不同执行单元同时运行。
 
-并行：
-
-> 多个任务在同一时刻真正同时执行。
-
-单核 CPU 可以并发，但不能真正并行。多核 CPU 才能真正并行。
-
-
+单核 CPU 可以通过抢占和切换实现并发，但同一时刻通常只能执行一个普通线程的指令流；多核 CPU 可以让多个线程并行。并发是程序结构和调度属性，并行是实际执行状态。
 
 ## 2. 同步和异步
 
-同步：
+“同步/异步”必须结合上下文理解。
 
-> 调用方发起操作后，需要等待结果返回。
+在一般调用语境中：
 
-异步：
+- **同步接口**：调用方在当前控制流中获得操作结果或失败信息；
+- **异步接口**：调用方先提交操作，操作完成后通过回调、Future、事件、完成队列等方式取得结果。
 
-> 调用方发起操作后，不需要一直等待，结果完成后通过回调、事件、通知等方式告知。
+在并发控制语境中，“同步”还可能指协调多个执行流的顺序，例如等待条件变量、栅栏或信号量。
 
-
+因此，不应只用“是否等待”一句话概括所有同步和异步语义。
 
 ## 3. 阻塞和非阻塞
 
-阻塞：
+阻塞/非阻塞描述一次调用在当前条件不满足时如何返回：
 
-> 调用后，如果条件不满足，线程会被挂起等待。
+- **阻塞调用**：当前线程可能睡眠，直到条件满足、超时或被中断；
+- **非阻塞调用**：不能立即完成时直接返回，例如 `EAGAIN` 或 `EWOULDBLOCK`。
 
-非阻塞：
+同步与阻塞不是同义词：
 
-> 调用后立即返回，不会让线程睡眠等待。
+- 非阻塞 `read()` 仍属于同步读取接口，因为数据可用时由本次调用完成读取；
+- 异步操作的提交函数可以很快返回，但等待完成通知的另一个接口本身仍可能阻塞；
+- `epoll_wait()` 会阻塞等待就绪事件，但 epoll 仍是同步 I/O 多路复用机制。
 
-**同步/异步关注的是结果通知机制。**
+## 4. 临界区、数据竞争和竞态条件
 
-**阻塞/非阻塞关注的是调用时线程是否等待。**
-
-
-
-## 4. 临界区
-
-临界区是访问共享资源的代码区域。
-
-多个线程同时进入临界区可能导致数据竞争，所以需要互斥。
-
-例如：
+**临界区**是访问共享状态、需要满足互斥或顺序约束的代码区域。
 
 ```cpp
 count++;
 ```
 
-这不是原子操作，可能包含：
+在普通整型上通常包含读、计算和写回。多个线程无同步地读写同一对象，且至少一个操作是写，会形成数据竞争。
 
-1. 从内存读取 count。
-2. 加一。
-3. 写回内存。
+在 C++ 内存模型中：
 
-多个线程同时执行可能导致结果错误。
+> 非原子对象上的数据竞争会导致未定义行为，不只是“结果少加一次”。
 
+需要区分：
 
+- **数据竞争**：语言内存模型中的并发未同步冲突；
+- **竞态条件**：结果依赖执行时序的更广义逻辑问题；
+- **原子性问题**：一个操作是否不可分割；
+- **可见性与顺序问题**：写入何时、以何种顺序被其他线程观察。
+
+锁可以同时建立互斥和 happens-before 关系；原子操作则提供由内存序指定的同步语义。
 
 ## 5. 互斥锁 Mutex
 
-互斥锁用于保证同一时间只有一个线程进入临界区。
+互斥锁保证同一时刻最多一个线程持有该锁并进入受保护区域。
 
-特点：
+典型属性：
 
-* 获取不到锁时，线程可能进入睡眠。
-* 适合临界区较长的场景。
-* 可能会产生用户态到内核态切换。
-* 不会一直占用 CPU。
+- 具有所有者语义，通常必须由加锁线程解锁；
+- 无竞争时通常通过用户态原子操作完成；
+- 竞争时实现可能先短暂自旋，再进入内核等待；
+- 解锁时若存在睡眠等待者，可能需要系统调用唤醒；
+- 可以建立锁前后操作的同步关系。
 
-适合：
+### 5.1 互斥锁并非只适合“长临界区”
 
-* 临界区较长。
-* 锁竞争比较激烈。
-* 不希望线程空转浪费 CPU。
+互斥锁是否合适取决于：
 
-### 互斥锁用户态到内核态切换
+- 临界区长度；
+- 竞争概率；
+- 系统是否过度订阅；
+- 锁持有者是否可能被抢占或阻塞；
+- 是否需要公平性或优先级继承；
+- 数据结构是否可以分片。
 
-互斥锁**不一定**会产生用户态到内核态切换。
+即使临界区很短，在普通用户态程序中，成熟互斥锁也可能比自旋锁更稳妥。只有在预期等待时间极短、CPU 资源充足且锁持有者能够很快运行时，自旋才可能更有优势。
 
-关键区别在于：**锁有没有竞争。**
+### 5.2 Linux futex 的基本思想
 
-#### 1. 无竞争时：通常只在用户态完成
-
-线程尝试加锁时，往往先使用原子指令，例如 CAS：
-
-```cpp
-// 伪代码
-if (CAS(lock, 0, 1)) {
-    // 加锁成功
-}
-```
-
-CPU 直接把锁从“未占用”改成“已占用”，不需要操作系统介入，因此：
-
-1. 用户态原子操作
-2. 成功获得锁
-3. 没有系统调用，没有内核态切换
-
-这也是现代互斥锁效率较高的原因。
-
-#### 2. 有竞争时：线程需要进入内核睡眠
-
-假设线程 A 已经持有锁，线程 B 再调用：
-
-```cpp
-pthread_mutex_lock(&mutex);
-```
-
-线程 B 发现锁被占用后，有两种选择：
-
-1. 一直在用户态自旋等待；
-2. 暂停运行，让出 CPU。
-
-互斥锁通常不能长期自旋，否则会浪费 CPU。因此，线程 B 会请求内核把自己阻塞起来：
+Linux 用户态互斥锁通常使用 **fast path + futex slow path**：
 
 ```mermaid
 flowchart TD
-    A["线程 B 在用户态发现锁被占用"] --> B["调用 futex_wait()"]
-    B --> C["CPU 从用户态进入内核态"]
-    C --> D["内核把线程 B 加入等待队列"]
-    D --> E["线程 B 进入阻塞状态"]
-    E --> F["调度器选择其他可运行线程"]
+    A["尝试用户态原子加锁"] --> B{"成功？"}
+    B -->|是| C["进入临界区"]
+    B -->|否| D["竞争路径"]
+    D --> E{"短暂自旋是否合适？"}
+    E -->|是| F["自旋后重试"]
+    E -->|否| G["futex wait 进入内核等待"]
+    G --> H["被唤醒后重新竞争锁"]
 ```
 
-这时就产生了：
+`futex` 的核心价值是：
 
-* 用户态到内核态切换；
-* 线程调度；
-* 可能的上下文切换。
+> 内核只负责等待和唤醒；无竞争状态变化尽量由用户态完成。
 
-####  3. 解锁时也可能进入内核
+真实 `pthread_mutex` 实现远比下面的概念模型复杂，通常会维护未锁定、已锁定、存在等待者等状态，还可能支持：
 
-线程 A 解锁时，先在用户态把锁状态改为“未占用”。
+- 自适应自旋；
+- 错误检查；
+- 递归锁；
+- robust mutex；
+- 优先级继承；
+- 所有者死亡处理。
 
-如果没有等待线程，解锁也不需要进入内核。
+不应把简单的 `CAS + futex_wait` 伪代码直接当作可用互斥锁实现，否则可能产生丢失唤醒、ABA、所有权和内存序错误。
 
-但如果锁上有等待者，则需要通知内核唤醒一个线程：
+### 5.3 为什么睡眠和唤醒需要内核？
 
-```mermaid
-flowchart TD
-    A["线程 A 执行解锁"] --> B{"是否存在等待线程？"}
-    B -->|否| C["仅修改用户态锁状态"]
-    B -->|是| D["调用 futex_wake()"]
-    D --> E["CPU 进入内核态"]
-    E --> F["内核唤醒线程 B"]
-```
+用户态可以通过原子指令修改锁字，但只有内核能够：
+
+- 把线程从可运行状态转为睡眠；
+- 将线程挂到等待队列；
+- 让出 CPU 并选择其他任务；
+- 在事件发生后重新唤醒线程；
+- 处理超时、信号和优先级关系。
 
 因此：
 
-无竞争解锁：通常纯用户态
-有等待者解锁：可能需要进入内核态唤醒线程
-
-####  4. Linux 中典型的 futex 机制
-
-Linux 的 `pthread_mutex` 通常基于 `futex`：
-
 ```text
-futex = fast userspace mutex
+锁状态快速变化：通常可在用户态完成
+线程睡眠、唤醒和调度：需要内核参与
 ```
-
-它的设计思想就是：
-
-> 无竞争时在用户态快速完成；只有发生竞争时才进入内核。
-
-简化后的逻辑如下：
-
-```cpp
-void lock() {
-    // 快速路径：纯用户态原子操作
-    if (atomic_compare_exchange(lock_word, 0, 1)) {
-        return;
-    }
-
-    // 慢速路径：锁被占用，进入内核睡眠
-    futex_wait(lock_word, 1);
-}
-```
-
-解锁：
-
-```cpp
-void unlock() {
-    atomic_store(lock_word, 0);
-
-    // 如果有等待线程，进入内核将其唤醒
-    if (has_waiters) {
-        futex_wake(lock_word, 1);
-    }
-}
-```
-
-####  5. 为什么必须让内核参与
-
-用户态代码可以修改锁变量，但它做不了下面这些事情：
-
-* 把当前线程设置为阻塞状态；
-* 将线程从 CPU 上撤下；
-* 把线程加入等待队列；
-* 在锁释放后重新唤醒线程；
-* 决定接下来调度哪个线程运行。
-
-这些都属于操作系统调度器的职责，所以一旦线程需要“睡眠等待”，就必须进入内核。
-
-可以概括为：
-
-
-- 只修改锁状态：用户态可以完成
-- 阻塞、调度、唤醒线程：必须由内核完成
-
-> 互斥锁本身不必然导致用户态到内核态切换；只有锁竞争导致线程阻塞或唤醒时，通常才需要进入内核。
-
-
 
 ## 6. 自旋锁 Spin Lock
 
-自旋锁获取不到锁时不会睡眠，而是在原地循环等待。
+自旋锁在获取失败时反复检查锁状态，而不是主动睡眠。
 
 特点：
 
-* 不发生线程睡眠和唤醒。
-* 避免上下文切换。
-* 会持续占用 CPU。
-* 适合临界区非常短的场景。
+- 避免主动阻塞和唤醒路径；
+- 等待期间持续消耗 CPU；
+- 等待线程仍可能被操作系统抢占，所以不能说“绝不会发生上下文切换”；
+- 适合锁持有时间极短且 CPU 不过度订阅的场景；
+- 锁持有期间绝不能执行可能长期阻塞的操作。
 
 不适合：
 
-* 临界区很长。
-* 单核 CPU。
-* 锁持有期间可能被阻塞。
+- 长临界区；
+- 高竞争；
+- 单核用户态程序；
+- 线程数明显超过 CPU 数；
+- 锁持有者可能被抢占或等待 I/O。
 
-**为什么自旋锁不适合长时间持有？**
-
-> 因为等待线程会一直占用 CPU 空转，锁持有时间越长，CPU 浪费越严重。
-
-
+用户态自旋锁和内核自旋锁也不能简单等同。内核自旋锁常与关闭抢占、屏蔽中断等规则配合，具体语义依内核上下文而异。
 
 ## 7. 读写锁
 
-读写锁区分读操作和写操作。
+读写锁允许：
 
-规则：
+- 多个读者同时持有读锁；
+- 写者独占；
+- 读写互斥。
 
-* 多个读线程可以同时进入。
-* 写线程必须独占。
-* 读写不能同时进行。
+适合读操作明显多于写操作、且读临界区足够长的场景。
 
-适合：
+需要注意：
 
-* 读多写少。
-* 读操作耗时明显。
-* 共享数据读频率远高于写频率。
-
-不适合：
-
-* 写操作很多。
-* 读操作很短。
-* 容易出现写线程饥饿。
-
-> 写线程饥饿: 写线程一直想获取写锁，但因为读线程持续不断地进入临界区，写线程长期得不到执行机会。
-
-
+- 读写锁自身维护状态的成本可能高于普通互斥锁；
+- 高频短读操作未必受益；
+- 公平性取决于实现；
+- 读者优先可能使写者饥饿；
+- 写者优先可能降低读吞吐；
+- 锁升级和降级如果接口不明确，容易死锁。
 
 ## 8. 条件变量
 
-条件变量用于线程之间等待某个条件成立。
+条件变量用于让线程等待某个由共享状态表示的条件。
 
-它通常和互斥锁一起使用。
+条件变量本身不保存业务条件。业务条件必须由受同一互斥锁保护的状态变量表示。
 
-典型流程：
-
-```cpp
-lock(mutex);
-while (!condition) {
-    wait(cond, mutex);
-}
-do_something();
-unlock(mutex);
-```
-
-为什么要用 `while` 而不是 `if`？
-
-因为可能出现：
-
-* 虚假唤醒。
-* 多个线程被唤醒，但只有一个真正满足条件。
-* 条件被其他线程提前改变。
-
-> 条件变量用于线程等待某个条件成立。它通常配合互斥锁使用，因为条件的检查和等待必须是原子过程，否则可能出现丢失唤醒问题。等待时线程会释放锁，唤醒后重新获取锁并再次检查条件。
+典型 C++ 用法：
 
 ```cpp
 #include <condition_variable>
@@ -1454,86 +1605,120 @@ unlock(mutex);
 #include <thread>
 
 std::mutex mutex;
-std::condition_variable cond;
-bool ready = false;  // 条件变量本身不保存条件，条件由 ready 表示
+std::condition_variable condition;
+bool ready = false;
 
 void worker() {
-    /*
-     * unique_lock(mutex)
-     * 获取互斥锁。
-     *
-     * condition_variable::wait() 需要使用 unique_lock，
-     * 因为 wait() 需要暂时释放锁，唤醒后再重新加锁。
-     */
     std::unique_lock<std::mutex> lock(mutex);
 
-    /*
-     * 必须使用 while 反复检查条件：
-     * 1. 可能发生虚假唤醒；
-     * 2. 条件可能被其他线程再次修改；
-     * 3. 多个线程醒来时，条件可能只够一个线程使用。
-     */
-    while (!ready) {
-        /*
-         * wait(lock) 会原子地完成两个操作：
-         * 1. 释放 mutex；
-         * 2. 让当前线程进入阻塞状态。
-         *
-         * 被唤醒后，wait() 会先重新获得 mutex，
-         * 然后才返回并继续检查 ready。
-         */
-        cond.wait(lock);
-    }
+    condition.wait(lock, [] {
+        return ready;
+    });
 
-    // 执行到这里时，线程持有 mutex，并且 ready == true。
-    std::cout << "条件成立，工作线程开始执行\n";
+    // wait 返回时已经重新获得 mutex，并且谓词为 true。
+    std::cout << "condition satisfied\n";
 }
 
 int main() {
     std::thread thread(worker);
 
     {
-        /*
-         * 修改 ready 时必须加锁，
-         * 保证条件的检查和修改受到同一把锁保护。
-         */
         std::lock_guard<std::mutex> lock(mutex);
         ready = true;
-    }  // 离开作用域，自动释放 mutex
+    }
 
-    /*
-     * notify_one()
-     * 唤醒一个正在等待 cond 的线程。
-     *
-     * 通常先修改条件并释放锁，再调用 notify_one()，
-     * 避免被唤醒的线程立即阻塞在 mutex 上。
-     */
-    cond.notify_one();
-
+    condition.notify_one();
     thread.join();
 }
 ```
 
-## 9. 信号量和互斥锁区别
+`wait(lock, predicate)` 等价于反复检查：
 
-| 对比点  | 互斥锁        | 信号量        |
-| - | - | - |
-| 本质   | 锁          | 计数器        |
-| 资源数量 | 通常是 1      | 可以是多个      |
-| 释放者  | 一般要求加锁线程释放 | 可以由其他线程释放  |
-| 用途   | 保护临界区      | 资源计数、同步    |
-| 典型场景 | 共享变量保护     | 生产者消费者、连接池 |
+```cpp
+while (!predicate()) {
+    wait(lock);
+}
+```
 
+必须循环检查的原因包括：
+
+- 虚假唤醒；
+- 多个等待者竞争同一资源；
+- 线程被唤醒后，在重新获得锁之前条件又发生变化。
+
+`wait()` 会把“释放互斥锁并加入等待”作为与通知协议协调的操作，避免在正确使用同一互斥锁时出现检查条件后、正式睡眠前的丢失唤醒窗口。
+
+通常先在锁内修改条件，再解锁并通知，可以减少被唤醒线程立刻阻塞在互斥锁上的概率。但通知在锁内还是锁外并非一条对所有实现都绝对最优的规则，应以正确性和具体性能为准。
+
+## 9. 信号量与互斥锁
+
+| 对比点 | 互斥锁 | 信号量 |
+|---|---|---|
+| 状态 | 锁定/未锁定及实现附加状态 | 非负计数 |
+| 所有者 | 通常有 | 通常没有 |
+| 释放者 | 通常要求持有者解锁 | 可以由其他执行流发布 |
+| 主要用途 | 保护共享不变量 | 资源计数、同步和限流 |
+| 常见场景 | 临界区保护 | 连接池、生产者消费者、并发上限 |
+
+二值信号量的计数范围可以是 0/1，但它仍不自动获得互斥锁的所有者检查、优先级继承和错误诊断语义。
+
+## 10. 原子操作与内存序
+
+原子操作用于对单个原子对象进行不可分割的访问。它们不等于“自动解决所有线程安全问题”。
+
+```cpp
+#include <atomic>
+
+int data = 0;
+std::atomic<bool> ready{false};
+
+void producer() {
+    data = 42;
+    ready.store(true, std::memory_order_release);
+}
+
+void consumer() {
+    if (ready.load(std::memory_order_acquire)) {
+        // acquire 观察到 release 后，data = 42 对当前线程可见。
+        use(data);
+    }
+}
+```
+
+这里：
+
+- `ready` 是原子变量；
+- `release` 与读取到该值的 `acquire` 建立同步关系；
+- `data` 虽然不是原子变量，但只有生产者写，消费者在同步完成后读，因此没有数据竞争。
+
+如果 `ready` 也是普通 `bool`，代码会产生数据竞争和未定义行为，不能只解释为“CPU 重排序”。
+
+常见内存序：
+
+- `relaxed`：只保证该原子对象的原子性；
+- `acquire`：阻止后续操作越过成功的获取；
+- `release`：阻止先前操作越过发布；
+- `acq_rel`：用于读改写；
+- `seq_cst`：提供更强的全局顺序约束。
+
+内存序应从 happens-before 和共享不变量出发选择，而不是只根据“哪个更快”选择。
+
+## 11. 无锁不等于无等待
+
+并发算法常见进展保证：
+
+- **blocking**：某线程暂停可能阻塞其他线程；
+- **lock-free**：系统整体持续取得进展，但单个线程可能长期失败；
+- **wait-free**：每个线程都能在有限步内完成；
+- **obstruction-free**：单独运行时可以完成。
+
+无锁算法仍可能因 CAS 重试、缓存行争用和内存回收而变慢，也更容易出现 ABA、悬空指针和复杂内存序问题。
 
 # 五、死锁
 
 ## 1. 什么是死锁？
 
-死锁是指多个进程或线程互相等待对方持有的资源，导致所有任务都无法继续执行。
-
-例子：
-
-线程 A 持有锁 1 并等待锁 2，线程 B 持有锁 2 并等待锁 1：
+死锁是多个执行流形成永久等待关系，每个参与者都在等待其他参与者持有或才能产生的资源，导致所有参与者都无法继续。
 
 ```mermaid
 flowchart LR
@@ -1541,2830 +1726,2755 @@ flowchart LR
     B -->|"等待锁 1"| A
 ```
 
-两个线程形成循环等待，因此都无法继续执行。
+死锁不仅发生在互斥锁之间，还可能涉及：
 
+- 文件锁；
+- 信号量；
+- 线程 `join()`；
+- 条件变量协议；
+- I/O 与回调；
+- 数据库事务；
+- RPC 调用链；
+- 线程池任务互相等待。
 
+## 2. Coffman 四个必要条件
 
-## 2. 死锁四个必要条件
+经典资源死锁需要同时满足：
 
-1. **互斥条件**
-   资源同一时间只能被一个线程占用。
+1. **互斥**：资源不能被多个参与者以当前方式同时使用。
+2. **占有且等待**：参与者持有部分资源，同时等待其他资源。
+3. **不可剥夺**：资源不能被系统安全地强制回收。
+4. **循环等待**：形成闭环等待关系。
 
-2. **占有且等待**
-   已经持有资源的线程，还在等待新的资源。
-
-3. **不可剥夺**
-   资源不能被强制抢走，只能由持有者主动释放。
-
-4. **循环等待**
-   多个线程形成环形等待关系。
-
-只要破坏其中一个条件，就可以预防死锁。
-
-
+破坏任一必要条件可以预防这类死锁，但代价可能是并发度下降、资源浪费或实现复杂度增加。
 
 ## 3. 死锁预防
 
-死锁预防是从机制上破坏死锁条件。
+### 3.1 固定加锁顺序
 
-常见方式：
+给锁建立全局顺序，所有线程按同一顺序获取：
 
-* 一次性申请所有资源，破坏占有且等待。
-* 给资源编号，按固定顺序申请，破坏循环等待。
-* 允许资源被抢占，破坏不可剥夺。
-* 尽量减少互斥资源。
+```text
+Lock A → Lock B → Lock C
+```
 
-最常用的是：
+禁止出现相反顺序，是工程中最常用的方法之一。
 
-> 按固定顺序加锁。
+C++ 中同时获取多把锁时，可以使用：
 
+```cpp
+std::scoped_lock lock(mutex_a, mutex_b);
+```
 
+标准库会使用避免简单循环等待的加锁策略，但仍要求程序整体不存在其他协议死锁。
+
+### 3.2 不在持锁期间调用不可控代码
+
+持锁时避免：
+
+- 阻塞 I/O；
+- 用户回调；
+- 虚函数或插件代码；
+- 跨服务 RPC；
+- 等待线程退出；
+- 再次进入可能获取同一组锁的复杂函数。
+
+这些操作会扩大锁依赖图，使死锁更难分析。
+
+### 3.3 缩小锁范围和资源依赖
+
+- 减少同时持有多把锁；
+- 在加锁前准备不需要保护的数据；
+- 使用分片锁；
+- 用消息传递替代共享状态；
+- 使用不可变对象或版本化数据。
+
+### 3.4 一次性获取资源
+
+一次申请所有资源可以破坏“占有且等待”，但会降低利用率，而且资源集合可能无法提前确定。
 
 ## 4. 死锁避免
 
-死锁避免是在资源分配前判断是否安全。
+死锁避免在每次分配资源前判断分配后是否仍处于安全状态。
 
-典型算法：
+银行家算法是经典示例：
 
-> 银行家算法。
+> 只有在系统仍存在一个能让所有参与者最终完成的安全序列时，才批准当前资源请求。
 
-银行家算法核心思想：
+它需要事先知道最大资源需求，因此更适合理论模型或资源需求明确的系统，不常直接用于普通锁管理。
 
-> 在分配资源前，先判断分配后系统是否仍处于安全状态。如果分配可能导致系统进入不安全状态，就暂时不分配。
+## 5. 死锁检测
 
+### 5.1 等待图
 
+可以建立：
 
-## 5. 死锁检测和恢复
+```text
+线程/事务 → 正在等待的资源或持有者
+```
 
-死锁检测：
+若资源只有单实例，等待图中的环通常可直接说明死锁。
 
-* 定期检查资源分配图。
-* 判断是否存在环路。
+当资源存在多个实例时，仅发现环并不总是死锁的充分条件，需要结合可用数量和剩余需求进一步判断。
 
-死锁恢复：
+### 5.2 常见工具
 
-* 杀死某些进程。
-* 回滚进程状态。
-* 抢占资源。
-* 超时释放锁。
+C/C++：
 
+```bash
+gdb -p <pid>
+thread apply all bt
+pstack <pid>
+```
 
+Linux 锁与调度：
+
+```bash
+perf lock record ./app
+perf lock report
+perf sched timehist
+```
+
+Java：
+
+```bash
+jstack <pid>
+```
+
+数据库通常提供事务锁等待图和死锁日志。
+
+## 6. 超时不是“强制释放别人的锁”
+
+常见策略是：
+
+- 使用 `try_lock` 或 timed lock；
+- 请求超时后放弃当前操作；
+- 取消事务并回滚；
+- 释放自己已经安全持有的资源；
+- 重试并加入随机退避。
+
+不能由任意线程在超时后直接解锁另一线程持有的普通互斥锁，这通常违反所有者语义并破坏共享不变量。
+
+## 7. 死锁恢复
+
+检测到死锁后，可能采取：
+
+- 终止或取消一个参与者；
+- 回滚事务；
+- 重启子系统或进程；
+- 由支持抢占的资源管理器回收资源；
+- 人工干预。
+
+恢复策略要考虑：
+
+- 已完成工作的代价；
+- 数据一致性；
+- 受害者选择；
+- 是否会重复选择同一任务造成饥饿；
+- 外部副作用能否回滚。
+
+## 8. 死锁、活锁和饥饿
+
+- **死锁**：参与者都无法继续。
+- **活锁**：参与者不断改变状态、主动让步或重试，但没有有效进展。
+- **饥饿**：某个任务长期得不到资源，其他任务仍在推进。
+
+加锁顺序主要防死锁；公平锁、排队、退避和配额等机制则可能用于缓解饥饿和活锁。
 
 # 六、内存管理
 
-## 1. 为什么需要内存管理？
+## 1. 操作系统为什么需要内存管理？
 
-操作系统做内存管理是为了：
+内存管理需要同时解决：
 
-* 隔离不同进程的地址空间。
-* 防止进程非法访问其他进程或内核内存。
-* 提高内存利用率。
-* 支持虚拟内存。
-* 支持内存共享和保护。
-* 简化程序员的内存使用模型。
+- 地址空间隔离；
+- 访问权限保护；
+- 虚拟地址到物理地址的转换；
+- 物理页分配与回收；
+- 文件映射和共享内存；
+- 按需分配与页面回收；
+- 页缓存、写回和交换；
+- NUMA、Huge Page 等性能问题。
 
+虚拟内存不仅是“让程序使用比物理内存更大的空间”，更重要的是提供统一的地址抽象、保护边界和灵活映射。
 
+## 2. 虚拟地址与物理地址
 
-## 2. 虚拟地址和物理地址
+### 2.1 虚拟地址
 
-物理地址：
+用户程序中的指针通常表示虚拟地址。虚拟地址由当前地址空间、页表和访问权限共同解释。
 
-> 内存硬件中真实存在的地址。
+相同虚拟地址在不同进程中可以：
 
-虚拟地址：
+- 映射到不同物理页；
+- 映射到同一共享物理页；
+- 在一个进程中合法、另一个进程中非法。
 
-> 程序看到的地址，由 CPU 和 MMU 转换成物理地址。
+### 2.2 物理地址
 
-逻辑地址：
+物理地址是处理器和内存系统用于访问物理地址空间的地址。该地址空间不仅可能包含 RAM，还可能包含 MMIO 等设备映射区域。
 
-> 程序生成的地址，很多语境下和虚拟地址接近。
+用户态程序通常不能直接操作任意物理地址。
 
-程序中看到的地址通常是虚拟地址，不是物理地址。
+### 2.3 地址转换
 
+```mermaid
+flowchart LR
+    VA["虚拟地址"] --> TLB{"TLB 命中？"}
+    TLB -->|是| PA["物理地址与权限"]
+    TLB -->|否| PT["页表遍历"]
+    PT --> OK{"映射有效且权限允许？"}
+    OK -->|是| FILL["填充 TLB"]
+    FILL --> PA
+    OK -->|否| PF["触发页故障或保护异常"]
+```
 
+地址转换由 MMU、TLB、页表和操作系统共同完成。不同架构可能使用硬件页表遍历，也可能由软件参与处理 TLB miss。
 
-## 3. 为什么要用虚拟地址？
+## 3. 虚拟地址空间的作用
 
-虚拟地址的作用：
+### 3.1 隔离
 
-1. 地址隔离
-   每个进程以为自己独占整个内存空间。
+每个进程拥有自己的地址空间视图，普通错误指针通常不能直接访问另一个进程的私有内存。
 
-2. 内存保护
-   防止一个进程随意访问另一个进程。
+### 3.2 保护
 
-3. 简化程序开发
-   程序不需要关心实际物理内存位置。
+页表项可以限制：
 
-4. 支持虚拟内存
-   可以把暂时不用的页面换出到磁盘。
+- 用户态或内核态访问；
+- 读、写和执行权限；
+- 内存类型和缓存属性。
 
-5. 支持共享内存
-   多个进程可以把不同虚拟地址映射到同一物理页。
+W^X、NX 等机制建立在这些权限之上。
 
+### 3.3 按需分配
 
+`malloc()` 返回地址不等于对应物理页已经全部分配。匿名映射可在首次访问时通过页故障分配物理页。
+
+### 3.4 共享
+
+多个地址空间可以把不同虚拟地址映射到同一组物理页，用于：
+
+- 共享库；
+- 共享内存；
+- 文件页缓存；
+- `fork()` 后的写时复制。
+
+### 3.5 文件映射
+
+文件内容可以映射进地址空间，进程通过普通内存访问触发页面装入、脏页跟踪和写回。
 
 ## 4. 分页
 
-分页是把虚拟地址空间和物理内存都划分成固定大小的块。
+分页把虚拟地址空间划分为固定大小的虚拟页，把物理内存划分为页框。
 
-* 虚拟内存块叫页。
-* 物理内存块叫页框。
-* 页表记录虚拟页到物理页框的映射。
-
-优点：
-
-* 不会产生外部碎片。
-* 内存分配灵活。
-* 便于虚拟内存实现。
-
-缺点：
-
-* 可能产生内部碎片。
-* 页表可能很大。
-* 地址转换需要额外开销。
-
-
-
-## 5. 分段
-
-分段是按照程序的逻辑结构划分内存。
-
-常见段：
-
-* 代码段
-* 数据段
-* 堆段
-* 栈段
+```text
+虚拟地址 = 虚拟页号 VPN + 页内偏移
+物理地址 = 物理页框号 PFN + 页内偏移
+```
 
 优点：
 
-* 符合程序逻辑。
-* 便于权限控制和共享。
+- 基础页粒度下便于非连续物理内存分配；
+- 支持按页保护和共享；
+- 支持按需分页；
+- 不需要为整个对象寻找同等大小的连续物理区域。
+
+需要限定：
+
+> “分页没有外部碎片”是教材对固定大小基础页分配的简化。物理内存仍可能因高阶连续页、大页和 DMA 连续内存需求产生碎片问题。
 
 缺点：
 
-* 会产生外部碎片。
-* 内存分配管理复杂。
+- 页表占用内存；
+- 地址转换有额外成本；
+- 页内未使用空间形成内部碎片；
+- 页故障可能产生高延迟。
 
+## 5. 分段与现代系统中的“段”
 
+经典硬件分段按照逻辑段保存基址、界限和权限：
 
-## 6. 分页和分段区别
+```text
+逻辑地址 = 段选择子 + 段内偏移
+```
 
-| 对比点  | 分页        | 分段          |
-| - |  | -- |
-| 划分方式 | 固定大小      | 按逻辑模块，大小不固定 |
-| 面向对象 | 操作系统      | 程序员/程序逻辑    |
-| 碎片   | 内部碎片      | 外部碎片        |
-| 地址结构 | 页号 + 页内偏移 | 段号 + 段内偏移   |
-| 保护共享 | 粒度较细      | 更符合逻辑       |
+优点是逻辑组织和保护自然，缺点是可变长度段容易产生外部碎片。
 
+现代 64 位通用操作系统通常以分页为主要隔离和映射机制。以 x86-64 为例，用户态通常使用近似平坦的段模型，分页承担主要地址转换工作。
 
+因此需要区分：
 
-## 7. 页表
+- **硬件分段机制**；
+- ELF 中的 Program Segment；
+- 链接器中的代码段、数据段；
+- Linux 中的 VMA；
+- 人们口语中的“堆段、栈段”。
 
-页表用于记录虚拟页到物理页框的映射。
+这些概念相关但不完全等价。代码区、堆和栈在现代 Linux 上主要表现为不同的虚拟内存映射区域，不代表系统仍使用经典可变长度硬件分段管理它们。
 
-页表项通常包含：
+## 6. 分页和经典分段对比
 
-* 物理页框号
-* 有效位
-* 访问权限
-* 脏位
-* 访问位
-* 是否在内存中
+| 对比点 | 分页 | 经典分段 |
+|---|---|---|
+| 划分粒度 | 固定大小页 | 可变大小逻辑段 |
+| 地址形式 | 页号 + 页内偏移 | 段号 + 段内偏移 |
+| 主要视角 | 地址转换与物理内存管理 | 程序逻辑结构 |
+| 典型碎片 | 内部碎片 | 外部碎片 |
+| 现代通用系统地位 | 主要机制 | 多数系统中弱化或采用平坦模型 |
 
+## 7. 页表和页表项
 
+页表描述虚拟页的映射和属性。典型页表项可能包含：
+
+- 物理页框号；
+- 是否存在或有效；
+- 可读、可写、可执行权限；
+- 用户/内核访问权限；
+- Accessed/Referenced 位；
+- Dirty 位；
+- 大页标志；
+- 内存类型和缓存属性；
+- 操作系统自定义的软件位。
+
+具体位布局由架构决定。对于不在内存中的页，操作系统还可能把交换位置或其他软件状态编码在非 present 页表项中。
+
+“Present”与“页面是否在 RAM 中”也不能在所有架构和所有软件状态下机械等同，应结合内核页表语义理解。
 
 ## 8. 多级页表
 
-如果每个进程都维护一个完整线性页表，会占用大量内存。
-
-多级页表把页表分层，只为实际使用的地址空间分配下级页表。
+单级页表需要为整个虚拟地址空间预留大量页表项。多级页表把页表本身也分页，仅为实际使用的地址范围分配下级页表。
 
 优点：
 
-* 节省页表内存。
-* 适合稀疏地址空间。
+- 适合稀疏地址空间；
+- 减少页表内存；
+- 可在中间层直接映射大页。
 
-缺点：
+代价：
 
-* 地址转换需要多次访存。
-* 需要 TLB 加速。
-
-
+- TLB miss 时页表遍历可能访问多级内存；
+- 页表页本身也占用物理内存和缓存；
+- 修改映射时需要 TLB shootdown 等跨 CPU 协调。
 
 ## 9. TLB
 
-TLB 是快表，是 MMU 中用于缓存虚拟页到物理页映射的高速缓存。
+TLB 是处理器中的地址转换缓存，通常同时缓存：
 
-TLB 命中：
+- 虚拟页到物理页框的转换；
+- 访问权限；
+- 页大小和部分内存属性。
 
-1. CPU 生成虚拟地址。
-2. MMU 查 TLB。
-3. 找到物理页框。
-4. 拼接页内偏移，得到物理地址。
+### 9.1 TLB miss 不等于 page fault
 
-TLB 未命中：
+- **TLB miss**：TLB 中没有缓存，可能通过页表遍历找到有效映射。
+- **Page fault**：页表状态或权限要求内核处理，例如未映射、COW 或权限错误。
 
-1. MMU 查页表。
-2. 找到页表项。
-3. 更新 TLB。
-4. 重新完成地址转换。
+### 9.2 地址空间切换
 
-**为什么进程切换可能导致 TLB 失效？**
+不同进程的相同虚拟地址可能含义不同。处理器可以：
 
-因为不同进程的虚拟地址到物理地址映射不同。进程切换后，旧进程的 TLB 缓存对新进程通常无效，所以需要刷新或使用 ASID （Address Space Identifier，地址空间标识符）等机制区分，从而避免大多数进程切换时的 TLB 全量刷新，提高系统性能。
+- 切换页表根；
+- 刷新相关 TLB 项；
+- 使用 ASID、PCID 等标识为不同地址空间保留 TLB 项。
 
-ASID 不会无限增长，ASID 的位数是有限的。如果系统运行的进程数量超过可用 ASID，操作系统会复用 ASID。操作系统需要管理 ASID 的生命周期和回收。
+ASID/PCID 数量有限，操作系统需要管理分配、复用和代际，复用时可能执行定向或全局失效。
 
+### 9.3 TLB shootdown
 
-# 七、虚拟内存与缺页中断
+一个 CPU 修改了可能被其他 CPU 缓存的页表映射时，需要通知相关 CPU 失效对应 TLB 项。这个跨核协调称为 TLB shootdown，可能成为频繁映射修改、`mprotect()` 或大规模内存回收的性能成本。
+
+# 七、虚拟内存与页故障
 
 ## 1. 什么是虚拟内存？
 
-虚拟内存是一种内存管理技术，让程序看到的地址空间可以大于实际物理内存。
+虚拟内存是由硬件和操作系统共同提供的地址空间抽象。它让程序以虚拟地址访问内存，并支持：
 
-它依赖：
+- 隔离和权限保护；
+- 按需分配；
+- 非连续物理内存映射；
+- 文件映射；
+- 共享内存；
+- 写时复制；
+- 页面回收和交换。
 
-* 分页机制
-* 页表
-* 缺页中断
-* 页面置换
-* 磁盘交换区或文件映射
+虚拟内存不要求系统一定配置 swap，也不意味着程序可以无条件使用无限内存。提交限制、cgroup 限制、地址空间大小和 OOM 策略仍然存在。
 
+## 2. “缺页中断”还是“页故障”？
 
+更准确的术语是 **page fault，页故障或缺页异常**。它是处理器在执行指令时产生的同步异常，不是外部设备随机触发的硬件中断。
 
-## 2. 虚拟内存解决什么问题？
+页故障不仅表示“页面不在物理内存中”，还可能由以下情况触发：
 
-1. 程序可以使用连续的虚拟地址空间。
-2. 多个进程可以隔离运行。
-3. 物理内存可以按需分配。
-4. 不活跃页面可以换出到磁盘。
-5. 支持内存映射文件和共享库。
+- 页面尚未映射；
+- 首次访问匿名映射；
+- 文件页尚未建立当前进程映射；
+- 写时复制；
+- 访问权限不允许；
+- 栈按需增长；
+- `userfaultfd` 等用户态缺页处理；
+- 对被截断文件映射的非法访问。
 
+## 3. 页故障处理流程
 
+```mermaid
+flowchart TD
+    A["CPU 执行访存指令"] --> B["页表遍历发现异常条件"]
+    B --> C["进入内核页故障处理"]
+    C --> D{"虚拟地址和访问类型是否合法？"}
+    D -->|否| E["向进程发送 SIGSEGV/SIGBUS 等"]
+    D -->|是| F{"故障类型"}
+    F --> G["匿名页首次访问<br/>分配或映射零页"]
+    F --> H["COW 写故障<br/>复制页面"]
+    F --> I["文件页<br/>从页缓存映射或发起 I/O"]
+    F --> J["交换页<br/>换入"]
+    G --> K["更新页表与 TLB"]
+    H --> K
+    I --> K
+    J --> K
+    K --> L["重新执行原访存指令"]
+```
 
-## 3. 缺页中断
+并非每次合法页故障都需要：
 
-当程序访问某个虚拟页时，如果该页不在物理内存中，就会触发缺页中断。
+- 寻找空闲页；
+- 淘汰页面；
+- 从磁盘读取。
 
-完整流程：
+例如：
 
-1. CPU 访问虚拟地址。
-2. MMU 查页表，发现页不在内存。
-3. 触发缺页异常，进入内核态。
-4. 操作系统判断访问是否合法。
-5. 如果非法，发送段错误信号。
-6. 如果合法，寻找空闲物理页。
-7. 如果没有空闲页，执行页面置换。
-8. 从磁盘加载目标页到物理内存。
-9. 更新页表。
-10. 恢复用户程序继续执行。
+- 文件页已经在 page cache 中；
+- COW 页已经在内存中；
+- 匿名页首次读可能映射共享零页；
+- 只需建立当前进程的页表映射。
 
+## 4. Minor Fault 与 Major Fault
 
+### 4.1 Minor Page Fault
 
-## 4. 页面置换算法
+处理故障不需要等待存储 I/O，例如：
 
-## OPT
+- 文件页已在 page cache 中；
+- COW 复制内存页；
+- 匿名页首次实际分配；
+- 只需补建页表。
 
-理论最优算法。
+Minor 不代表没有成本。分配页面、清零、复制 4 KiB 数据和更新页表都可能消耗 CPU。
 
-思想：
+### 4.2 Major Page Fault
 
-> 淘汰未来最长时间不会被访问的页面。
+处理故障需要等待 I/O，例如从：
 
-问题：
+- 块设备；
+- 交换区；
+- 网络文件系统；
+- 其他后备存储
 
-* 需要知道未来访问序列。
-* 实际无法实现。
-* 常用于理论比较。
+读入数据。Major fault 往往延迟明显更高。
 
+## 5. 页面回收与置换
 
+操作系统在内存压力下需要回收：
 
-## FIFO
+- 干净文件页：通常可直接丢弃，未来再从文件读取；
+- 脏文件页：通常要先写回；
+- 匿名页：若需要保留且配置了 swap，通常要换出；
+- 可重新生成的缓存；
+- 不可移动或被固定的页面通常难以回收。
 
-先进先出。
+下面的 OPT、FIFO、LRU、Clock、LFU 是教材算法，用于理解置换思想，不应直接宣称某个现代 Linux 版本完整采用其中某一个算法。生产内核通常使用复杂的 LRU 近似、活跃度跟踪、工作集检测、回收优先级和可选的多代 LRU 等机制。
 
-思想：
+### 5.1 OPT
 
-> 最早进入内存的页面最先淘汰。
+淘汰未来最长时间不会再访问的页面。
 
-优点：
+它需要预知未来访问序列，无法在线实现，主要作为理论最优基准。
 
-* 简单。
+### 5.2 FIFO
 
-缺点：
+淘汰最早进入内存的页面。
 
-* 可能淘汰经常使用的页面。
-* 可能出现 Belady 异常，增加了物理页框（Page Frame）的数量，FIFO 只按进入内存的先后顺序淘汰页面、没有栈性质，淘汰顺序可能发生变化，导致缺页次数反而增加。
+实现简单，但不反映访问热度，并可能出现 Belady 异常：增加页框后，缺页次数反而增加。
 
+### 5.3 LRU
 
+淘汰最长时间未访问的页面。
 
-## LRU
+符合时间局部性，但精确维护全局访问顺序成本很高，实际系统一般使用近似方法。
 
-最近最久未使用。
+### 5.4 Clock/Second Chance
 
-思想：
+使用访问位近似 LRU：
 
-> 淘汰最长时间没有被访问的页面。
+1. 指针循环扫描；
+2. 访问位为 1 时清零并跳过；
+3. 访问位为 0 时作为候选。
 
-优点：
+它是经典近似思想，不代表所有系统的完整回收实现。
 
-* 符合局部性原理。
-* 效果较好。
+### 5.5 LFU
 
-缺点：
+淘汰历史访问次数最少的页面。
 
-* 精确实现成本高。
-* 需要记录访问顺序。
+问题是旧热点可能长期保留，因此通常需要时间衰减或分代统计。
 
+## 6. 内存抖动 Thrashing
 
+内存抖动表示工作集明显超过可用内存，系统频繁回收、换入、换出或重新读取页面，CPU 和设备时间主要消耗在内存管理而非业务计算。
 
-## Clock
+常见现象：
 
-Clock 是 LRU 的近似算法。
+- major fault 增加；
+- swap in/out 持续；
+- I/O wait 升高；
+- 运行队列和 direct reclaim 延迟异常；
+- 吞吐下降，尾延迟激增。
 
-每个页面有访问位。
+常见原因：
 
-流程：
+- 并发工作集过大；
+- 容器或进程内存限制过紧；
+- 内存泄漏或缓存失控；
+- 访问局部性差；
+- 随机访问大于内存的数据集；
+- 过度提交。
 
-* 指针循环扫描页面。
-* 如果访问位为 1，清 0，给第二次机会。
-* 如果访问位为 0，淘汰该页。
+处理方向：
 
-优点：
-
-* 实现简单。
-* 性能接近 LRU。
-* 操作系统中常见。
-
-
-
-## LFU
-
-最少使用。
-
-思想：
-
-> 淘汰访问次数最少的页面。
-
-问题：
-
-* 历史访问次数可能误导当前判断。
-* 需要计数和衰减机制。
-
-
-
-## 5. 内存抖动
-
-内存抖动是指系统频繁发生页面换入换出，CPU 大量时间花在处理缺页和磁盘 IO 上，真正执行程序的时间很少。
-
-原因：
-
-* 进程太多。
-* 物理内存不足。
-* 工作集太大。
-* 页面置换算法不合理。
-
-解决：
-
-* 增加物理内存。
-* 减少并发进程数。
-* 优化程序局部性。
-* 调整页面置换策略。
-* 限制进程内存占用。
-
-
+- 降低并发和工作集；
+- 增加内存或调整 cgroup 限制；
+- 修复泄漏和无界缓存；
+- 改善数据布局与局部性；
+- 使用流式、分块或外存算法；
+- 观察而不是盲目扩大 swap，因为 swap 只能缓解部分压力，不能消除持续超量工作集。
 
 # 八、文件系统
 
 ## 1. 文件系统的作用
 
-文件系统负责管理磁盘上的数据。
+文件系统提供：
 
-主要功能：
+- 文件和目录命名；
+- 元数据与权限；
+- 数据块分配；
+- 持久化和崩溃恢复；
+- 缓存与写回；
+- 挂载和命名空间；
+- 文件操作接口。
 
-* 文件命名。
-* 目录组织。
-* 权限控制。
-* 空间分配。
-* 元数据管理。
-* 缓存管理。
-* 文件读写接口。
+Linux 通过 VFS 为 ext4、XFS、Btrfs、tmpfs、NFS 等不同文件系统提供统一接口。
 
+## 2. VFS 中几个容易混淆的对象
 
+### 2.1 inode
 
-## 2. inode
+inode 表示文件系统对象的元数据和数据定位信息，通常包括：
 
-inode 是文件的元数据结构。
+- 文件类型；
+- 权限和所有者；
+- 大小；
+- 时间戳；
+- 硬链接计数；
+- 数据块或 extent 信息；
+- 扩展属性等。
 
-inode 保存：
+inode 不保存某个目录中的文件名。
 
-* 文件类型。
-* 文件大小。
-* 权限。
-* 所有者。
-* 时间戳。
-* 链接数。
-* 数据块地址。
-* inode 编号。
+### 2.2 dentry
 
-**inode 不保存文件名。文件名保存在目录项中。**
+目录项 dentry 表示“名称到 inode”的解析关系，并参与路径查找缓存：
 
-目录项负责：
+```text
+父目录 + 文件名 → dentry → inode
+```
 
-> 文件名 → inode 编号
+同一个 inode 可以对应多个 dentry，即多个硬链接名称。
 
+### 2.3 open file description
 
+`open()` 后，内核会建立或引用一个打开文件描述对象，其中通常保存：
+
+- 当前文件偏移；
+- 文件状态标志；
+- 对 inode/文件对象的引用。
+
+进程文件描述符表中的整数 fd 指向这个打开文件描述。`dup()` 和 `fork()` 后的多个 fd 可能引用同一个打开文件描述，因此共享文件偏移和状态标志。
 
 ## 3. 硬链接
 
-**硬链接是多个文件名指向同一个 inode。**
+硬链接是多个目录项指向同一个 inode。
 
 特点：
 
-* 共享同一个 inode。
-* 删除一个文件名，不影响 inode 中的数据，除非链接数变为 0。
-* **不能跨文件系统**。
-* 一般不能对目录创建硬链接。
+- 共享文件数据和 inode 元数据；
+- 不能跨文件系统；
+- 普通用户通常不能为目录创建硬链接；
+- 删除一个名称只减少链接计数；
+- 文件数据通常在链接计数为 0 且没有任何打开文件引用后才真正释放。
 
+因此，文件被 `unlink()` 后，已打开的 fd 仍然可以继续访问它，直到最后一个引用关闭。
 
+## 4. 符号链接
 
-## 4. 软链接
-
-**软链接**也叫**符号链接**，本质上是一个**特殊文件**，里面**保存目标路径**。
+符号链接是有自己 inode 的特殊文件，其内容保存目标路径。
 
 特点：
 
-* **有自己的 inode**。
-* **可以跨文件系统**。
-* **可以链接目录**。
-* **原文件删除后，软链接会失效，变成悬空链接**。
+- 可以跨文件系统；
+- 可以指向目录；
+- 目标路径可以是绝对路径或相对路径；
+- 目标被删除或路径变化后可能成为悬空链接；
+- 访问时路径解析会继续跟随目标，需注意循环链接和安全检查。
 
+## 5. 硬链接和符号链接对比
 
+| 对比点 | 硬链接 | 符号链接 |
+|---|---|---|
+| inode | 与目标名称指向同一 inode | 自己拥有 inode |
+| 保存内容 | 目录项直接指向 inode | 保存目标路径 |
+| 跨文件系统 | 不可以 | 可以 |
+| 链接目录 | 通常受禁止 | 可以 |
+| 原名称删除 | 只要仍有链接或打开引用，数据可继续存在 | 可能变成悬空链接 |
+| 路径解析 | 直接得到同一 inode | 需要继续解析目标路径 |
 
-## 5. 硬链接和软链接区别
+## 6. 页缓存、缓冲与持久化
 
-| 对比点     | 硬链接             | 软链接         |
-| - |  | -- |
-| inode   | 与原文件相同          | 有自己的 inode  |
-| 是否跨文件系统 | 不可以             | 可以          |
-| 是否能链接目录 | 通常不可以           | 可以          |
-| 原文件删除   | 数据仍在            | 链接失效        |
-| 本质      | 多个目录项指向同一 inode | 保存目标路径的特殊文件 |
+普通文件 I/O 通常经过 page cache：
 
+```text
+应用 read/write
+      ↓
+Page Cache
+      ↓
+文件系统与块层
+      ↓
+存储设备
+```
 
+`write()` 成功通常表示数据已经进入内核并被当前文件语义接受，不一定已经落到非易失介质。
 
-# 九、IO 模型
+常见持久化接口：
 
-## 1. 一次 IO 分两个阶段
+- `fsync(fd)`：同步文件数据及必要元数据；
+- `fdatasync(fd)`：重点同步数据和必要元数据；
+- `syncfs(fd)`：同步对应文件系统；
+- `O_SYNC/O_DSYNC`：改变写入完成语义。
 
-以网络 IO 为例，一次读取通常分为两个阶段：
+即使调用 `fsync()`，最终持久性仍受文件系统、设备写缓存、电源保护和硬件实现影响。数据库还需要正确处理目录项持久化、日志顺序和原子重命名协议。
 
-1. 等待数据准备好。(等待数据到达内核)
-2. 将数据从内核缓冲区拷贝到用户缓冲区。
+# 九、I/O 模型
+
+## 1. 一次读取通常包含哪些阶段？
+
+以网络读取为例，可以抽象为：
+
+1. **等待可读条件**：数据到达 Socket 接收缓冲区，或出现 EOF、错误等可读状态。
+2. **完成读取操作**：应用调用读取接口，内核把可用数据交付给应用缓冲区，或者返回状态。
 
 ```mermaid
 flowchart LR
-    D["磁盘或网卡"] -->|"阶段 1：设备 DMA<br/>等待并准备数据"| K["内核缓冲区"]
-    K -->|"阶段 2：CPU 拷贝<br/>read() 完成数据复制"| U["用户缓冲区 buf"]
+    N["网卡接收数据"] -->|"DMA/驱动/协议栈"| K["内核 Socket 接收缓冲区"]
+    K -->|"read/recv 交付数据"| U["用户缓冲区"]
 ```
 
-不同 IO 模型的区别主要就在这两个阶段。
+对于文件 I/O，数据可能来自 page cache，也可能需要设备 I/O。不同设备、Direct I/O、`mmap`、零拷贝和注册缓冲区的路径并不完全相同。
 
+## 2. 阻塞 I/O
 
+阻塞文件描述符上的 `read()`：
 
-## 2. 阻塞 IO
+1. 若当前无法完成，调用线程可能睡眠；
+2. 数据、EOF、错误、信号或超时出现后，线程被唤醒；
+3. 系统调用完成并返回。
 
-流程：
+```text
+read()
+  ├─ 当前有数据 → 读取并返回
+  └─ 当前无数据 → 线程睡眠 → 条件满足 → 返回
+```
 
-1. 用户线程调用 `read`。
-2. 如果数据没准备好，线程阻塞。
-3. 数据到达后，内核把数据拷贝到用户空间。
-4. `read` 返回。
+优点：
 
-特点：
+- 控制流直观；
+- 适合连接数量较少或使用线程池的程序。
 
-* 编程简单。
-* 一个连接一个线程时并发能力差。
-* 线程资源消耗大。
+缺点：
 
+- 一个连接一个线程时，空闲连接仍占用线程和栈；
+- 大量线程会增加调度、内存和同步成本；
+- 某个慢操作可能长期占用工作线程。
 
+## 3. 非阻塞 I/O
 
-## 3. 非阻塞 IO
+文件描述符设置 `O_NONBLOCK` 后，操作不能立即完成时通常返回：
 
-流程：
+```text
+-1，errno = EAGAIN 或 EWOULDBLOCK
+```
 
-1. 用户线程调用 `read`。
-2. 如果数据没准备好，立即返回 `EAGAIN`。
-3. 用户线程反复轮询。
-4. 数据准备好后，再读取。
+非阻塞并不要求应用不停忙轮询。更常见做法是结合 `select`、`poll`、`epoll` 等就绪通知机制：
 
-特点：
+```text
+等待就绪事件 → 对就绪 fd 执行非阻塞 read/write → 直到暂时不能继续
+```
 
-* 线程不会睡眠阻塞。
-* 需要不断轮询，可能浪费 CPU。
+需要处理：
 
+- 部分读取；
+- 部分写入；
+- `EINTR`；
+- `EAGAIN/EWOULDBLOCK`；
+- EOF；
+- 连接错误；
+- 输出缓冲与背压。
 
+## 4. I/O 多路复用
 
-## 4. IO 多路复用
+I/O 多路复用让一个线程等待多个文件描述符的就绪状态。
 
-**一个线程可以同时监听多个 fd**。
+典型接口：
 
-典型机制：
+- `select`；
+- `poll`；
+- `epoll`；
+- BSD/macOS 的 `kqueue`；
+- Windows 的相关事件接口。
 
-* select
-* poll
-* epoll
-
-流程：
-
-1. 线程阻塞在 `select/poll/epoll_wait`。
-2. 内核监控多个 fd。
-3. **某些 fd 就绪**后返回。
-4. 用户线程再调用 `read/write` 处理。
-
-特点：
-
-* 适合高并发连接。
-* 一个线程可以管理大量 socket。
-* **本质上仍然是同步 IO，因为数据拷贝阶段还是用户线程自己完成**。
-
-
-
-## 5. 信号驱动 IO
-
-数据准备好后，内核发送信号通知进程。
-
-特点：
-
-* 使用较少。
-* 编程复杂。
-* 不如 epoll 常见。
-
-
-
-## 6. 异步 IO
-
-**异步 IO 中，用户发起 IO 请求后立即返回，内核完成等待数据和数据拷贝，最后通知用户**。
-
-特点：
-
-* 等待数据和拷贝数据都不需要用户线程阻塞。
-* 真正意义上的异步 IO。
-* Linux 下传统网络编程中，epoll 更常见。
-
-
-
-## 7. 同步 IO 和异步 IO 的本质区别
-
-* 同步 IO：用户线程发起 IO 后，必须一直等到数据被拷贝到自己的用户缓冲区（buf）后才能继续执行。
-* 异步 IO：用户线程发起 IO 后立即返回，内核在后台完成等待数据和拷贝到用户缓冲区的整个过程，完成后再通知用户线程。
-
-因此，同步与异步 IO 的本质区别不是是否阻塞，而是IO 请求的完成责任是否一直绑定在发起该请求的用户线程上。
-
-**关键不在于是否阻塞**，而在于：
-
-> **数据从内核空间拷贝到用户空间这一步，是由用户线程自己完成，还是由内核完成后通知用户。**
-
-同步 IO 中，用户线程调用 `read()` 后，由该系统调用完成内核缓冲区到用户缓冲区的数据复制：
+基本流程：
 
 ```mermaid
 sequenceDiagram
-    participant App as 用户线程
-    participant Kernel as 操作系统内核
-    participant Device as I/O 设备
+    participant App as 事件循环线程
+    participant Mux as epoll/select/poll
+    participant FD as 多个 fd
 
-    App->>Kernel: read(fd, buf, size)
-    Kernel->>Device: 等待或请求数据
-    Device-->>Kernel: 数据进入内核缓冲区
-    Kernel->>Kernel: 将数据复制到用户 buf
-    Kernel-->>App: read() 返回
+    App->>Mux: 等待就绪事件
+    FD-->>Mux: 某些 fd 可读/可写/异常
+    Mux-->>App: 返回就绪集合
+    App->>FD: read/write/accept
 ```
 
-同步 IO 包括：
+它通常被归类为同步 I/O，因为：
 
-* 阻塞 IO
-* 非阻塞 IO
-* IO 多路复用
-* 信号驱动 IO
+- 多路复用接口通知的是“可以尝试 I/O”；
+- 应用之后仍调用 `read()`、`write()`、`accept()` 等同步系统调用；
+- 当这些调用返回时，本次同步操作已经完成或返回当前状态。
 
-异步 IO（如 AIO）中，用户线程提交请求后立即返回，由内核完成等待和数据复制：
+`epoll_wait()` 本身可能阻塞，但“阻塞等待就绪”和“异步完成 I/O”是不同维度。
+
+## 5. 信号驱动 I/O
+
+信号驱动 I/O 允许内核在 fd 状态变化时发送 `SIGIO` 等信号。
+
+特点：
+
+- 通知是异步到达的；
+- 信号处理和状态管理复杂；
+- 普通信号存在合并语义；
+- 仍常需要在通知后调用同步读取接口；
+- 在通用高并发网络服务中通常不如 epoll 常见。
+
+它一般被放入“同步 I/O 模型”一侧，因为信号多是就绪通知，而不是完整 I/O 完成通知。
+
+## 6. 异步 I/O
+
+异步 I/O 的核心语义是：
+
+1. 应用提交一个操作；
+2. 提交接口在操作完成前返回；
+3. 内核或运行时继续推进操作；
+4. 操作完成后，通过回调、信号、Future 或完成队列通知应用。
 
 ```mermaid
 sequenceDiagram
-    participant App as 用户线程
-    participant Kernel as 操作系统内核
-    participant Device as I/O 设备
+    participant App as 应用线程
+    participant Kernel as 内核/异步执行层
+    participant Device as 设备或网络
 
-    App->>Kernel: aio_read(fd, buf, size)
-    Kernel-->>App: 请求已提交，立即返回
-    App->>App: 继续执行其他任务
-    Kernel->>Device: 等待或请求数据
-    Device-->>Kernel: 数据进入内核缓冲区
-    Kernel->>Kernel: 将数据复制到用户 buf
-    Kernel-->>App: 通知 I/O 已完成
+    App->>Kernel: 提交异步 I/O
+    Kernel-->>App: 返回“已提交”
+    App->>App: 执行其他任务
+    Kernel->>Device: 推进 I/O
+    Device-->>Kernel: I/O 完成
+    Kernel-->>App: 完成通知
 ```
 
-无论同步还是异步，都必须等待设备；区别在于等待和完成责任由谁承担。
+这里不应简单概括为“用户线程复制数据还是内核复制数据”。同步 `read()` 中，复制也是内核代表调用线程执行的；异步 I/O 还可能使用 Direct I/O、固定缓冲区或零拷贝路径。
 
+更准确的区别是：
 
+> 同步接口返回时，本次操作已经完成到接口所定义的完成点；异步提交接口可以在操作完成前返回，结果随后通过独立完成机制交付。
+
+## 7. 同步、异步、阻塞、非阻塞对比
+
+| 维度 | 问题 |
+|---|---|
+| 阻塞/非阻塞 | 当前调用暂时不能完成时，调用线程是否睡眠等待？ |
+| 同步/异步 | 操作是否在提交调用返回前完成，还是之后通过独立机制报告完成？ |
+
+可能的组合：
+
+- 阻塞同步：普通阻塞 `read()`；
+- 非阻塞同步：`O_NONBLOCK` 的 `read()`；
+- 阻塞等待异步完成：提交异步请求后调用阻塞式完成队列等待；
+- 非阻塞异步：提交请求后以轮询、回调或非阻塞完成队列取得结果。
+
+## 8. I/O“就绪”与“完成”
+
+**就绪通知 Readiness**：
+
+```text
+fd 当前可能可以进行 read/write
+```
+
+典型：`select`、`poll`、`epoll`。
+
+**完成通知 Completion**：
+
+```text
+先前提交的具体 I/O 操作已经完成
+```
+
+典型：IOCP、部分 AIO、`io_uring` 完成队列。
+
+需要注意：
+
+- 就绪不保证无限量 I/O 都不阻塞；
+- 多线程竞争同一 fd 时，就绪状态可能被其他线程消费；
+- 完成事件也可能表示部分完成或错误；
+- 异步操作期间，缓冲区和请求上下文必须保持有效。
 
 # 十、select、poll、epoll
 
 ## 1. select
 
-> select 可以理解为 从你给内核的一组文件描述符中，选出当前已经就绪的那些。
+`select()` 接收多个 fd 集合，并返回其中当前就绪的 fd。
 
 特点：
 
-* 使用 fd_set。
-* fd 数量有限制。
-* 每次调用都要把 fd 集合从用户态拷贝到内核态。
-* 内核需要线性扫描 fd。
-* 返回后用户也要扫描哪些 fd 就绪。
+- 使用 `fd_set` 位图；
+- 监听的 fd 数值必须小于 `FD_SETSIZE`，Linux/glibc 中通常是 1024；
+- 限制针对 **fd 的数值**，不只是集合里有多少个 fd；
+- 每次调用都要把 fd 集合传入内核；
+- 内核和用户态都需要按范围扫描；
+- 返回后会修改传入的集合，下一轮必须重建；
+- 超时结构也可能被修改，不能盲目复用。
 
-缺点：
-
-* **fd 数量限制**。
-* 拷贝开销大。
-* 扫描开销大。
+修正后的简单示例：
 
 ```cpp
+#include <cerrno>
+#include <cstdio>
+#include <iostream>
+
 #include <sys/select.h>
 #include <unistd.h>
-#include <iostream>
 
 int main() {
     while (true) {
-        fd_set readfds;
-        /*
-         * FD_ZERO(fd_set*)
-         * 将监听集合清空。
-         * 注意：每次调用 select() 前都必须重新初始化。
-         */
-        FD_ZERO(&readfds);
-        /*
-         * FD_SET(fd, fd_set*)
-         * 将 fd 加入监听集合。
-         * 这里监听标准输入(STDIN_FILENO = 0)。
-         */
-        FD_SET(STDIN_FILENO, &readfds);
-        std::cout << "等待输入...\n";
-        /*
-         * select(maxfd+1, readfds, writefds, exceptfds, timeout)
-         *
-         * maxfd+1：监听的最大 fd + 1。 应用程序自己维护 maxfd
-         * readfds：监听可读事件。不是一个动态数组，而是一个位图（bitmap）。
-         * 一般 #define FD_SETSIZE 1024，所以有 fd 数量限制。
-         * timeout：nullptr 表示一直阻塞。
-         *
-         * 返回值：
-         * >0：有几个 fd 就绪。
-         * =0：超时。
-         * <0：调用失败。
-         *
-         * 注意：
-         * 1. select() 返回后会修改 readfds。
-         * 2. 所以下一次循环必须重新 FD_ZERO、FD_SET。
-         */
-        int ret = select(STDIN_FILENO + 1,
-                         &readfds,
-                         nullptr,
-                         nullptr,
-                         nullptr);
-        if (ret > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
-            /*
-             * FD_ISSET(fd, fd_set*)
-             * 判断某个 fd 是否真的发生了事件。
-             */
-            char buf[100];
-            read(STDIN_FILENO, buf, sizeof(buf));
-            std::cout << "收到：" << buf;
+        fd_set read_set;
+        FD_ZERO(&read_set);
+        FD_SET(STDIN_FILENO, &read_set);
+
+        int result;
+
+        do {
+            result = ::select(
+                STDIN_FILENO + 1,
+                &read_set,
+                nullptr,
+                nullptr,
+                nullptr
+            );
+        } while (result == -1 && errno == EINTR);
+
+        if (result == -1) {
+            std::perror("select");
+            return 1;
+        }
+
+        if (FD_ISSET(STDIN_FILENO, &read_set)) {
+            char buffer[128];
+            const ssize_t n = ::read(
+                STDIN_FILENO,
+                buffer,
+                sizeof(buffer)
+            );
+
+            if (n > 0) {
+                std::cout.write(buffer, n);
+            } else if (n == 0) {
+                break;
+            } else if (errno != EINTR) {
+                std::perror("read");
+                return 1;
+            }
         }
     }
 }
 ```
 
-
+不能直接把未补 `'\0'` 的 `read()` 缓冲区作为 C 字符串输出，因此示例使用 `std::cout.write()` 按实际长度输出。
 
 ## 2. poll
 
-poll 的英文含义是“轮询、查询状态”。可以理解为
-
-> 把一组 fd 交给内核，让内核检查这些 fd 当前发生了什么事件。
+`poll()` 使用 `pollfd` 数组描述监听集合。
 
 特点：
 
-* 使用 pollfd 数组。
-* 没有 select 那种固定 fd 数量限制。
-* 仍然需要每次拷贝 fd 数组。
-* 仍然需要线性扫描。
-
-相比 select：
-
-* 解决 fd 数量限制。
-* 没有解决重复拷贝和线性扫描问题。
+- 没有 `select()` 那种由 `FD_SETSIZE` 造成的固定 fd 数值上限；
+- 实际规模仍受 `RLIMIT_NOFILE`、内存和系统资源限制；
+- 每次调用都要传入整个数组；
+- 内核通常需要遍历数组；
+- 返回后应用仍需检查各元素的 `revents`；
+- `events` 是输入，`revents` 是输出。
 
 ```cpp
-#include <poll.h>
-#include <unistd.h>
+#include <cerrno>
+#include <cstdio>
 #include <iostream>
 
+#include <poll.h>
+#include <unistd.h>
+
 int main() {
-    pollfd fds[1];
-    /*
-     * pollfd 结构体：
-     * fd      ：监听的文件描述符
-     * events  ：希望监听的事件
-     * revents ：实际发生的事件（poll 返回后填写）
-     */
-    fds[0].fd = STDIN_FILENO;
-    // POLLIN 表示监听可读事件。
-    fds[0].events = POLLIN;
+    pollfd descriptor{};
+    descriptor.fd = STDIN_FILENO;
+    descriptor.events = POLLIN;
+
     while (true) {
-        std::cout << "等待输入...\n";
-        /*
-         * poll(fds, nfds, timeout)
-         *
-         * fds：pollfd 数组。
-         * nfds：数组元素个数。
-         * timeout：
-         *   -1 一直阻塞
-         *    0 立即返回
-         *  > 0 等待指定毫秒
-         *
-         * 返回值：
-         * >0：有几个 fd 就绪。
-         * =0：超时。
-         * <0：失败。
-         *
-         * 注意：
-         * poll 不会修改 events，
-         * 但会修改 revents。
-         */
-        int ret = poll(fds, 1, -1);
-        if (ret > 0 && (fds[0].revents & POLLIN)) {
-            char buf[100];
-            read(STDIN_FILENO, buf, sizeof(buf));
-            std::cout << "收到：" << buf;
+        int result;
+
+        do {
+            result = ::poll(&descriptor, 1, -1);
+        } while (result == -1 && errno == EINTR);
+
+        if (result == -1) {
+            std::perror("poll");
+            return 1;
+        }
+
+        if (descriptor.revents & (POLLERR | POLLNVAL)) {
+            std::cerr << "poll error\n";
+            return 1;
+        }
+
+        if (descriptor.revents & (POLLIN | POLLHUP)) {
+            char buffer[128];
+            const ssize_t n = ::read(
+                STDIN_FILENO,
+                buffer,
+                sizeof(buffer)
+            );
+
+            if (n > 0) {
+                std::cout.write(buffer, n);
+            } else if (n == 0) {
+                break;
+            } else if (errno != EINTR) {
+                std::perror("read");
+                return 1;
+            }
         }
     }
 }
 ```
-
-
 
 ## 3. epoll
 
-epoll 通常理解为 `event poll`, 即“事件轮询”或“事件通知式 poll”。
+epoll 是 Linux 的 I/O 事件通知接口。一个 epoll 实例从用户态角度可理解为包含：
 
-epoll 的核心思路是：
+- **interest list**：应用注册关注的 fd 及事件；
+- **ready list**：当前已就绪对象的引用集合。
 
-> 先把需要监听的文件描述符注册到内核中，之后调用 epoll_wait()，只获取已经发生事件的文件描述符。
-
-epoll 由三个主要函数组成：
+主要接口：
 
 ```c
-epoll_create
-epoll_ctl
-epoll_wait
+epoll_create1()
+epoll_ctl()
+epoll_wait()
 ```
 
-特点：
-
-* 通过 `epoll_ctl` 注册 fd。
-* fd 集合保存在内核中，不需要每次重复传入。
-* 就绪事件放入就绪队列。
-* `epoll_wait` 只返回就绪 fd。
-* 适合大量连接、少量活跃的场景。
+### 3.1 创建 epoll 实例
 
 ```cpp
-#include <sys/epoll.h>
-#include <unistd.h>
+int epfd = epoll_create1(EPOLL_CLOEXEC);
+```
+
+`epoll_create1()` 中的 `1` 只是函数名称的一部分。相较旧接口 `epoll_create()`，它增加了 `flags` 参数；不能解释为“第 1 版”或“因为性能提升 1 级”。
+
+### 3.2 注册事件
+
+```cpp
+epoll_event event{};
+event.events = EPOLLIN;
+event.data.fd = fd;
+
+epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
+```
+
+常用操作：
+
+- `EPOLL_CTL_ADD`；
+- `EPOLL_CTL_MOD`；
+- `EPOLL_CTL_DEL`。
+
+注册关系保存在内核 epoll 实例中，因此每次 `epoll_wait()` 不需要重新提交完整监听集合。但：
+
+- `epoll_ctl()` 本身有系统调用和内核数据结构更新成本；
+- `epoll_wait()` 仍要把返回事件复制到用户数组；
+- epoll 并不意味着所有操作都是 O(1)；
+- epoll 主要适合可轮询的 fd，普通磁盘文件通常不能像 Socket 一样注册，可能得到 `EPERM`。
+
+### 3.3 等待事件
+
+```cpp
+epoll_event events[64];
+
+int n = epoll_wait(
+    epfd,
+    events,
+    64,
+    -1
+);
+```
+
+返回值：
+
+- `> 0`：返回的事件数量；
+- `0`：超时；
+- `-1`：失败，例如被信号中断时 `errno == EINTR`。
+
+应用只遍历本次返回的 `n` 个事件，而不必扫描所有监听 fd。
+
+## 4. 一个正确的非阻塞 epoll 读取服务器骨架
+
+下面的示例：
+
+- 使用 `SOCK_NONBLOCK`；
+- 循环 `accept4()` 直到 `EAGAIN`；
+- 循环读取直到 `EAGAIN`；
+- 正确处理 EOF 和错误；
+- 只演示接收并输出数据，不实现 Echo 输出队列。
+
+之所以不直接写成“收到后立即一次 `write()` 回去”，是因为非阻塞 Socket 的写入可能部分完成，正确服务器需要为每个连接维护输出缓冲，并在 `EPOLLOUT` 时继续发送。
+
+```cpp
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 
-int main() {
-    /*
-     * epoll_create1(flags) 
-     * epoll_create1() 里的 1 表示 epoll_create() 的改进版本。
-     * 创建 epoll 实例。
-     * flags 通常填 0。
-     *
-     * 返回值：
-     * 成功返回 epoll 文件描述符。
-     * 失败返回 -1。
-     */
-    int epfd = epoll_create1(0);
-    epoll_event event;
-    /*
-     * events：
-     * 希望监听的事件。
-     * data：
-     * 用户自定义数据，通常保存 fd。
-     */
-    event.events = EPOLLIN;
-    event.data.fd = STDIN_FILENO;
-    /*
-     * epoll_ctl(epfd, op, fd, event)
-     *
-     * epfd：epoll 实例。
-     * op：
-     *   EPOLL_CTL_ADD 添加监听
-     *   EPOLL_CTL_MOD 修改监听
-     *   EPOLL_CTL_DEL 删除监听
-     *
-     * fd：需要监听的文件描述符。
-     *
-     * 注意：
-     * 一个 fd 一般只需要 ADD 一次。
-     */
-    epoll_ctl(
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+namespace {
+
+bool add_to_epoll(int epfd, int fd, std::uint32_t events) {
+    epoll_event event{};
+    event.events = events;
+    event.data.fd = fd;
+
+    return ::epoll_ctl(
         epfd,
         EPOLL_CTL_ADD,
-        STDIN_FILENO,
+        fd,
         &event
-    );
-    epoll_event events[10];
-    while (true) {
-        std::cout << "等待输入...\n";
-        /*
-         * epoll_wait(epfd, events, maxevents, timeout)
-         *
-         * events：
-         * 返回已经就绪的事件。
-         *
-         * maxevents：
-         * 最多返回多少个事件。
-         *
-         * timeout：
-         * -1 一直阻塞。
-         *
-         * 返回值：
-         * >0：返回就绪事件个数。
-         * =0：超时。
-         * <0：失败。
-         *
-         * 注意：
-         * epoll_wait() 只返回真正发生事件的 fd，
-         * 不需要遍历所有监听对象。
-         */
-        int n = epoll_wait(
-            epfd,
-            events,
-            10,
-            -1
-        );
-        for (int i = 0; i < n; i++) {
-            if (events[i].data.fd == STDIN_FILENO) {
-                char buf[100];
-                read(STDIN_FILENO, buf, sizeof(buf));
-                std::cout << "收到：" << buf;
-            }
-        }
-    }
-    /*
-     * close(epfd)
-     * 关闭 epoll 实例，同时释放内核资源。
-     */
-    close(epfd);
+    ) == 0;
 }
-```
 
-### TCP 服务器例子
+void close_connection(int epfd, int fd) {
+    ::epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+    ::close(fd);
+}
 
-```cpp
-#include <arpa/inet.h>     // sockaddr_in、htons()、INADDR_ANY
-#include <cerrno>          // errno、EINTR
-#include <sys/epoll.h>     // epoll_create1、epoll_ctl、epoll_wait
-#include <sys/socket.h>    // socket、bind、listen、accept
-#include <unistd.h>        // read、write、close
-
-#include <iostream>
+}  // namespace
 
 int main() {
-    /*
-     * socket(domain, type, protocol)
-     *
-     * 创建一个 Socket，并在内核中创建对应的 Socket 对象。
-     *
-     * domain：
-     *   AF_INET 表示使用 IPv4。
-     *
-     * type：
-     *   SOCK_STREAM 表示面向连接的字节流通信，即 TCP。
-     *
-     * protocol：
-     *   传 0 表示让内核根据 AF_INET 和 SOCK_STREAM
-     *   自动选择 TCP 协议。
-     *
-     * 返回值：
-     *   >= 0：Socket 文件描述符。
-     *   -1：创建失败，同时设置 errno。
-     *
-     * listen_fd 不是端口，也不是 Socket 本身，
-     * 它是当前进程用于访问内核 Socket 对象的文件描述符。
-     */
-    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    const int listen_fd = ::socket(
+        AF_INET,
+        SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+        0
+    );
 
     if (listen_fd == -1) {
-        perror("socket");
+        std::perror("socket");
         return 1;
     }
 
-    /*
-     * sockaddr_in 用于描述 IPv4 Socket 地址。
-     *
-     * 它主要包含：
-     *   sin_family：地址族。
-     *   sin_addr：IPv4 地址。
-     *   sin_port：端口号。
-     */
+    int reuse = 1;
+    if (::setsockopt(
+            listen_fd,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &reuse,
+            sizeof(reuse)
+        ) == -1) {
+        std::perror("setsockopt");
+        ::close(listen_fd);
+        return 1;
+    }
+
     sockaddr_in address{};
-
-    // 必须与 socket() 使用的 AF_INET 保持一致。
     address.sin_family = AF_INET;
-
-    /*
-     * INADDR_ANY 表示绑定本机所有 IPv4 网络接口。
-     *
-     * 例如本机可能同时拥有：
-     *   127.0.0.1
-     *   192.168.1.10
-     *   其他网卡地址
-     *
-     * 使用 INADDR_ANY 后，客户端通过这些地址访问 8080 端口，
-     * 都可能连接到这个监听 Socket。
-     */
-    address.sin_addr.s_addr = INADDR_ANY;
-
-    /*
-     * TCP/IP 协议使用网络字节序，也就是大端序。
-     *
-     * htons：
-     *   host to network short
-     *
-     * 将主机字节序的 16 位端口号 8080
-     * 转换成网络字节序。
-     */
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(8080);
 
-    /*
-     * bind(fd, addr, addrlen)
-     *
-     * 将 listen_fd 指向的 Socket 绑定到一个本地地址：
-     *
-     *   0.0.0.0:8080
-     *
-     * 参数：
-     *   listen_fd：
-     *     要绑定的 Socket 文件描述符。
-     *
-     *   sockaddr*：
-     *     bind() 使用通用地址结构 sockaddr，
-     *     因此需要把 sockaddr_in* 转换成 sockaddr*。
-     *
-     *   sizeof(address)：
-     *     地址结构体的大小。
-     *
-     * 返回值：
-     *   0：绑定成功。
-     *   -1：绑定失败。
-     *
-     * 常见失败原因：
-     *   1. 端口已被占用。
-     *   2. 没有权限绑定某些低端口。
-     *   3. 地址参数错误。
-     */
-    if (bind(
+    if (::bind(
             listen_fd,
-            reinterpret_cast<sockaddr*>(&address),
+            reinterpret_cast<const sockaddr*>(&address),
             sizeof(address)
         ) == -1) {
-        perror("bind");
-        close(listen_fd);
+        std::perror("bind");
+        ::close(listen_fd);
         return 1;
     }
 
-    /*
-     * listen(fd, backlog)
-     *
-     * 将普通 TCP Socket 转换为监听 Socket。
-     *
-     * 此后 listen_fd 主要负责：
-     *   接收客户端连接，而不是直接传输业务数据。
-     *
-     * backlog：
-     *   表示已完成连接、等待 accept() 取出的连接队列
-     *   所允许的排队规模提示。
-     *
-     * 它不是“最多只能连接 128 个客户端”。
-     * 已经被 accept() 取出的客户端连接不在该等待队列中。
-     */
-    if (listen(listen_fd, 128) == -1) {
-        perror("listen");
-        close(listen_fd);
+    if (::listen(listen_fd, SOMAXCONN) == -1) {
+        std::perror("listen");
+        ::close(listen_fd);
         return 1;
     }
 
-    /*
-     * epoll_create1(flags)
-     *
-     * 在内核中创建一个 epoll 实例。
-     *
-     * 参数 flags：
-     *   0：不使用特殊选项。
-     *
-     * 也可以使用：
-     *   EPOLL_CLOEXEC
-     *
-     * 表示进程执行 exec() 时自动关闭 epoll 文件描述符。
-     *
-     * 返回值：
-     *   >= 0：epoll 实例对应的文件描述符。
-     *   -1：创建失败。
-     *
-     * epfd 用于操作 epoll 实例，
-     * 它不是被监听的网络 Socket。
-     */
-    int epfd = epoll_create1(0);
-
+    const int epfd = ::epoll_create1(EPOLL_CLOEXEC);
     if (epfd == -1) {
-        perror("epoll_create1");
-        close(listen_fd);
+        std::perror("epoll_create1");
+        ::close(listen_fd);
         return 1;
     }
 
     /*
-     * epoll_event 用于描述：
-     *
-     * 1. 希望监听哪些事件；
-     * 2. 事件发生后返回什么用户数据。
+     * 使用 ET 是为了演示“处理到 EAGAIN”。
+     * 生产代码也可以选择 LT，ET 并不天然保证更快。
      */
-    epoll_event listen_event{};
-
-    /*
-     * EPOLLIN 表示监听“可读事件”。
-     *
-     * 对普通客户端 Socket：
-     *   可读通常表示有数据到达，或者对端关闭了连接。
-     *
-     * 对监听 Socket：
-     *   可读表示已经有连接完成握手，
-     *   可以调用 accept() 取出新连接。
-     */
-    listen_event.events = EPOLLIN;
-
-    /*
-     * data 是 epoll_event 中的联合体，
-     * 可以保存 fd、指针或其他用户数据。
-     *
-     * 这里保存 listen_fd，
-     * 方便 epoll_wait() 返回事件后判断是哪个 fd 就绪。
-     */
-    listen_event.data.fd = listen_fd;
-
-    /*
-     * epoll_ctl(epfd, op, fd, event)
-     *
-     * 修改 epoll 实例中的监听集合。
-     *
-     * epfd：
-     *   要操作的 epoll 实例。
-     *
-     * EPOLL_CTL_ADD：
-     *   把 fd 添加到监听集合。
-     *
-     * listen_fd：
-     *   要监听的文件描述符。
-     *
-     * &listen_event：
-     *   指定监听的事件及附带数据。
-     *
-     * 常用 op：
-     *   EPOLL_CTL_ADD：添加监听。
-     *   EPOLL_CTL_MOD：修改监听事件。
-     *   EPOLL_CTL_DEL：删除监听。
-     *
-     * fd 添加一次后，监听关系会保存在内核中，
-     * 不需要在每次 epoll_wait() 前重新添加。
-     */
-    if (epoll_ctl(
+    if (!add_to_epoll(
             epfd,
-            EPOLL_CTL_ADD,
             listen_fd,
-            &listen_event
-        ) == -1) {
-        perror("epoll_ctl ADD listen_fd");
-        close(epfd);
-        close(listen_fd);
+            EPOLLIN | EPOLLET
+        )) {
+        std::perror("epoll_ctl listen");
+        ::close(epfd);
+        ::close(listen_fd);
         return 1;
     }
 
-    /*
-     * ready_events 是输出数组。
-     *
-     * epoll_wait() 返回时，
-     * 内核会把已经就绪的事件写入这个数组。
-     *
-     * 这里数组容量为 64，
-     * 表示一次最多接收 64 个就绪事件。
-     *
-     * 即使监听了 10000 个 fd，
-     * 一次只有 3 个 fd 就绪时，
-     * epoll_wait() 只会返回这 3 个事件。
-     */
-    epoll_event ready_events[64];
+    epoll_event ready[64];
 
     while (true) {
-        /*
-         * epoll_wait(epfd, events, maxevents, timeout)
-         *
-         * 等待 epoll 实例中注册的 fd 发生事件。
-         *
-         * epfd：
-         *   epoll 实例。
-         *
-         * ready_events：
-         *   用于接收就绪事件的数组。
-         *
-         * 64：
-         *   数组容量，本次最多返回 64 个事件。
-         *
-         * timeout：
-         *   -1：一直阻塞，直到至少一个事件发生。
-         *    0：立即返回，不等待。
-         *   >0：最多等待指定毫秒数。
-         *
-         * 返回值：
-         *   >0：就绪事件数量。
-         *    0：等待超时。
-         *   -1：调用失败。
-         *
-         * 如果被信号中断，可能返回 -1 且 errno == EINTR，
-         * 通常可以直接重新调用。
-         */
-        int n = epoll_wait(epfd, ready_events, 64, -1);
+        int count;
 
-        if (n == -1) {
-            if (errno == EINTR) {
-                // 被信号中断，不是致命错误，重新等待。
-                continue;
-            }
+        do {
+            count = ::epoll_wait(epfd, ready, 64, -1);
+        } while (count == -1 && errno == EINTR);
 
-            perror("epoll_wait");
+        if (count == -1) {
+            std::perror("epoll_wait");
             break;
         }
 
-        /*
-         * 只遍历本次真正就绪的 n 个事件。
-         *
-         * 这与 select、poll 每次需要检查整个监听集合不同。
-         */
-        for (int i = 0; i < n; ++i) {
-            /*
-             * 取出注册事件时保存在 data.fd 中的文件描述符。
-             */
-            int fd = ready_events[i].data.fd;
-
-            /*
-             * 先判断是否发生错误或连接挂断。
-             *
-             * EPOLLERR：
-             *   Socket 发生错误。
-             *
-             * EPOLLHUP：
-             *   连接挂断。
-             *
-             * 实际服务器通常还会处理 EPOLLRDHUP，
-             * 用于检测对端关闭写方向。
-             */
-            if (ready_events[i].events & (EPOLLERR | EPOLLHUP)) {
-                /*
-                 * 如果监听 Socket 发生错误，
-                 * 通常属于服务器级异常。
-                 */
-                if (fd == listen_fd) {
-                    std::cerr << "监听 Socket 发生错误\n";
-                    continue;
-                }
-
-                /*
-                 * 普通客户端发生错误时，
-                 * 将其移出 epoll 并关闭。
-                 */
-                epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
-                close(fd);
-                continue;
-            }
+        for (int i = 0; i < count; ++i) {
+            const int fd = ready[i].data.fd;
+            const std::uint32_t events = ready[i].events;
 
             if (fd == listen_fd) {
-                /*
-                 * listen_fd 出现 EPOLLIN：
-                 *
-                 * 表示内核的已完成连接队列中存在连接，
-                 * 可以调用 accept() 取出一个客户端连接。
-                 *
-                 * 注意：
-                 * accept() 返回的不是 listen_fd，
-                 * 而是一个新的 client_fd。
-                 *
-                 * listen_fd：
-                 *   始终负责接受新连接。
-                 *
-                 * client_fd：
-                 *   负责与某一个具体客户端收发数据。
-                 */
-
-                /*
-                 * accept(listen_fd, client_addr, addrlen)
-                 *
-                 * 参数：
-                 *   listen_fd：
-                 *     监听 Socket。
-                 *
-                 *   nullptr, nullptr：
-                 *     表示当前不需要获取客户端 IP 和端口。
-                 *
-                 * 返回值：
-                 *   >= 0：新的客户端连接文件描述符。
-                 *   -1：失败。
-                 *
-                 * 每调用一次 accept()，
-                 * 通常从已完成连接队列中取出一个连接。
-                 */
-                int client_fd = accept(listen_fd, nullptr, nullptr);
-
-                if (client_fd == -1) {
-                    /*
-                     * 在当前阻塞、LT 示例中，
-                     * accept() 通常应当可以成功。
-                     *
-                     * 实际非阻塞服务器中，
-                     * errno == EAGAIN 表示连接已经取完。
-                     */
-                    perror("accept");
-                    continue;
-                }
-
-                /*
-                 * 为新客户端构造监听事件。
-                 */
-                epoll_event client_event{};
-
-                /*
-                 * 监听客户端 Socket 的可读事件。
-                 *
-                 * 本例没有添加 EPOLLET，
-                 * 因此使用的是默认 LT（水平触发）模式。
-                 *
-                 * LT 模式下，只要接收缓冲区仍有数据，
-                 * epoll_wait() 就会继续报告可读。
-                 */
-                client_event.events = EPOLLIN;
-
-                // 保存 client_fd，便于事件发生后识别连接。
-                client_event.data.fd = client_fd;
-
-                /*
-                 * 把 client_fd 添加到 epoll 监听集合。
-                 *
-                 * 之后客户端发送数据时，
-                 * epoll_wait() 就会返回该 client_fd。
-                 */
-                if (epoll_ctl(
-                        epfd,
-                        EPOLL_CTL_ADD,
-                        client_fd,
-                        &client_event
-                    ) == -1) {
-                    perror("epoll_ctl ADD client_fd");
-                    close(client_fd);
-                    continue;
-                }
-
-                std::cout
-                    << "新客户端连接，fd = "
-                    << client_fd
-                    << '\n';
-            } else {
-                /*
-                 * 走到这里，fd 是某个普通客户端 Socket。
-                 *
-                 * EPOLLIN 通常有两种含义：
-                 *
-                 * 1. 客户端发送了数据；
-                 * 2. 客户端关闭了连接，此时 read() 返回 0。
-                 */
-                char buffer[1024];
-
-                /*
-                 * read(fd, buffer, count)
-                 *
-                 * 从 fd 对应的 Socket 接收缓冲区读取数据。
-                 *
-                 * 参数：
-                 *   fd：
-                 *     客户端 Socket。
-                 *
-                 *   buffer：
-                 *     保存读取结果的用户空间缓冲区。
-                 *
-                 *   sizeof(buffer)：
-                 *     本次最多读取 1024 字节。
-                 *
-                 * 返回值：
-                 *   >0：实际读取到的字节数。
-                 *    0：对端正常关闭连接。
-                 *   -1：读取失败。
-                 *
-                 * 注意：
-                 * TCP 是字节流协议，不保留消息边界。
-                 * 一次 read() 不一定对应客户端的一次 write()。
-                 */
-                ssize_t count = read(fd, buffer, sizeof(buffer));
-
-                if (count > 0) {
-                    /*
-                     * 成功读取到 count 字节。
-                     *
-                     * buffer 不一定以 '\0' 结尾，
-                     * 因此不能直接把它当作 C 字符串处理。
-                     *
-                     * 本例直接把收到的数据原样写回，
-                     * 实现一个简单的 Echo Server。
-                     */
-
-                    /*
-                     * write(fd, buffer, count)
-                     *
-                     * 向客户端发送 count 字节数据。
-                     *
-                     * 返回值：
-                     *   >0：实际写入的字节数。
-                     *   -1：写入失败。
-                     *
-                     * 常见问题：
-                     * write() 不保证一次写完所有 count 字节。
-                     * 正式代码应循环写，直到全部发送完成，
-                     * 或者在非阻塞模式下保存剩余数据，
-                     * 等待 EPOLLOUT 后继续发送。
-                     */
-                    ssize_t written = write(fd, buffer, count);
-
-                    if (written == -1) {
-                        perror("write");
-
-                        epoll_ctl(
-                            epfd,
-                            EPOLL_CTL_DEL,
-                            fd,
-                            nullptr
-                        );
-
-                        close(fd);
-                    }
-                } else if (count == 0) {
-                    /*
-                     * read() 返回 0：
-                     *
-                     * 表示客户端进行了正常关闭，
-                     * 即对端发送了 FIN。
-                     *
-                     * 此时该连接后续不会再有数据可读，
-                     * 应从 epoll 中删除并关闭文件描述符。
-                     */
-
-                    /*
-                     * EPOLL_CTL_DEL：
-                     * 从 epoll 监听集合中删除 fd。
-                     *
-                     * 对已关闭的 fd，Linux 通常也会自动移除，
-                     * 但显式 DEL 能让资源管理逻辑更清楚。
-                     */
-                    epoll_ctl(
-                        epfd,
-                        EPOLL_CTL_DEL,
-                        fd,
-                        nullptr
+                while (true) {
+                    const int client_fd = ::accept4(
+                        listen_fd,
+                        nullptr,
+                        nullptr,
+                        SOCK_NONBLOCK | SOCK_CLOEXEC
                     );
 
-                    close(fd);
+                    if (client_fd >= 0) {
+                        if (!add_to_epoll(
+                                epfd,
+                                client_fd,
+                                EPOLLIN | EPOLLRDHUP | EPOLLET
+                            )) {
+                            std::perror("epoll_ctl client");
+                            ::close(client_fd);
+                        }
+                        continue;
+                    }
 
-                    std::cout
-                        << "客户端断开连接，fd = "
-                        << fd
-                        << '\n';
-                } else {
-                    /*
-                     * read() 返回 -1，表示读取失败。
-                     *
-                     * EINTR：
-                     *   read() 被信号中断，可以重新读取。
-                     *
-                     * 非阻塞模式下还可能出现：
-                     *   EAGAIN 或 EWOULDBLOCK
-                     *
-                     * 表示当前已经没有数据可读，
-                     * 不是连接错误。
-                     */
                     if (errno == EINTR) {
                         continue;
                     }
 
-                    perror("read");
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        break;
+                    }
 
-                    epoll_ctl(
-                        epfd,
-                        EPOLL_CTL_DEL,
+                    std::perror("accept4");
+                    break;
+                }
+
+                continue;
+            }
+
+            if (events & EPOLLERR) {
+                close_connection(epfd, fd);
+                continue;
+            }
+
+            bool closed = false;
+
+            if (events & (EPOLLIN | EPOLLRDHUP | EPOLLHUP)) {
+                while (true) {
+                    char buffer[4096];
+                    const ssize_t n = ::read(
                         fd,
-                        nullptr
+                        buffer,
+                        sizeof(buffer)
                     );
 
-                    close(fd);
+                    if (n > 0) {
+                        std::cout.write(buffer, n);
+                        continue;
+                    }
+
+                    if (n == 0) {
+                        closed = true;
+                        break;
+                    }
+
+                    if (errno == EINTR) {
+                        continue;
+                    }
+
+                    if (errno == EAGAIN ||
+                        errno == EWOULDBLOCK) {
+                        break;
+                    }
+
+                    std::perror("read");
+                    closed = true;
+                    break;
                 }
+            }
+
+            if (events & (EPOLLRDHUP | EPOLLHUP)) {
+                closed = true;
+            }
+
+            if (closed) {
+                close_connection(epfd, fd);
             }
         }
     }
 
-    /*
-     * 关闭 epoll 文件描述符，
-     * 内核释放对应的 epoll 实例。
-     */
-    close(epfd);
-
-    /*
-     * 关闭监听 Socket。
-     *
-     * 关闭后服务器不再接受新的 TCP 连接。
-     */
-    close(listen_fd);
-
+    ::close(epfd);
+    ::close(listen_fd);
     return 0;
 }
 ```
 
-
-
-## 4. epoll 为什么高效？
+## 5. epoll 为什么适合大量连接？
 
 主要原因：
 
-1. fd 集合不需要每次重复拷贝。
-2. 内核维护就绪队列。
-3. 返回的是就绪 fd，不需要用户遍历所有 fd。
-4. 适合高并发连接场景。
-5. 事件驱动模型减少线程数量。
+1. 监听集合由 epoll 实例持续维护，不必每次等待都重新提交整个 fd 集合；
+2. 内核维护 ready list；
+3. 应用主要遍历已经返回的事件；
+4. 可配合非阻塞 I/O 和事件循环，用少量线程管理大量空闲连接。
 
+epoll 的优势最明显于：
 
+```text
+监听 fd 很多，但每轮只有少量 fd 活跃
+```
 
-## 5. LT 和 ET
+需要避免错误结论：
 
-## LT：水平触发
+- epoll 不是所有负载都比 poll 快；
+- 少量 fd 时差异可能很小；
+- 所有连接同时活跃时，应用仍必须处理所有事件；
+- `epoll_ctl`、唤醒、缓存和锁仍有成本；
+- 业务处理慢时，换成 epoll 不能消除业务瓶颈。
 
-> LT：Level Triggered
+## 6. LT 与 ET
 
-只要 fd 还有数据可读，epoll 就会一直通知。
+### 6.1 LT：水平触发
 
-特点：
-
-* 编程简单。
-* 不容易漏事件。
-* 可以不一次性读完。
-
-
-
-## ET：边缘触发
-
-> ET：Edge Triggered
-
-“边缘”指状态发生变化的那个瞬间。
-只有 fd 状态从“不可读”变成“可读”时通知一次。
-
-特点：
-
-* 通知次数少。
-* 性能更好。
-* 必须一次性读到 `EAGAIN`。
-* 通常必须配合非阻塞 IO。
-
-**为什么 ET 要配合非阻塞 IO？**
-
-因为 ET 模式下需要循环读取直到没有数据。如果使用阻塞 IO，读完已有数据后继续读可能会阻塞住整个线程。
-
-
-
-# 十一、Linux 常见机制
-
-## 1. fork
-
-`fork()` 用于创建子进程。
-
-返回值：
-
-* 父进程中返回子进程 PID。
-* 子进程中返回 0。
-* 失败返回 -1。
-
-fork 后：
-
-* 父子进程拥有几乎相同的地址空间内容。
-* 但它们是两个独立进程。
-* **文件描述符会被复制，指向同一个打开文件表项**。
-* 使用写时复制 COW 优化内存复制。
-
-
-
-## 2. 写时复制 COW
-
-fork 时，操作系统不会立刻复制整个地址空间，而是让父子进程共享相同物理页，并把页面标记为只读。
-
-当某一方尝试写入时：
-
-1. 触发缺页异常。
-2. 操作系统复制该物理页。
-3. 修改页表映射。
-4. 写入新页面。
+默认模式。只要 fd 仍满足就绪条件，后续 `epoll_wait()` 仍可再次报告。
 
 优点：
 
-* 避免不必要的内存复制。
-* fork 后马上 exec 的场景非常高效。
+- 编程简单；
+- 不要求一次处理到 `EAGAIN`；
+- 更不容易因遗漏读取而永久丢失推进机会。
 
+### 6.2 ET：边缘触发
 
+使用 `EPOLLET`。主要在就绪状态发生变化时通知。
+
+正确使用方式通常是：
+
+1. fd 设置为非阻塞；
+2. 收到事件后循环执行 `accept/read/write`；
+3. 直到返回 `EAGAIN/EWOULDBLOCK`；
+4. 再回到 `epoll_wait()`。
+
+否则，缓冲区中即使仍有数据，也可能暂时得不到新的边缘通知。
+
+### 6.3 ET 不等于一定性能更高
+
+ET 可能减少重复就绪通知，但也增加：
+
+- 状态机复杂度；
+- 单连接一次处理过多导致其他连接饥饿的风险；
+- 输出缓冲和部分写入处理难度；
+- 漏读、漏写和边缘丢失类 bug。
+
+选择 LT 还是 ET 应根据负载和实现能力，而不是把 ET 当成固定的“高级高性能模式”。
+
+## 7. 常见事件语义
+
+- `EPOLLIN`：可读，也可能是 EOF 到达；
+- `EPOLLOUT`：当前发送缓冲区有空间，不代表一次可以写完所有数据；
+- `EPOLLRDHUP`：对端关闭写方向；
+- `EPOLLHUP`：挂起；
+- `EPOLLERR`：错误，通常无须显式注册也会报告；
+- `EPOLLONESHOT`：事件交付后临时禁用，需要 `MOD` 重新激活；
+- `EPOLLEXCLUSIVE`：用于部分多等待者场景，降低惊群。
+
+对 `EPOLLERR` 可使用 `getsockopt(fd, SOL_SOCKET, SO_ERROR, ...)` 取得具体 Socket 错误。
+
+# 十一、Linux 常见进程机制
+
+## 1. fork
+
+`fork()` 创建一个新的子进程。
+
+返回值：
+
+- 父进程中返回子进程 PID；
+- 子进程中返回 0；
+- 失败时父进程返回 -1，不创建子进程。
+
+父子进程在逻辑上拥有独立地址空间，但初始内容几乎相同。内核通常通过写时复制避免立即复制全部私有可写页面。
+
+### 1.1 文件描述符继承
+
+子进程获得父进程文件描述符表的副本。对应 fd 通常指向同一个 **open file description**：
+
+```text
+父进程 fd ─┐
+           ├──> open file description ──> inode/socket/pipe
+子进程 fd ─┘
+```
+
+因此父子进程通常共享：
+
+- 文件偏移；
+- open file status flags；
+- 某些信号驱动 I/O 属性。
+
+但每个进程拥有独立的 fd 表项，`FD_CLOEXEC` 等 descriptor flag 属于表项层面。
+
+### 1.2 多线程程序中的 fork
+
+多线程进程调用 `fork()` 后：
+
+- 子进程只保留调用 `fork()` 的那个线程；
+- 地址空间中却复制了其他线程可能正在修改的互斥锁、条件变量和运行时状态；
+- 某把锁可能显示为已持有，但持锁线程并不存在于子进程中。
+
+因此，多线程程序在子进程 `execve()` 之前，只应调用异步信号安全函数。复杂程序可使用：
+
+- `pthread_atfork()`；
+- `posix_spawn()`；
+- 专门的进程创建线程；
+- 立即 `execve()`。
+
+## 2. 写时复制 COW
+
+`fork()` 后，父子进程的私有可写映射通常暂时引用相同物理页，并通过页表权限阻止直接写入。
+
+```mermaid
+flowchart TD
+    A["父子共享私有页面"] --> B["一方尝试写入"]
+    B --> C["触发写保护页故障"]
+    C --> D["内核判断为 COW"]
+    D --> E["为写入方准备独立页面"]
+    E --> F["复制旧内容并更新页表"]
+    F --> G["重新执行写指令"]
+```
+
+需要限定：
+
+- 不是所有映射都会 COW；
+- `MAP_SHARED` 映射本来就用于共享修改；
+- 只读映射无需因普通读取复制；
+- 内核可能使用更复杂的页面复用和大页拆分策略。
+
+COW 使“fork 后立即 exec”较高效，但大型多线程进程执行 `fork()` 仍可能产生：
+
+- 页表复制成本；
+- 内存记账成本；
+- 后续 COW fault；
+- 大页拆分；
+- 分配器锁状态问题。
 
 ## 3. exec
 
-`exec` 用于用新程序替换当前进程的地址空间。
+`exec` 通常指一组库接口，最终由 `execve()` 等系统调用把当前进程映像替换为新程序。
 
-注意：
+关键点：
 
-* **exec 不创建新进程**。
-* **PID 不变**。
-* 代码段、数据段、堆栈会被新程序替换。
-* 通常配合 fork 使用。
+- 不创建新 PID；
+- 成功时不会返回原程序；
+- 原代码、数据、堆、栈和大部分用户映射被替换；
+- 标记为 `FD_CLOEXEC` 的 fd 会关闭，其他 fd 默认保留；
+- 被捕获信号的处置通常重置为默认，忽略状态等属性按规则继承；
+- 多线程进程中，成功 exec 后只剩调用线程形成的新程序；
+- 当前工作目录、部分凭据、资源限制等进程属性按规则保留或变化。
 
-典型 shell 执行命令：
+典型 shell 流程：
 
 ```mermaid
 sequenceDiagram
-    participant Shell as Shell 父进程
+    participant Shell as Shell
     participant Child as 子进程
-    participant Kernel as 操作系统内核
+    participant Kernel as 内核
 
-    Shell->>Kernel: fork()
-    Kernel-->>Shell: 返回子进程 PID
-    Kernel-->>Child: 返回 0
-    Child->>Kernel: exec(新程序)
-    Kernel-->>Child: 用新程序替换地址空间
-    Shell->>Kernel: wait()/waitpid()
-    Child->>Kernel: exit()
-    Kernel-->>Shell: 返回子进程退出状态
+    Shell->>Kernel: fork/posix_spawn
+    Kernel-->>Child: 创建子进程
+    Child->>Kernel: execve
+    Kernel-->>Child: 替换为目标程序
+    Shell->>Kernel: waitpid
+    Child->>Kernel: exit
+    Kernel-->>Shell: 退出状态
 ```
 
+## 4. wait 和僵尸进程
 
+父进程通过：
 
-## 4. wait
+```c
+wait()
+waitpid()
+waitid()
+```
 
-父进程通过 `wait/waitpid` 等待子进程结束，并回收子进程资源。
+读取子进程状态并完成回收。
 
-如果父进程不 wait，子进程退出后可能变成僵尸进程。
+子进程退出后，在父进程读取状态前通常保留最小退出记录，称为僵尸。父进程应：
 
+- 正常调用 `wait` 系列；
+- 在 `SIGCHLD` 处理策略中回收；
+- 或由专门的事件循环统一处理子进程状态。
 
+信号处理函数中若调用 `waitpid()`，应只使用异步信号安全操作，并常见地循环使用 `WNOHANG` 回收多个子进程。
 
 ## 5. vfork
 
-`vfork` 创建子进程，但**子进程会暂时共享父进程地址空间，父进程阻塞，直到子进程 exec 或 exit**。
+`vfork()` 的语义比“更快的 fork”严格得多：
 
-特点：
+- 子进程在 `execve()` 或 `_exit()` 前与父进程共享地址空间；
+- 父进程通常被挂起；
+- 子进程不能从调用 `vfork()` 的函数正常返回；
+- 不能调用 `exit()`，应调用 `_exit()`；
+- 不能安全修改栈和普通父进程状态；
+- 在多线程程序中尤其危险。
 
-* 比 fork 更轻量。
-* 使用不当很危险。
-* 子进程不应该修改父进程数据。
+除非明确理解平台语义和限制，优先考虑 `posix_spawn()` 或普通 `fork()+exec()`。
 
-现代系统中，很多场景 fork + COW 已经足够高效。
+## 6. 孤儿进程和 subreaper
 
+父进程先退出而子进程继续运行时，子进程会被重新指定父进程。
 
+它不一定总是直接交给宿主机 PID 1：
 
-## 6. 僵尸进程
+- 可能交给最近的 child subreaper；
+- PID namespace 中可能交给该 namespace 的 init；
+- 最终由新的父进程负责回收。
 
-子进程已经退出，但父进程没有调用 wait 回收其退出状态，这个子进程就变成僵尸进程。
+容器入口进程经常需要承担 PID 1 的信号处理和僵尸回收职责。
 
-僵尸进程占用：
+## 7. clone 与线程创建
 
-* PID
-* 少量进程表项
-* 退出状态信息
+Linux 的 `clone()`/`clone3()` 可通过标志控制资源共享，例如概念上的：
 
-解决：
+- `CLONE_VM`：共享地址空间；
+- `CLONE_FILES`：共享文件描述符表；
+- `CLONE_SIGHAND`：共享信号处置；
+- `CLONE_THREAD`：加入同一线程组；
+- `CLONE_NEW*`：创建命名空间。
 
-* 父进程调用 wait/waitpid。
-* 处理 SIGCHLD。
-* 父进程退出后由 init/systemd 接管回收。
+线程库不会只调用一个“专门的内核线程创建系统调用”，而是利用 Linux task 和资源共享机制构造 POSIX 线程语义。
 
+## 8. posix_spawn
 
+`posix_spawn()` 把创建子进程和执行新程序组合成更受约束的接口。它的实现可以根据系统选择 `fork`、`vfork` 或其他优化路径。
 
-## 7. 孤儿进程
+适合：
 
-父进程先退出，子进程还在运行，这个子进程就是孤儿进程。
-
-**孤儿进程会被 init/systemd 接管，一般不是问题**。
-
-
+- 多线程程序启动外部命令；
+- 不需要在子进程 exec 前运行复杂逻辑；
+- 希望降低 fork 地址空间和运行时状态风险的场景。
 
 # 十二、用户态、内核态与系统调用
 
 ## 1. 用户态和内核态
 
-现代操作系统把 CPU 权限分成不同级别。
+现代 CPU 提供不同特权级。操作系统通常把普通应用运行在低特权级，把内核运行在高特权级。
 
-用户态：
+用户态通常：
 
-* 普通程序运行状态。
-* 不能直接访问硬件。
-* 不能直接访问内核内存。
-* 不能执行特权指令。
+- 不能执行特权指令；
+- 不能直接访问内核地址空间；
+- 不能任意配置 MMU、中断控制器和设备；
+- 通过受控接口请求内核服务。
 
-内核态：
+内核态可以：
 
-* 操作系统内核运行状态。
-* 可以访问硬件。
-* 可以管理内存、进程、文件系统、网络等资源。
-* 权限更高。
+- 管理页表、调度和中断；
+- 访问设备和内核内存；
+- 实现文件系统、网络、进程和安全检查。
 
+这种区分限制了单个应用错误的破坏范围，但内核漏洞、驱动错误和硬件故障仍可能影响整个系统。
 
+## 2. 系统调用是什么？
 
-## 2. 为什么要区分用户态和内核态？
+系统调用是用户程序进入内核请求服务的受控 ABI，例如：
 
-原因：
+- `read`；
+- `write`；
+- `openat`；
+- `mmap`；
+- `clone`；
+- `execve`；
+- `socket`；
+- `futex`。
 
-1. 安全性
-   防止普通程序破坏系统。
+典型过程：
 
-2. 隔离性
-   防止一个程序影响其他程序。
+```mermaid
+sequenceDiagram
+    participant App as 用户程序
+    participant Lib as C库/运行时
+    participant Kernel as 内核
 
-3. 稳定性
-   普通程序崩溃不应该导致整个系统崩溃。
+    App->>Lib: 调用包装函数
+    Lib->>Kernel: 系统调用指令 + 编号 + 参数
+    Kernel->>Kernel: 参数与权限检查
+    Kernel->>Kernel: 执行内核逻辑
+    Kernel-->>Lib: 返回值或 errno
+    Lib-->>App: 返回
+```
 
-4. 资源管理
-   硬件资源必须由操作系统统一管理。
+需要注意：
 
+- 系统调用不一定必须通过 libc，程序可以按 ABI 直接发起，但通常不推荐；
+- 库函数不一定产生系统调用，例如 `strlen()`；
+- 一个库函数可能产生多个系统调用；
+- 某些接口可通过 vDSO 在用户态完成，例如特定平台上的部分时间查询，不必真正陷入内核。
 
+## 3. 系统调用与上下文切换的区别
 
-## 3. 系统调用
+执行系统调用时通常发生：
 
-系统调用是用户程序请求操作系统服务的接口。
+- 用户态到内核态的特权级切换；
+- 切换到当前线程的内核执行上下文；
+- 返回时恢复用户态。
 
-例如：
+这不等于一定从线程 A 切换到线程 B。只有调度器选择另一个任务时，才发生任务上下文切换。
 
-* `read`
-* `write`
-* `open`
-* `close`
-* `fork`
-* `exec`
-* `mmap`
-* `socket`
+因此应区分：
 
-系统调用大致过程：
+```text
+mode switch：线程不变，特权级变化
+context switch：正在运行的任务变化
+```
 
-1. 用户程序调用库函数。
-2. 库函数准备系统调用号和参数。
-3. 通过特殊指令陷入内核态。
-4. 内核根据系统调用号执行对应函数。
-5. 内核完成操作。
-6. 返回用户态。
-7. 用户程序继续执行。
+## 4. 系统调用的成本
 
+成本可能来自：
 
+- 用户态/内核态边界转换；
+- 安全缓解措施；
+- 参数和指针校验；
+- 文件描述符和对象查找；
+- 锁与引用计数；
+- 数据复制；
+- 缺页和阻塞；
+- 调度与唤醒；
+- 缓存和分支预测扰动。
 
-## 4. 系统调用为什么有开销？
+不能把系统调用成本只理解成一条 `syscall` 指令。不同系统调用差异很大：
 
-因为涉及：
+- `getpid()` 与同步磁盘写入完全不是同一量级；
+- 命中 page cache 的 `read()` 与触发 major fault 的读取差异巨大；
+- 阻塞后发生调度时，真正成本主要可能来自等待和上下文切换。
 
-* 用户态到内核态切换。
-* 参数检查。
-* 权限检查。
-* 内核执行逻辑。
-* 内核态返回用户态。
-* 可能发生数据拷贝。
+## 5. 减少系统调用的常见方式
 
-所以高性能系统会尽量减少系统调用次数，例如：
+- 批量读写；
+- 用户态缓冲；
+- `readv/writev`；
+- `sendmmsg/recvmmsg`；
+- `mmap`；
+- `sendfile/splice`；
+- I/O 多路复用；
+- `io_uring` 批量提交和完成；
+- 连接复用；
+- 合理扩大缓冲区。
 
-* 批量读写。
-* 缓冲区。
-* mmap。
-* sendfile。
-* epoll。
-
-
+减少调用次数不是唯一目标。过大批次可能增加延迟和内存占用，应在吞吐、尾延迟和背压之间平衡。
 
 # 十三、mmap 与零拷贝
 
 ## 1. mmap 是什么？
 
-`mmap` 可以把文件或匿名内存映射到进程虚拟地址空间。
+`mmap()` 在进程虚拟地址空间中建立映射。后备对象可以是：
 
-使用 mmap 读文件时，程序可以像访问内存一样访问文件内容。
+- 文件；
+- 匿名内存；
+- 共享内存对象；
+- 设备内存；
+- Huge Page。
 
-普通 `read()` 的数据路径：
+典型参数涉及：
+
+- 地址与长度；
+- `PROT_READ/WRITE/EXEC`；
+- `MAP_PRIVATE` 或 `MAP_SHARED`；
+- 文件描述符与偏移。
+
+### 1.1 文件映射的数据路径
+
+```mermaid
+flowchart TD
+    A["mmap 建立 VMA 和页表处理规则"] --> B["程序访问映射地址"]
+    B --> C{"映射是否已建立且页面在内存？"}
+    C -->|是| D["直接通过虚拟地址访问"]
+    C -->|否| E["页故障"]
+    E --> F{"page cache 是否已有页面？"}
+    F -->|有| G["建立页表映射"]
+    F -->|无| H["从后备文件读取到 page cache"]
+    H --> G
+    G --> D
+```
+
+`mmap()` 主要避免普通 `read()` 中 page cache 到独立用户缓冲区的那次复制。磁盘或其他后备存储到内存的 I/O 并没有因此消失。
+
+### 1.2 MAP_PRIVATE 与 MAP_SHARED
+
+**MAP_PRIVATE**：
+
+- 写入通常通过 COW 进入私有页面；
+- 修改不直接写回原文件；
+- 其他进程通常看不到私有修改。
+
+**MAP_SHARED**：
+
+- 修改对映射同一对象的其他进程可见；
+- 脏页可以写回文件；
+- 持久化时机仍需结合 `msync()`、`fsync()` 和文件系统语义。
+
+### 1.3 mmap 的优点
+
+- 避免额外用户缓冲区复制；
+- 适合按地址随机访问；
+- 可让多个进程共享页面；
+- 由页故障按需装入；
+- 简化某些索引和只读文件格式访问。
+
+### 1.4 mmap 的风险和限制
+
+- 页故障延迟出现在普通内存访问指令上；
+- 错误恢复比 `read()` 返回错误更复杂；
+- 文件被截断后访问失效范围可能触发 `SIGBUS`；
+- 随机访问大文件可能造成 page cache 和 TLB 压力；
+- 映射数量过多会增加 VMA 管理成本；
+- `MAP_SHARED` 的并发修改仍需同步；
+- 映射不等于数据已经持久化；
+- 对简单顺序流式读取，`read()` 配合 readahead 可能更容易控制并且同样高效。
+
+## 2. 什么是零拷贝？
+
+“零拷贝”通常表示减少或消除 **CPU 在不同软件缓冲区之间复制载荷**，不代表系统中完全没有数据移动。
+
+普通文件发送的概念路径：
 
 ```mermaid
 flowchart LR
-    D["磁盘"] -->|"DMA"| K["Page Cache / 内核缓冲区"]
-    K -->|"CPU 拷贝"| U["用户缓冲区"]
+    D["存储设备"] -->|"DMA"| P["Page Cache"]
+    P -->|"CPU copy_to_user"| U["用户缓冲区"]
+    U -->|"CPU copy_from_user"| S["Socket 发送路径"]
+    S -->|"DMA"| N["网卡"]
 ```
 
-`mmap()` 的访问路径：
+`sendfile()` 的概念路径：
 
 ```mermaid
 flowchart LR
-    A["mmap() 建立虚拟地址映射"] --> B["程序访问映射地址"]
-    B --> C{"对应页面是否已在内存？"}
-    C -->|否| D["触发缺页异常"]
-    D --> E["内核从文件加载页面到 Page Cache"]
-    C -->|是| F["直接访问已映射页面"]
-    E --> F
+    D["存储设备"] -->|"DMA"| P["Page Cache"]
+    P -->|"页面引用/内核发送路径"| S["Socket 发送路径"]
+    S -->|"DMA"| N["网卡"]
 ```
 
-优点：
+在支持 Scatter-Gather 的情况下，网络栈和驱动可以把多个内存片段描述给设备，避免先合并成一块连续载荷缓冲区。
 
-* 减少一次用户态和内核态之间的数据拷贝。
-* 适合随机访问文件。
-* 多进程可以共享映射区域。
+具体内核版本、协议、文件系统、网卡、TLS 和 offload 配置会改变实际路径，因此图是概念模型，不是对所有平台的逐字节保证。
 
-缺点：
+## 3. sendfile、splice 与其他接口
 
-* 编程复杂。
-* 页面错误可能带来不可控延迟。
-* 文件过大时需要注意地址空间和映射管理。
+### 3.1 sendfile
 
+常用于把文件数据发送到 Socket：
 
-
-## 2. 零拷贝
-
-**零拷贝不是完全没有拷贝，而是减少 CPU 参与的数据拷贝**。
-
-普通文件发送、`sendfile()` 和 DMA Scatter-Gather 的数据路径可对比如下：
-
-```mermaid
-flowchart TD
-    subgraph N["普通 read + write"]
-        N1["磁盘"] -->|"DMA"| N2["Page Cache"]
-        N2 -->|"CPU 拷贝"| N3["用户缓冲区"]
-        N3 -->|"CPU 拷贝"| N4["Socket 缓冲区"]
-        N4 -->|"DMA"| N5["网卡"]
-    end
+```c
+sendfile(socket_fd, file_fd, &offset, count);
 ```
-```mermaid
-flowchart TD
-    subgraph S["sendfile"]
-        S1["磁盘"] -->|"DMA"| S2["Page Cache"]
-        S2 -->|"内核内复制或引用"| S3["Socket 发送路径"]
-        S3 -->|"DMA"| S4["网卡"]
-    end
+
+优势：
+
+- 减少用户态缓冲；
+- 减少 `read + write` 两次系统调用；
+- 降低用户/内核边界往返；
+- 可复用 page cache 页面。
+
+### 3.2 splice
+
+`splice()` 可以在支持的 fd 之间通过管道移动数据，减少显式用户态复制。
+
+### 3.3 copy_file_range
+
+用于文件之间复制，内核和文件系统可能使用更高效的复制、克隆或 offload。
+
+### 3.4 MSG_ZEROCOPY 等网络机制
+
+部分 Linux 网络接口允许减少发送路径复制，但会引入：
+
+- 页面固定；
+- 完成通知；
+- 错误队列处理；
+- 小消息收益不足；
+- 生命周期管理复杂度。
+
+## 4. DMA 与 Scatter-Gather
+
+**DMA** 允许设备在主存和设备之间传输数据，CPU 主要负责配置描述符和处理完成事件。
+
+**Scatter-Gather** 允许一次设备操作引用多个不连续内存片段：
+
+```text
+描述符 1 → 内存片段 A
+描述符 2 → 内存片段 B
+描述符 3 → 内存片段 C
 ```
-```mermaid
-flowchart TD
-    subgraph G["sendfile + DMA Scatter-Gather"]
-        G1["磁盘"] -->|"DMA"| G2["Page Cache 中的多个内存页"]
-        G2 -->|"建立描述符，不复制文件内容"| G3["DMA 描述符表"]
-        G3 -->|"网卡 Gather DMA"| G4["网卡"]
-    end
-```
-进一步支持 DMA Scatter-Gather 时，网卡可以直接按描述符读取多个不连续内存片段，从而继续减少 CPU 拷贝。
 
-> DMA（Direct Memory Access）：设备可以直接在内存和设备之间传输数据，不需要 CPU 一字节一字节地复制。
-> Scatter-Gather：一次 DMA 操作可以处理多个不连续的内存片段。scatter：把设备数据分散写入多个内存区域。gather：从多个不连续的内存区域收集数据并发送给设备。
-> 支持 Scatter-Gather 后操作系统不必把数据合并到连续缓冲区，而是向网卡提供一张描述表, 网卡按照描述符依次读取, 组合成连续的网络数据发送，虽然这些数据在内存中不连续，但网卡能够通过 DMA 自己收集，因此叫 Scatter-Gather DMA，即分散—聚集 DMA。
+设备按描述符收集或分散数据，减少 CPU 为连续缓冲区进行合并复制。
 
+DMA 不意味着 CPU 完全不参与。CPU 仍需：
 
-优点：
+- 构建和提交描述符；
+- 管理缓存一致性或同步；
+- 处理完成；
+- 运行协议栈和业务逻辑。
 
-* 减少 CPU 拷贝。
-* 减少上下文切换。
-* 提高大文件传输性能。
+## 5. 零拷贝减少的是什么？
 
-典型应用：
+可能减少：
 
-* Nginx 发送静态文件。
-* 文件服务器。
-* Kafka 等高吞吐系统。
+- CPU 内存复制；
+- 用户缓冲区占用；
+- 系统调用次数；
+- 用户态/内核态模式切换；
+- Cache 污染。
 
+不应统一写成“减少上下文切换”。`read()+write()` 与 `sendfile()` 的主要差异通常是系统调用和模式边界次数；是否发生线程上下文切换取决于阻塞和调度。
 
+## 6. 零拷贝并非总是更快
+
+不一定适合：
+
+- 极小消息；
+- 数据必须在用户态解压、加密、修改或序列化；
+- TLS 路径无法使用相应 offload；
+- 页面固定成本过高；
+- 输出设备和文件系统不支持有效路径；
+- 数据不在 page cache 且 I/O 本身是主要瓶颈。
+
+优化前应测量：
+
+- CPU 周期和内存带宽；
+- 系统调用次数；
+- page fault；
+- cache miss；
+- 吞吐和尾延迟。
 
 # 十四、高并发服务器模型
 
-## 1. 一个连接一个线程的问题
+## 1. 一个连接一个线程
 
-传统模型：
+模型：
 
 ```text
-一个客户端连接对应一个线程
+连接 1 → 线程 1
+连接 2 → 线程 2
+连接 3 → 线程 3
 ```
-
-问题：
-
-* 线程数量太多。
-* 内存占用大。
-* 上下文切换频繁。
-* 调度开销大。
-* 高并发下性能下降明显。
-
-
-
-## 2. Reactor 模型
-
-Reactor 是**同步 IO 多路复用**模型。
-
-核心思想：
-
-> 由事件分发器监听多个 fd，当 fd 就绪后，分发给对应 handler 处理。
-
-流程：
-
-1. epoll 监听事件。
-2. 事件就绪。
-3. Reactor 分发事件。
-4. Handler 执行 read/write。
-5. 业务线程处理任务。
-
-特点：
-
-* IO 就绪通知。
-* 读写由用户线程完成。
-* 常见于 Redis、Nginx、Netty。
-
-
-
-## 3. Proactor 模型
-
-Proactor 是异步 IO 模型。
-
-
-核心思想：
-
-> 用户发起异步 IO，内核完成 IO 后通知用户。
-
-1. 应用程序发起异步 I/O。
-2. 操作系统完成实际的数据读写。
-3. I/O 完成后，操作系统产生完成事件。
-4. Proactor 调用对应的完成处理函数。
-
-伪代码
-
-```cpp
-void on_read_complete(const char* data, size_t size) {
-    // 执行到这里时，数据已经由操作系统读取完成。
-    process(data, size);
-}
-
-int main() {
-    /*
-     * 提交异步读取请求。
-     *
-     * 调用后通常立即返回，不等待数据到达。
-     * 操作系统负责完成实际的 Socket 读取。
-     */
-    async_read(socket_fd, buffer, on_read_complete);
-
-    /*
-     * 等待异步操作的完成通知。
-     *
-     * 当读取完成后，事件循环会调用
-     * on_read_complete()。
-     */
-    run_completion_loop();
-}
-```
-
-对应执行路径
-
-```mermaid
-sequenceDiagram
-    participant App as 应用程序线程
-    participant Kernel as 操作系统内核
-    participant Client as 客户端
-
-    App->>Kernel: async_read(fd, buffer, callback)
-    Kernel-->>App: 立即返回
-
-    Note over App: 进入 run_completion_loop()<br/>等待完成事件
-
-    Client->>Kernel: 发送数据 hello
-    Kernel->>Kernel: 将数据读取到 buffer
-    Kernel-->>App: 返回读取完成事件
-
-    App->>App: 调用 on_read_complete(buffer, 5)
-    App->>App: process(data, size)
-```
-
-
-
-区别：
-
-| 模型    | Reactor    | Proactor |
-| -- | - | -- |
-| IO 类型 | 同步 IO 多路复用 | 异步 IO    |
-| 通知时机  | fd 就绪      | IO 完成    |
-| 数据拷贝  | 用户线程完成     | 内核完成     |
-| 典型机制  | epoll      | IOCP/AIO |
-
-
-
-## 4. Redis 为什么单线程还快？
-
-Redis 快的原因：
-
-1. 主要操作在内存中完成。
-2. 使用 IO 多路复用处理大量连接。
-3. 单线程避免锁竞争。
-4. 数据结构设计高效。
-5. 命令执行通常很快。
-6. **瓶颈很多时候在网络和内存，而不是 CPU。**
-
-注意：
-
-> Redis 不是所有部分都单线程。现代 Redis 在后台任务、网络 IO 等方面也引入了多线程优化，但核心命令执行长期保持单线程模型。
-
-
-
-## 5. Nginx 为什么使用多进程 + IO 多路复用？
-
-Nginx 常见模型：
-
-- master 进程
-- 多个 worker 进程
-- 每个 worker 使用 epoll
 
 优点：
 
-* 多进程利用多核。
-* worker 之间相对隔离，一个崩溃不影响全部。
-* 每个 worker 使用 epoll 处理大量连接。
-* 避免大量线程切换。
-* 适合高并发静态资源和反向代理场景。
+- 编程模型直观；
+- 阻塞式业务代码容易组织；
+- 连接数有限时足够实用。
 
+问题：
 
+- 每个线程需要栈和内核调度对象；
+- 大量空闲连接占用大量线程；
+- 上下文切换和锁竞争增加；
+- 线程池容易被慢请求耗尽；
+- 很难自然表达背压。
 
-# 十五、 一些细节知识点
+现代系统不一定完全抛弃该模型。虚拟线程、轻量线程或协程可以保留“每请求一条顺序控制流”的编程体验，同时由运行时复用少量内核线程。
 
-## 1. 多级页表细节
+## 2. Reactor 模型
 
-### 1.1 为什么需要多级页表
+Reactor 是基于 **就绪事件** 的事件驱动模型。
 
-进程使用的是虚拟地址，CPU 最终访问的是物理地址。页表负责维护：
+核心组件：
 
-```text
-虚拟页号 VPN → 物理页框号 PFN
+```mermaid
+flowchart LR
+    D["Event Demultiplexer<br/>epoll/kqueue"] --> R["Reactor/Event Loop"]
+    R --> H1["Accept Handler"]
+    R --> H2["Read Handler"]
+    R --> H3["Write Handler"]
+    H2 --> B["业务逻辑/线程池"]
 ```
 
-如果直接为整个虚拟地址空间建立单级页表，页表会非常大。
+基本流程：
 
-以 48 位虚拟地址、4 KiB 页为例：
+1. 注册感兴趣的事件；
+2. 事件循环等待 fd 就绪；
+3. 分发给对应 handler；
+4. handler 调用 `accept/read/write`；
+5. 业务逻辑同步执行或提交到工作线程池；
+6. 更新监听事件和连接状态。
+
+特点：
+
+- 通知的是就绪，不是某次 I/O 已完成；
+- 应用负责调用 I/O 系统调用；
+- 少量线程可管理大量连接；
+- 所有 handler 必须避免长时间阻塞事件循环；
+- 必须设计输出缓冲、超时和背压。
+
+### 2.1 常见 Reactor 变体
+
+**单 Reactor 单线程**
 
 ```text
-虚拟页数量 = 2^48 / 2^12 = 2^36
+事件等待 + I/O + 业务逻辑都在一个线程
 ```
 
-如果每个页表项占 8 字节：
+适合业务很轻的场景。
+
+**单 Reactor + 工作线程池**
 
 ```text
-页表大小 = 2^36 × 8 = 512 GiB
+Reactor 负责 I/O
+业务线程池负责耗时计算
 ```
 
-即使进程只使用很少的地址，也需要巨大的页表，因此需要多级页表按需分配。
+需要处理跨线程回写和连接生命周期。
 
-### 1.2 典型四级页表
+**主从 Reactor**
 
-典型 x86-64 四级页表将 48 位虚拟地址拆分为：
+```text
+主 Reactor 接收连接
+从 Reactor 处理连接 I/O
+业务线程池处理计算
+```
+
+适合多核和大量连接，但状态迁移与负载均衡更复杂。
+
+## 3. Proactor 模型
+
+Proactor 基于 **完成事件**：
+
+1. 应用提交具体异步 I/O 请求；
+2. 操作系统或异步执行层完成操作；
+3. 完成队列产生结果；
+4. 应用处理完成结果。
+
+```mermaid
+sequenceDiagram
+    participant App as 应用
+    participant P as Proactor/完成队列
+    participant OS as 内核异步 I/O
+
+    App->>OS: 提交 read(buffer)
+    OS-->>App: 已提交
+    OS->>OS: 等待并完成读取
+    OS-->>P: completion
+    P-->>App: 调用完成处理器
+```
+
+Reactor 与 Proactor 的核心区别：
+
+| 对比点 | Reactor | Proactor |
+|---|---|---|
+| 通知内容 | fd 就绪 | 某个操作完成 |
+| 应用何时调用 I/O | 收到就绪后调用 | 先提交具体操作 |
+| 常见接口 | epoll、kqueue | IOCP、AIO、io_uring 部分用法 |
+| 主要状态 | 连接就绪状态 | 请求与完成状态 |
+
+表中不应写成“Reactor 由用户线程复制数据、Proactor 由内核复制数据”。两者的区别是操作提交和完成语义，而不是哪段代码亲自执行字节复制。
+
+`io_uring` 能提交读写并取得 CQE，可构建 completion 风格模型；它也支持 poll 等操作，所以不应把整个接口机械等同于单一 Proactor。
+
+## 4. 背压 Backpressure
+
+高并发服务器不能无限：
+
+- 接收请求；
+- 分配任务；
+- 提交异步 I/O；
+- 缓存待发送数据。
+
+当下游处理速度低于上游输入速度时，需要：
+
+- 限制连接和并发请求；
+- 限制每连接输出缓冲；
+- 暂停读取；
+- 拒绝或降级；
+- 设置队列上限；
+- 超时和取消；
+- 按优先级丢弃。
+
+没有背压的“高并发”通常只是把故障推迟到内存耗尽或尾延迟失控。
+
+## 5. Redis 的单线程表述应如何理解？
+
+“Redis 是单线程”属于过度简化。
+
+更准确地说：
+
+- 经典核心命令执行路径长期强调串行化，降低共享数据结构锁复杂度；
+- 网络 I/O、后台持久化、异步释放和其他辅助工作可使用额外线程或进程；
+- 具体线程模型随版本、配置和功能变化。
+
+Redis 在许多负载下快，常见原因包括：
+
+- 数据主要在内存中；
+- 数据结构和协议实现紧凑；
+- 事件驱动 I/O；
+- 核心数据操作避免大量细粒度锁；
+- 单条命令通常较短；
+- 批处理和流水线减少往返。
+
+但长时间运行的命令、热 key、大对象和内存带宽仍可能使核心执行路径成为瓶颈。
+
+## 6. Nginx 的多进程事件模型
+
+Nginx 常见结构：
+
+```text
+master
+├─ worker 1：事件循环
+├─ worker 2：事件循环
+└─ worker N：事件循环
+```
+
+优点：
+
+- 多个 worker 利用多核；
+- worker 地址空间相对隔离；
+- 每个 worker 用 epoll/kqueue 管理大量连接；
+- 避免每连接一个线程；
+- master 统一管理配置重载和 worker 生命周期。
+
+需要限定：
+
+- Nginx 也可以使用线程池处理某些阻塞文件 I/O；
+- worker 数量并非越多越好；
+- 共享状态、accept 分配、CPU 亲和性和 NUMA 都可能影响性能。
+
+## 7. 选择模型的原则
+
+需要同时考虑：
+
+- 连接数与活跃比例；
+- 每请求 CPU 时间；
+- 是否大量调用阻塞第三方库；
+- 延迟目标；
+- 编程复杂度；
+- 取消与超时；
+- 连接状态大小；
+- 多核扩展；
+- 可观测性和故障隔离。
+
+常见组合：
+
+```text
+多进程隔离
+  + 每进程少量事件循环线程
+  + 协程组织异步控制流
+  + 工作线程池隔离阻塞或 CPU 任务
+```
+
+不存在对所有负载最优的唯一模型。
+
+# 十五、系统实现细节
+
+## 1. 多级页表
+
+### 1.1 为什么需要多级页表？
+
+页表维护：
+
+```text
+虚拟页号 VPN → 物理页框号 PFN + 权限
+```
+
+以 48 位虚拟地址、4 KiB 页、8 字节页表项为例，如果为整个虚拟地址空间建立单级页表：
+
+```text
+虚拟页数量 = 2^(48 - 12) = 2^36
+页表大小 = 2^36 × 8 B = 512 GiB
+```
+
+大多数进程只使用地址空间中的少量区域，单级页表会严重浪费内存。多级页表只为实际使用的地址范围逐级分配页表页。
+
+### 1.2 x86-64 四级页表
+
+经典 48 位 x86-64 地址可拆分为：
 
 ```text
 | 9 位 | 9 位 | 9 位 | 9 位 | 12 位 |
-| PGD  | PUD  | PMD  | PTE  | 页内偏移 |
+| PML4 | PDPT | PD   | PT   | 页内偏移 |
 ```
 
-每级索引 9 位，因此每张页表有：
+Linux 源码常使用架构无关抽象名称：
 
 ```text
-2^9 = 512 个页表项
+PGD → P4D → PUD → PMD → PTE
 ```
 
-每个页表项 8 字节，一张页表正好占：
+在四级配置中，某些抽象层会折叠；在支持五级页表的 x86-64 系统中，还会增加一级索引并扩展可用虚拟地址位数。
+
+因此：
+
+- `PGD/PUD/PMD/PTE` 是 Linux 内核抽象；
+- `PML4/PDPT/PD/PT` 是 x86-64 硬件术语；
+- 不能在所有架构上都把顶级页表寄存器叫 `CR3`，`CR3` 是 x86 专用名称。
+
+一张 4 KiB 页表页可容纳：
 
 ```text
-512 × 8 = 4096 字节 = 1 页
+4096 / 8 = 512 = 2^9 个页表项
 ```
 
-地址翻译过程：
+### 1.3 页表遍历
 
 ```mermaid
 flowchart TD
-    A["虚拟地址"] --> B["CR3：顶级页表基地址"]
-    B --> C["PGD[索引]"]
-    C --> D["PUD[索引]"]
-    D --> E["PMD[索引]"]
-    E --> F["PTE[索引]"]
-    F --> G["物理页框号 PFN"]
-    A --> H["页内偏移"]
-    G --> I["物理地址"]
-    H --> I
-```
-
-### 1.3 TLB
-
-多级页表意味着一次内存访问可能需要多次访存。CPU 使用 TLB 缓存最近的虚拟页到物理页映射：
-
-```mermaid
-flowchart TD
-    A["CPU 生成虚拟地址"] --> B{"TLB 是否命中？"}
-    B -->|命中| C["取得物理页框号"]
-    B -->|未命中| D["硬件执行 Page Walk"]
-    D --> E{"页表项是否有效且权限允许？"}
-    E -->|是| F["更新 TLB"]
+    A["CPU 产生虚拟地址"] --> B{"TLB 命中？"}
+    B -->|是| C["取得物理页框与权限"]
+    B -->|否| D["硬件或软件页表遍历"]
+    D --> E{"映射有效且权限允许？"}
+    E -->|是| F["填充 TLB"]
     F --> C
-    E -->|否| G["触发 Page Fault / 保护异常"]
-    C --> H["拼接页内偏移，得到物理地址"]
+    E -->|否| G["页故障/保护异常"]
+    C --> H["拼接页内偏移"]
 ```
 
-TLB 未命中不等于缺页异常：
+x86 通常由硬件 page walk；某些架构和场景由软件参与 TLB refill。页表遍历本身还可能受缓存和 page-walk cache 加速。
 
-- **TLB miss**：映射存在，只是 TLB 没缓存。
-- **Page fault**：页表项不存在、权限不允许，或者页面尚未装入。
+### 1.4 页表项常见属性
 
+可能包括：
 
+- present/valid；
+- read/write；
+- user/supervisor；
+- accessed；
+- dirty；
+- execute-never/NX；
+- global；
+- huge page；
+- 物理页框号；
+- 内存类型和架构专用属性。
 
-### 1.4 页表项常见标志
-
-典型页表项包含：
-
-- `Present`：页面是否存在。
-- `Read/Write`：是否允许写。
-- `User/Supervisor`：用户态是否可访问。
-- `Accessed`：页面是否被访问过。
-- `Dirty`：页面是否被写过。
-- `NX`：禁止执行。
-- 物理页框号。
-
-内核可利用 `Accessed` 和 `Dirty` 位进行页面回收、换页和写回判断。
+内核可利用 Accessed 和 Dirty 信息辅助页面回收与写回，但不同架构提供方式不同，内核也可能通过清位、软件采样等方法估算活跃度。
 
 ### 1.5 Huge Page
 
-普通页通常为 4 KiB。大页常见为：
+以 x86-64 为例，常见页大小：
 
+- 4 KiB；
 - 2 MiB；
 - 1 GiB。
 
-大页优点：
+需要区分：
 
+- **Transparent Huge Pages，THP**：内核自动尝试使用和拆分大页；
+- **hugetlbfs/显式 HugeTLB**：预留和显式管理的大页。
+
+优点：
+
+- 扩大 TLB 覆盖范围；
 - 减少页表层级和页表内存；
-- 减少 TLB 项数量；
-- 降低 TLB miss。
+- 对连续大工作集可能降低 TLB miss。
 
-缺点：
+代价：
 
-- 内存碎片更严重；
-- 分配和回收成本更高；
-- 可能造成内部碎片；
-- 不一定适合稀疏访问。
+- 内部碎片；
+- 分配和整理成本；
+- COW 或内存回收时拆分成本；
+- 对稀疏、随机或小对象工作集未必有利；
+- 可能增加页故障尾延迟。
 
+## 2. 页故障细节
 
+### 2.1 Minor Fault
 
-### 1.6 缺页异常
+不需要等待后备存储 I/O，例如：
 
-常见缺页类型：
+- 文件页已经在 page cache；
+- COW；
+- 匿名页首次分配；
+- 补建页表映射。
 
-#### Minor Page Fault
+### 2.2 Major Fault
 
-页面已经在内存中，只是当前进程页表尚未建立映射，例如：
+需要等待 I/O 才能完成，例如从磁盘、swap 或网络文件系统读取。
 
-- `fork()` 后第一次写触发 COW；
-- 文件页已在 page cache 中；
-- 匿名页首次访问。
-
-#### Major Page Fault
-
-页面不在内存，需要从磁盘读取，延迟明显更高。
-
-#### Copy-on-Write
-
-`fork()` 后父子进程共享物理页，并把页表项设置为只读。某一方写入时触发缺页异常：
+### 2.3 Copy-on-Write
 
 ```mermaid
 flowchart TD
-    A["父子进程共享只读物理页"] --> B["某一进程尝试写入"]
-    B --> C["CPU 触发写保护异常"]
-    C --> D["内核分配新的物理页"]
-    D --> E["复制原页面内容"]
-    E --> F["更新当前进程页表为可写映射"]
-    F --> G["重新执行写指令"]
+    A["多个地址空间引用同一私有页面"] --> B["页面写保护"]
+    B --> C["一方执行写入"]
+    C --> D["触发页故障"]
+    D --> E["内核检查引用和映射语义"]
+    E --> F["复制或复用为独占页面"]
+    F --> G["更新写入方页表"]
+    G --> H["重新执行写指令"]
 ```
 
-## 2. NUMA
+如果页面已经只剩当前映射独占，内核可能不必实际复制，只需更新权限。具体优化取决于内核实现。
 
-### 2.1 基本概念
+## 3. NUMA
 
-NUMA 全称 `Non-Uniform Memory Access` 非一致内存访问
+### 3.1 基本概念
 
-多路 CPU 或多芯片系统中，每个 CPU 节点都有自己的本地内存：
+NUMA 是 Non-Uniform Memory Access，即不同 CPU 访问不同内存节点的延迟和带宽并不一致。
 
 ```mermaid
 flowchart LR
     subgraph N0["NUMA Node 0"]
-        C0["CPU / Core 0"]
-        M0["Local Memory 0"]
+        C0["CPU 核心"]
+        M0["本地内存"]
     end
 
     subgraph N1["NUMA Node 1"]
-        C1["CPU / Core 1"]
-        M1["Local Memory 1"]
+        C1["CPU 核心"]
+        M1["本地内存"]
     end
 
-    C0 -->|"本地访问：低延迟、高带宽"| M0
-    C0 -->|"经过互连总线的远端访问"| M1
-    C1 -->|"本地访问：低延迟、高带宽"| M1
-    C1 -->|"经过互连总线的远端访问"| M0
+    C0 -->|"本地访问"| M0
+    C0 -->|"远端互连"| M1
+    C1 -->|"本地访问"| M1
+    C1 -->|"远端互连"| M0
 ```
 
-因此，内存访问延迟和带宽不是均匀的。
+远端内存不是不可访问，只是通常延迟更高、可用带宽更低，并消耗互连资源。
 
+### 3.2 First Touch
 
+Linux 默认内存策略下，匿名页面通常在发生实际物理分配时优先从当前线程所在 NUMA 节点分配。
 
-### 2.2 First Touch
+“第一次访问”应更严谨地理解为：
 
-Linux 常采用 First Touch 策略：
+- 页表和内存策略允许时的首次实际分配；
+- 匿名页第一次读可能暂时映射共享零页；
+- 第一次写通常更能决定真实私有物理页的位置；
+- 显式 NUMA policy、内存压力和自动 NUMA balancing 都可能改变结果。
 
-> 哪个 CPU 上的线程第一次实际访问某个页面，该页面通常优先分配到该 CPU 所在 NUMA 节点。
+错误模式：
 
-错误示例：
+```text
+主线程固定在 Node 0，串行初始化所有数组
+工作线程固定在 Node 1，长期处理数组
+```
 
-- 主线程在 Node 0 初始化全部数组
-- 工作线程在 Node 1 处理数组
+此时页面可能主要位于 Node 0，Node 1 工作线程产生大量远端访问。
 
-结果是工作线程大量访问远端内存。
+更好的并行初始化方式是让每个工作线程在未来处理数据的节点上首次写入对应分片。
 
-更好的方式：
+### 3.3 线程迁移
 
-- 让各工作线程在自己的 CPU 节点上初始化自己负责的数据
-
-
-### 2.3 线程迁移与远端访问
-
-如果线程从 Node 0 迁移到 Node 1，但数据仍在 Node 0：
+线程迁移到其他节点后，数据页不会自动同步迁移：
 
 ```mermaid
 flowchart LR
-    A["线程原本运行在 Node 0"] --> B["数据页分配在 Memory 0"]
-    A --> C["调度器把线程迁移到 Node 1"]
-    B --> D["数据仍留在 Memory 0"]
-    C --> E["线程从 Node 1 访问 Memory 0"]
-    D --> E
-    E --> F["远端访问增加：延迟上升、带宽下降"]
+    T0["线程在 Node 0 初始化"] --> P["页面位于 Node 0"]
+    T0 --> T1["线程迁移到 Node 1"]
+    T1 --> R["从 Node 1 远端访问 Node 0 页面"]
+    P --> R
 ```
 
-这会导致：
+自动 NUMA balancing 可能采样访问并迁移线程或页面，但迁移本身也有：
 
-- 延迟升高；
-- 内存带宽下降；
-- CPU 利用率看似不高，但程序仍然很慢。
+- 页面复制；
+- TLB shootdown；
+- 锁和扫描；
+- 热页来回迁移
 
-内核可进行 NUMA balancing，尝试迁移页面或线程，但迁移本身也有成本。
+等成本。
 
-
-
-### 2.4 常用工具
+### 3.4 常用工具
 
 ```bash
-# 查看 NUMA 拓扑
 numactl --hardware
-
-# 查看 CPU、NUMA 节点信息
 lscpu
-
-# 查看各 NUMA 节点内存访问情况
 numastat
+numastat -p <pid>
+cat /proc/<pid>/numa_maps
 
-# 将程序绑定到指定 CPU 节点，并优先分配本地内存
 numactl --cpunodebind=0 --membind=0 ./app
-
-# 绑定 CPU
 taskset -c 0-7 ./app
 ```
 
+`--membind` 比“优先本地分配”更严格，指定节点内存不足时可能直接分配失败。若希望优先某节点但允许回退，可以使用相应 preferred 策略。
 
+### 3.5 优化原则
 
-### 2.5 性能优化原则
+- 先测量远端访问是否真是瓶颈；
+- 保持线程和主要数据的节点局部性；
+- 避免无意义的跨节点迁移；
+- 线程池、内存池和分片结构最好 NUMA-aware；
+- 不要为了局部性造成严重 CPU 负载不均；
+- 大页、页迁移和绑核策略需要一起评估。
 
-1. 线程尽量固定在稳定的 CPU 集合。
-2. 数据尽量分配在使用它的线程所在节点。
-3. 避免线程频繁跨节点迁移。
-4. 大型内存应用应观察 `numastat` 中的 remote access。
-5. 线程池和内存池最好具有 NUMA 感知能力。
+## 4. 缓存一致性与伪共享
 
+### 4.1 缓存层次并非固定
 
-
-## 3. 缓存一致性
-
-### 3.1 为什么需要缓存一致性
-
-多核 CPU 通常每个核心都有私有缓存：
+常见多核结构：
 
 ```mermaid
 flowchart TD
-    C0["Core 0"] --> L10["私有 L1 / L2 Cache"]
-    C1["Core 1"] --> L11["私有 L1 / L2 Cache"]
-    L10 --> LLC["共享 LLC / L3 Cache"]
+    C0["Core 0"] --> L10["私有或局部 L1/L2"]
+    C1["Core 1"] --> L11["私有或局部 L1/L2"]
+    L10 --> LLC["共享或分片 LLC"]
     L11 --> LLC
-    LLC --> MEM["主内存"]
+    LLC --> M["内存"]
 ```
 
-如果多个核心缓存了同一地址，缓存一致性协议必须保证写入能够使其他核心的旧副本失效。
+具体共享关系依微架构而异：
 
-### 3.2 MESI
+- L2 可能私有也可能共享；
+- LLC 可能按 slice 分布；
+- 非所有平台都采用 MESI；
+- 还存在 MOESI、MESIF 等变体。
 
-MESI 的四种典型状态：
+### 4.2 MESI 基本状态
 
-- `M`：Modified，当前缓存独占且已修改。
-- `E`：Exclusive，当前缓存独占但未修改。
-- `S`：Shared，多个核心共享。
-- `I`：Invalid，缓存行无效。
+- `M` Modified：当前缓存拥有已修改的唯一副本；
+- `E` Exclusive：当前缓存独占且内容干净；
+- `S` Shared：多个缓存可持有干净副本；
+- `I` Invalid：当前副本无效。
 
-两个核心读取同一缓存行后，都可能处于 `S` 状态；Core 0 写入时需要获得独占所有权，并使 Core 1 的副本失效：
+当核心要写一个 Shared 缓存行时，通常需要获得所有权并使其他副本失效。
 
 ```mermaid
 sequenceDiagram
-    participant C0 as Core 0 Cache
-    participant Bus as 一致性互连
-    participant C1 as Core 1 Cache
+    participant C0 as Core 0
+    participant I as 一致性互连
+    participant C1 as Core 1
 
-    Note over C0,C1: 初始：两侧都缓存 x=1，状态均为 S
-    C0->>Bus: 请求缓存行独占所有权
-    Bus->>C1: 发送失效消息 Invalidate
-    C1-->>Bus: 将该缓存行从 S 变为 I
-    Bus-->>C0: 授予独占写权限
-    C0->>C0: 写入 x=2，状态变为 M
+    Note over C0,C1: 两个核心均持有 Shared 副本
+    C0->>I: 请求写权限/所有权
+    I->>C1: Invalidate
+    C1-->>I: Ack
+    I-->>C0: 授予所有权
+    C0->>C0: 修改缓存行
 ```
 
-此过程会产生一致性消息和缓存行所有权转移。
+### 4.3 伪共享
 
-
-### 3.3 缓存行
-
-缓存一致性通常以缓存行为单位，而不是以变量为单位。常见缓存行大小为 64 字节。
-
-如果两个线程修改不同变量，但变量位于同一缓存行，也会互相使缓存失效，这叫 **伪共享**。
+一致性以缓存行为单位，而非 C++ 变量为单位。两个线程修改不同对象，但对象位于同一缓存行时，缓存行可能在核心之间反复转移。
 
 ```cpp
-struct Counter {
-    long a;
-    long b;
+struct Counters {
+    std::atomic<long> left;
+    std::atomic<long> right;
 };
 ```
 
-线程 1 修改 `a`，线程 2 修改 `b`，即使逻辑上没有共享变量，也可能发生缓存行反复转移。
+即使 `left` 与 `right` 逻辑独立，也可能伪共享。
 
-一种缓解方式：
+缓解方法：
 
 ```cpp
-struct alignas(64) Counter {
-    long value;
+#include <new>
+#include <atomic>
+
+struct alignas(std::hardware_destructive_interference_size)
+PaddedCounter {
+    std::atomic<long> value{0};
 };
 ```
 
-使不同线程频繁修改的数据位于不同缓存行。
+需要注意：
 
+- `std::hardware_destructive_interference_size` 的可用性和取值依实现；
+- 仅给结构起始地址对齐不一定解决所有嵌套布局问题；
+- 填充会增加内存占用和 cache footprint；
+- 应通过性能计数器验证，而不是对所有变量盲目补齐 64 字节。
 
-### 3.4 一致性与内存顺序不是一回事
+### 4.4 缓存一致性不等于内存模型
 
-缓存一致性解决：
+缓存一致性解决同一内存位置副本的协调。
 
-> 同一地址的写入最终如何被其他核心观察。
+语言内存模型解决：
 
-内存模型解决：
+- 哪些并发访问构成数据竞争；
+- 编译器和 CPU 可进行哪些重排序；
+- 原子操作建立哪些同步关系。
 
-> 不同地址的读写顺序能否被重排。
-
-例如：
+错误代码：
 
 ```cpp
+int data = 0;
+bool ready = false;
+
+// 线程 1
 data = 42;
 ready = true;
+
+// 线程 2
+if (ready) {
+    use(data);
+}
 ```
 
-另一个线程可能先观察到 `ready == true`，但尚未观察到 `data == 42`。因此需要原子变量和内存序：
+这是 C++ 数据竞争，行为未定义，不能只解释成“线程 2 可能先看到 ready”。
+
+正确示例：
 
 ```cpp
+int data = 0;
+std::atomic<bool> ready{false};
+
+// 线程 1
 data = 42;
 ready.store(true, std::memory_order_release);
-```
 
-读取线程：
-
-```cpp
+// 线程 2
 if (ready.load(std::memory_order_acquire)) {
     use(data);
 }
 ```
 
+### 4.5 原子操作的成本
 
+不能笼统说“原子操作都很贵”：
 
-### 3.5 原子操作为何代价较高
+- 未竞争的原子 load/store 可能非常便宜；
+- `memory_order_relaxed` 不要求全局顺序；
+- 原子 RMW、强内存屏障和跨核竞争可能昂贵；
+- 真正的大成本往往是同一缓存行所有权反复转移。
 
-原子读改写操作可能需要：
+所以：
 
-- 获取缓存行独占权；
-- 使其他核心缓存副本失效；
-- 防止部分指令重排；
-- 在高竞争下反复转移缓存行。
+```text
+无锁 ≠ 无竞争
+无锁 ≠ 一定更快
+原子 ≠ 自动可扩展
+```
 
-所以“无锁”不一定比锁快。大量线程竞争同一原子变量时，也会产生严重缓存抖动。
+## 5. Linux 内核调度细节
 
+### 5.1 调度对象
 
-## 4. 内核调度细节
+Linux 调度 task。用户态线程通常对应一个可调度 task。
 
-### 4.1 调度对象
+`task_struct` 包含或引用：
 
-Linux 调度的基本对象是线程。每个线程在内核中由 `task_struct` 描述，包含：
-
-- 线程状态；
-- 寄存器上下文；
-- 调度策略；
-- 优先级；
+- 调度实体与策略；
+- 状态和优先级；
 - CPU 亲和性；
-- 内存描述符；
-- 文件描述符表等。
+- 内核栈与体系结构状态；
+- 地址空间、文件表、信号结构和凭据；
+- 统计与追踪信息。
 
-### 4.2 可运行队列
+内存描述符和文件表可能被多个线程共享，因此不能简单说每个 `task_struct` 都独占完整副本。
 
-每个 CPU 通常有自己的运行队列：
+### 5.2 每 CPU 运行队列
+
+Linux 通常为每个逻辑 CPU 维护 runqueue：
 
 ```mermaid
 flowchart LR
-    R0["CPU 0 Run Queue"] --> C0["CPU 0"]
-    R1["CPU 1 Run Queue"] --> C1["CPU 1"]
-    R2["CPU 2 Run Queue"] --> C2["CPU 2"]
+    R0["CPU 0 rq"] --> C0["CPU 0"]
+    R1["CPU 1 rq"] --> C1["CPU 1"]
+    R2["CPU 2 rq"] --> C2["CPU 2"]
 
-    R0 <-->|"负载均衡 / 任务迁移"| R1
-    R1 <-->|"负载均衡 / 任务迁移"| R2
+    R0 <-->|"负载均衡/迁移"| R1
+    R1 <-->|"负载均衡/迁移"| R2
 ```
 
-优点：
+优势：
 
 - 降低全局锁竞争；
-- 提高缓存局部性；
-- 允许多核并行调度。
+- 改善缓存局部性；
+- 各 CPU 可并行调度。
 
-代价是需要进行负载均衡，把任务从繁忙 CPU 迁移到空闲 CPU。
+代价：
 
-### 4.3 调度发生的典型时机
+- 需要负载均衡；
+- 迁移影响 Cache、TLB 和 NUMA；
+- CPU capacity 在大小核系统中不同，负载不能只按任务数量比较。
 
-调度器可能在以下时机运行：
+### 5.3 调度发生的常见时机
 
-1. 当前线程时间片或调度额度用完。
-2. 当前线程阻塞，例如等待 I/O、锁或条件变量。
-3. 更高优先级线程被唤醒。
-4. 当前线程主动调用 `sched_yield()`。
-5. 中断返回内核或用户态前发现需要重新调度。
-6. CPU 负载均衡触发任务迁移。
+- 当前任务阻塞；
+- 时间额度用完；
+- 更高优先级或更早截止任务唤醒；
+- 中断或系统调用返回前发现 `need_resched`；
+- 主动 `sched_yield()`；
+- CPU idle 或周期负载均衡；
+- CPU hotplug、亲和性变化。
 
-### 4.4 上下文切换
+`sched_yield()` 不保证立即让特定线程运行，也不应作为普通同步机制。
 
-线程切换通常包括：
+### 5.4 切换成本
 
-- 保存当前寄存器；
-- 恢复下一个线程寄存器；
+任务切换可能涉及：
+
+- 保存和恢复寄存器；
 - 切换内核栈；
-- 可能切换页表；
-- 更新调度器状态；
-- 影响 TLB、分支预测器和 CPU cache。
+- 地址空间切换；
+- TLB 和 Cache 扰动；
+- 分支预测状态影响；
+- NUMA 远端访问；
+- 调度器数据结构更新。
 
-要区分**用户态/内核态切换**和**任务上下文切换**：
+切换次数只是指标之一。大量上下文切换如果伴随高吞吐和低延迟可能正常；少量切换也不能证明系统高效。
+
+### 5.5 调度类
+
+概念上的优先顺序通常包括：
+
+- stop；
+- deadline；
+- real-time；
+- fair；
+- idle。
+
+同一调度类内部使用各自策略：
+
+- `SCHED_DEADLINE`；
+- `SCHED_FIFO/SCHED_RR`；
+- `SCHED_OTHER/SCHED_BATCH/SCHED_IDLE` 等。
+
+实时任务配置不当可能长期压制普通任务，应设置资源上限并谨慎授权。
+
+## 6. Linux 公平调度：从 CFS 到 EEVDF
+
+### 6.1 CFS 的历史思想
+
+CFS（Completely Fair Scheduler）试图逼近“理想多任务 CPU”。它为普通任务维护虚拟运行时间：
+
+```text
+vruntime 增量 ≈ 实际运行时间 × 基准权重 / 任务权重
+```
+
+权重越高，`vruntime` 增长越慢，任务长期获得更多 CPU 份额。
+
+经典 CFS 以 `vruntime` 排序可运行实体，并倾向选择虚拟运行时间较小的任务。
+
+### 6.2 现代 Linux 的 EEVDF
+
+现代 Linux 公平调度路径已从经典 CFS 选择逻辑逐步转向 **EEVDF（Earliest Eligible Virtual Deadline First）**。内核官方文档说明，Linux 从 6.6 开始过渡到 EEVDF。
+
+EEVDF 仍使用虚拟时间和权重公平思想，但增加两个关键概念：
+
+- **lag**：任务相对于公平份额是欠 CPU 时间还是超额使用；
+- **virtual deadline**：任务本次请求对应的虚拟截止时间。
+
+简化选择过程：
+
+1. 找出 eligible 的任务，通常要求 lag 表明它没有超额占用；
+2. 在 eligible 任务中选择虚拟截止时间最早者；
+3. 更短的请求 slice 可以改善延迟敏感任务的响应。
 
 ```mermaid
 flowchart TD
-    subgraph M["用户态 / 内核态切换：线程不变"]
-        A1["线程 A：用户态"] -->|"系统调用或异常"| A2["线程 A：内核态"]
-        A2 -->|"系统调用返回"| A3["线程 A：用户态"]
-    end
+    A["可运行公平类任务"] --> B["计算/维护 lag"]
+    B --> C["筛选 eligible 任务"]
+    C --> D["比较 virtual deadline"]
+    D --> E["选择最早虚拟截止任务"]
 ```
 
-```mermaid
-flowchart TD
-    subgraph C["上下文切换：运行任务发生变化"]
-        B1["线程 A 正在运行"] -->|"保存 A 的上下文"| B2["调度器选择线程 B"]
-        B2 -->|"恢复 B 的上下文"| B3["线程 B 开始运行"]
-    end
-```
+因此，把现代 Linux 普通调度完整描述为“红黑树永远选最小 vruntime”已经不够准确。
 
-二者可能同时发生，也可能只发生其中一种。
+### 6.3 nice 和权重
 
-### 4.5 调度类
-
-Linux 使用调度类组织不同策略。概念上包括：
-
-- 停机类；
-- Deadline；
-- 实时调度；
-- 普通公平调度；
-- Idle。
-
-不同调度类之间先比较类别优先级，同一类别内部再使用各自算法。
-
-### 4.6 CPU 亲和性
-
-CPU affinity 限制线程可以运行在哪些 CPU 上：
-
-```bash
-taskset -c 0,1 ./app
-```
-
-优点：
-
-- 提高 cache 和 TLB 局部性；
-- 降低跨 NUMA 节点迁移；
-- 降低抖动。
-
-缺点：
-
-- 绑定不合理会造成负载不均衡；
-- CPU 忙时不能灵活迁移。
-
-## 5. Linux CFS 调度
-
-### 5.1 核心目标
-
-CFS 全称 `Completely Fair Scheduler` 完全公平调度器
-
-核心思想：
-
-> 假设存在一个理想处理器，所有可运行任务可以同时按权重分享 CPU。真实系统通过轮流运行任务来逼近这一理想状态。
-
-### 5.2 vruntime
-
-CFS 为每个任务维护虚拟运行时间 `vruntime`。
-
-简化公式：
+nice 通常范围：
 
 ```text
-vruntime += 实际运行时间 × 基准权重 / 当前任务权重
-```
-
-- 普通权重任务：`vruntime` 按正常速度增长。
-- 高优先级任务：权重大，`vruntime` 增长较慢。
-- 低优先级任务：权重小，`vruntime` 增长较快。
-
-调度器倾向选择 `vruntime` 最小的任务运行。
-
-
-
-### 5.3 nice 值
-
-nice 值通常范围：
-
-```text
--20 到 19
+-20 ... 19
 ```
 
 - nice 越小，权重越高；
-- nice 越大，权重越低。
+- nice 越大，权重越低；
+- 它影响普通公平类任务的 CPU 份额；
+- 不等同于实时优先级；
+- CPU cgroup 权重、亲和性和可用 CPU 容量也会影响结果。
 
-它不是简单的“固定优先级”，而是影响任务获得 CPU 的比例。
+### 6.4 公平不等于相同运行时间
 
+公平是按权重、层级和可用 CPU 资源分配：
 
-### 5.4 红黑树
+- 不同 nice 值不应获得相同份额；
+- cgroup 可改变组间权重；
+- 睡眠、唤醒和迁移影响短期延迟；
+- 长期公平也不保证硬实时截止时间。
 
-经典 CFS 使用红黑树组织可运行任务，越靠左的任务 `vruntime` 越小：
+### 6.5 为什么普通公平调度不适合硬实时？
 
-```mermaid
-flowchart TD
-    T["按 vruntime 排序的红黑树"] --> L["最左侧任务<br/>vruntime 最小"]
-    T --> R["右侧任务<br/>vruntime 较大"]
-    L --> X["选择最左侧任务运行"]
-    X --> U["运行后更新 vruntime"]
-    U --> I["重新插入红黑树"]
-    I --> T
-```
+因为普通公平调度优化长期份额和交互响应，不提供严格的最坏情况执行与截止时间保证。硬实时需要：
 
-调度器反复选择 `vruntime` 最小的任务运行。
+- 可证明的调度分析；
+- 有界中断和锁延迟；
+- 资源预算；
+- 实时调度策略；
+- 避免不可控缺页和阻塞。
 
-红黑树使插入和删除复杂度约为`O(log n)`
+## 7. io_uring
 
-### 5.5 调度周期与运行额度
+### 7.1 基本结构
 
-CFS 没有传统意义上固定不变的时间片。它会根据：
+`io_uring` 使用共享映射的环形队列：
 
-- 可运行任务数量；
-- 目标调度周期；
-- 最小粒度；
-- 任务权重；
-
-计算某个任务的理想运行时间。
-
-简化理解：
-
-```text
-任务份额 = 当前任务权重 / 所有可运行任务权重之和
-```
-
-```text
-理想运行时间 = 调度周期 × 任务份额
-```
-
-### 5.6 睡眠任务唤醒
-
-I/O 密集型任务经常睡眠。唤醒后，它的 `vruntime` 通常会被限制在合理范围内，避免因为长时间未运行而无限抢占 CPU。
-
-这使交互式、I/O 密集型任务通常具有较好的响应性。
-
-
-### 5.7 CFS 相关疑问
-
-**CFS 是否保证每个任务获得完全相同 CPU 时间？**  
-不保证。它按权重公平，不是绝对相等。
-
-**nice 值是否等于实时优先级？**  
-不是。nice 只影响普通调度类中的权重。实时调度策略优先级高于普通 CFS 任务。
-
-**为什么 CFS 适合普通任务，不适合硬实时？**  
-因为它追求长期公平，不提供严格的截止时间保证。
-
-
-## 6. io_uring
-
-### 6.1 传统 I/O 的问题
-
-传统异步或高并发 I/O 通常涉及多次系统调用：
-
-- 提交请求 → 系统调用
-- 等待事件 → 系统调用
-- 读取/写入 → 系统调用
-
-系统调用会带来：
-
-- 用户态与内核态切换；
-- 参数复制；
-- 调用和返回开销；
-- 高频事件处理成本。
-
-
-
-### 6.2 基本结构
-
-`io_uring` 使用两个环形队列：
-
-- SQ：Submission Queue，提交队列；
-- CQ：Completion Queue，完成队列。
+- SQ：Submission Queue；
+- CQ：Completion Queue；
+- SQE：提交项；
+- CQE：完成项。
 
 ```mermaid
 flowchart LR
-    subgraph U["用户态与内核共享映射的 Ring"]
-        SQ["SQ：Submission Queue<br/>提交 I/O 请求"]
-        CQ["CQ：Completion Queue<br/>读取完成结果"]
-    end
-
-    K["内核 I/O 执行路径"]
-    SQ -->|"提交 SQE"| K
-    K -->|"写入 CQE"| CQ
+    A["应用填写 SQE"] --> SQ["Submission Queue"]
+    SQ --> K["内核处理请求"]
+    K --> CQ["Completion Queue"]
+    CQ --> B["应用消费 CQE"]
 ```
 
-用户态和内核通过共享内存访问队列，减少反复复制和系统调用。
+共享映射减少了反复复制请求描述符的需要，但不能简单说“使用 io_uring 后不再有系统调用”：
 
+- 普通模式下仍需 `io_uring_enter()` 提交或等待；
+- 可以批量摊薄调用；
+- SQPOLL 可由内核线程轮询 SQ，在特定条件下降低提交调用；
+- 注册文件和缓冲区可减少重复查找与固定成本。
 
-### 6.3 基本执行流程
+### 7.2 操作执行方式
 
+io_uring 提供统一提交接口，但不同操作可能：
 
-```mermaid
-sequenceDiagram
-    participant App as 应用程序
-    participant SQ as Submission Queue
-    participant Kernel as 操作系统内核
-    participant CQ as Completion Queue
+- 立即同步完成并产生 CQE；
+- 使用文件的非阻塞路径；
+- 进入内核异步执行；
+- 转交 io-wq 工作线程；
+- 被链接、取消或超时。
 
-    App->>App: 创建 io_uring
-    App->>SQ: 获取并填写 SQE
-    App->>SQ: 提交操作类型、fd、buffer、长度
-    SQ->>Kernel: 通知内核处理请求
-    Kernel->>Kernel: 执行 I/O
-    Kernel->>CQ: 写入 CQE
-    App->>CQ: 读取完成结果
-    App->>App: 根据 res 和 user_data 处理请求
-```
+所以“io_uring 完全不使用线程”是不准确的。
 
-伪代码：
+### 7.3 基本伪代码
 
 ```cpp
 io_uring ring;
-io_uring_queue_init(256, &ring, 0);
+
+if (io_uring_queue_init(256, &ring, 0) < 0) {
+    // handle error
+}
 
 io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+if (sqe == nullptr) {
+    // SQ is full; submit or apply backpressure
+}
+
 io_uring_prep_read(sqe, fd, buffer, size, offset);
+io_uring_sqe_set_data64(sqe, request_id);
 
-sqe->user_data = request_id;
+if (io_uring_submit(&ring) < 0) {
+    // handle error
+}
 
-io_uring_submit(&ring);
+io_uring_cqe* cqe = nullptr;
+if (io_uring_wait_cqe(&ring, &cqe) == 0) {
+    const int result = cqe->res;
+    const std::uint64_t id = io_uring_cqe_get_data64(cqe);
+    // result < 0 时，负值通常是 -errno。
+    io_uring_cqe_seen(&ring, cqe);
+}
 
-io_uring_cqe* cqe;
-io_uring_wait_cqe(&ring, &cqe);
-
-int result = cqe->res;
-io_uring_cqe_seen(&ring, cqe);
+io_uring_queue_exit(&ring);
 ```
 
+### 7.4 Buffer 生命周期
 
+请求完成前：
 
-### 6.4 SQE 与 CQE
+- 普通缓冲区必须保持地址有效；
+- 不能释放或复用给不兼容操作；
+- 注册缓冲区也有明确注册和注销生命周期；
+- CQE 到达不一定表示应用高级协议已经完成，只表示内核操作完成到对应语义点。
 
-#### SQE
+### 7.5 部分完成
 
-描述一个待执行的 I/O 操作，例如：
+读写操作可能：
 
-- `READ`；
-- `WRITE`；
-- `ACCEPT`；
-- `CONNECT`；
-- `SEND`；
-- `RECV`；
-- `TIMEOUT`。
+- 返回小于请求长度；
+- 遇到 EOF；
+- 返回 `-EAGAIN`；
+- 被取消；
+- 超时；
+- 与 linked operation 产生联动结果。
 
-#### CQE
+应用仍需维护状态机。
 
-描述一个已完成操作：
+### 7.6 io_uring 与 epoll
 
-- `res`：返回值或错误码；
-- `user_data`：应用提交时关联的上下文。
+| 对比点 | epoll | io_uring |
+|---|---|---|
+| 主要模型 | fd 就绪通知 | 操作提交与完成 |
+| 应用操作 | 就绪后调用 read/write | 提前提交 read/write 等 |
+| 数据结构 | interest/ready list | SQ/CQ |
+| 批处理 | 返回多事件 | 批量提交与批量完成 |
+| 适合范围 | Socket readiness | 文件、网络及更多异步操作 |
 
-通过 `user_data`，应用可以知道完成事件属于哪个请求。
+io_uring 也支持 poll 请求，因此两者不是完全互斥。小规模负载、简单网络服务或成熟 epoll 代码不一定因迁移 io_uring 自动变快。
 
+### 7.7 高级特性
 
+- registered buffers；
+- registered files；
+- SQPOLL；
+- linked operations；
+- multishot accept/recv；
+- fixed buffer selection；
+- cancellation；
+- timeout；
+- zero-copy 相关网络能力。
 
-### 6.5 高级特性
+高级特性常伴随更严格的资源、权限、内核版本和生命周期要求。
 
-#### 批量提交和批量完成
+### 7.8 背压
 
-一次提交多个 SQE，减少系统调用。
-
-#### Registered Buffer
-
-提前把缓冲区注册给内核，减少每次 I/O 的页固定和地址检查成本。
-
-#### Registered File
-
-提前注册文件描述符，减少重复查找。
-
-#### SQPOLL
-
-内核线程轮询提交队列，应用提交请求后可能不必每次执行系统调用。
-
-#### Linked Operations
-
-把多个操作串联：
-
-```mermaid
-flowchart LR
-    A["读取文件"] -->|"成功后继续"| B["发送到网络"]
-    B -->|"关联超时约束"| C["超时处理"]
-    A -. "失败则取消后续操作" .-> X["终止链"]
-    B -. "失败则取消后续操作" .-> X
-```
-
-前一个失败时可以取消后续操作。
-
-### 6.6 io_uring 与 epoll
-
-`epoll` 是就绪通知模型，`io_uring` 更接近完成通知模型：
-
-```mermaid
-flowchart LR
-    subgraph E["epoll：Readiness"]
-        E1["内核通知 fd 可读"] --> E2["应用调用 read()"]
-        E2 --> E3["应用获得数据"]
-    end
-
-    subgraph U["io_uring：Completion"]
-        U1["应用提前提交 read 请求"] --> U2["内核执行 I/O"]
-        U2 --> U3["内核返回完成事件 CQE"]
-    end
-```
-
-因此：
-
-- `epoll` 更接近 Reactor；
-- `io_uring` 可构建更接近 Proactor 的模型。
-
-
-### 6.7 常见问题
-
-1. 异步操作期间 buffer 必须保持有效。
-2. CQ 消费过慢可能形成积压。
-3. 需要处理请求取消、超时和部分完成。
-4. 写操作可能只完成部分数据。
-5. io_uring 不是所有场景都比 epoll 快，小规模连接下差异可能不明显。
-6. 程序必须建立背压机制，不能无限提交请求。
-
-
-## 7. cgroups 和 namespace
-
-### 7.1 二者分工
-
-一句话区分：
-
-```mermaid
-flowchart LR
-    P["容器或进程组"] --> N["namespace<br/>隔离系统视图"]
-    P --> C["cgroups<br/>限制和统计资源"]
-    N --> N1["PID、Mount、Network、UTS、IPC、User"]
-    C --> C1["CPU、Memory、I/O、PIDs、cpuset"]
-```
-
-
-
-### 7.2 namespace
-
-namespace 为进程提供隔离的系统视图。
-
-常见类型：
-
-| Namespace | 隔离内容 |
-|||
-| PID | 进程号与进程树 |
-| Mount | 挂载点和文件系统视图 |
-| Network | 网卡、路由、端口、协议栈 |
-| UTS | 主机名和域名 |
-| IPC | System V IPC、消息队列、共享内存 |
-| User | UID、GID 和 capability |
-| Cgroup | cgroup 路径视图 |
-| Time | 某些时间相关视图 |
-
-创建 namespace 的常见接口：
+SQ 和 CQ 都是有限资源。应用必须限制未完成请求：
 
 ```text
-clone()
+提交速率 > 完成和消费速率
+        ↓
+SQ/CQ 拥塞、内存占用、尾延迟和取消成本上升
+```
+
+需要：
+
+- 最大 in-flight 请求数；
+- CQ 及时消费；
+- 每连接/每租户配额；
+- 超时和取消；
+- 负载降级。
+
+## 8. namespace 与 cgroup
+
+### 8.1 二者分工
+
+```mermaid
+flowchart LR
+    P["进程/容器"] --> N["namespace<br/>隔离可见视图"]
+    P --> C["cgroup<br/>组织、统计和分配资源"]
+```
+
+namespace 主要解决“看见什么”，cgroup 主要解决“能使用多少以及如何分配”。
+
+### 8.2 namespace
+
+常见 namespace：
+
+| 类型 | 隔离内容 |
+|---|---|
+| PID | PID 编号和进程树视图 |
+| Mount | 挂载点和文件系统视图 |
+| Network | 网卡、路由、端口和协议栈 |
+| UTS | 主机名和域名 |
+| IPC | System V IPC、POSIX 消息队列等 |
+| User | UID/GID 与 capability 映射 |
+| Cgroup | cgroup 路径视图 |
+| Time | 部分系统时钟偏移视图 |
+
+常用接口：
+
+```text
+clone()/clone3()
 unshare()
 setns()
 ```
 
-命令示例：
+命令：
 
 ```bash
-# 创建新的 PID、Mount、UTS namespace
 unshare --pid --mount --uts --fork /bin/bash
-
-# 进入已有进程的 namespace
 nsenter -t <pid> -n -m -p
 ```
 
+创建 PID namespace 时，通常还需要正确挂载新的 `/proc`，否则工具看到的进程视图可能与 namespace 不一致。
 
+### 8.3 PID namespace
 
-### 7.3 PID Namespace
+PID namespace 可以嵌套：
 
-容器中的进程可能看到自己是 PID 1：
+- 父 namespace 能看到子 namespace 中的任务；
+- 子 namespace 看不到父 namespace 的任务；
+- 同一 task 在不同层级具有不同 PID；
+- namespace 中的 PID 1 有特殊信号和回收职责。
 
-```text
-宿主机 PID：32561
-容器内 PID：1
-```
+容器 PID 1 应正确：
 
-PID namespace 是嵌套的。父 namespace 可以看到子 namespace 中的进程，子 namespace 不能看到父 namespace 的进程。
+- 回收僵尸；
+- 转发终止信号；
+- 处理子进程生命周期。
 
-容器 PID 1 需要承担：
+### 8.4 Network namespace
 
-- 回收僵尸进程；
-- 处理信号；
-- 正确转发终止信号。
+每个 network namespace 可拥有独立的：
 
-
-
-### 7.4 Network Namespace
-
-每个网络 namespace 可以拥有独立的：
-
-- 网卡；
+- 网络设备；
 - IP 地址；
 - 路由表；
-- iptables/nftables 规则；
-- Socket 和端口空间。
+- Socket/端口空间；
+- netfilter 规则；
+- `/proc/sys/net` 部分配置。
 
-容器网络常通过 veth pair 连接：
+veth pair 常连接两个 namespace：
 
 ```mermaid
 flowchart LR
-    C["容器 Network Namespace<br/>eth0"] <-->|"veth pair"| V["宿主机 veth"]
-    V --> B["Linux Bridge"]
-    B --> P["宿主机物理网卡"]
+    C["容器 eth0"] <-->|"veth pair"| H["宿主机 veth"]
+    H --> B["bridge/路由"]
+    B --> E["外部网络"]
 ```
 
-### 7.5 cgroups
+是否使用 bridge、NAT、路由、macvlan、ipvlan 或 eBPF 取决于网络方案。
 
-cgroups 用于：
+### 8.5 cgroup v2
 
-- 资源统计；
-- 资源限制；
-- 优先级控制；
-- 进程分组。
-
-常见控制器：
+cgroup v2 使用统一层级，并通过控制器管理资源：
 
 - `cpu`；
 - `memory`；
@@ -4372,355 +4482,468 @@ cgroups 用于：
 - `pids`；
 - `cpuset`。
 
-cgroups v2 使用统一层级：
+典型路径：
 
 ```text
 /sys/fs/cgroup/
 ```
 
-### 7.6 常见限制
+cgroup 不只是“限制资源”，还用于：
 
-### CPU
+- 分层组织；
+- 统计；
+- 权重分配；
+- 保护；
+- 压力和事件通知。
 
-`cpu.max` 可限制 CPU 配额：
-
-```text
-quota period
-```
-
-例如：
+### 8.6 CPU 配额
 
 ```bash
 echo "50000 100000" > cpu.max
 ```
 
-表示每 100 ms 最多使用 50 ms CPU 时间，相当于约 0.5 个 CPU。
+表示每 100 ms 周期最多使用 50 ms CPU 时间，长期配额相当于约 0.5 个 CPU。
 
-#### 内存
+它不保证：
+
+- 固定绑定半个核心；
+- 每个 1 ms 窗口都能使用 0.5 ms；
+- 没有节流尾延迟。
+
+CPU quota 用完后会被 throttle，可能造成周期性延迟尖峰。
+
+### 8.7 内存限制
 
 ```bash
 echo 1G > memory.max
 ```
 
-超过限制后，可能触发 cgroup 内部回收或 OOM。
+达到 hard limit 后，内核会尝试在 cgroup 内回收；无法降低使用量时可能触发 cgroup OOM。实际使用可暂时超过限制，且 page cache、匿名内存、内核记账等共同影响统计。
 
-#### 进程数量
+常用接口还包括：
+
+- `memory.current`；
+- `memory.high`；
+- `memory.events`；
+- `memory.stat`；
+- `memory.swap.max`。
+
+`memory.high` 常用于节流和回收压力，`memory.max` 是硬上限。
+
+### 8.8 pids.max
 
 ```bash
 echo 100 > pids.max
 ```
 
-限制该 cgroup 最多创建 100 个进程或线程。
+PIDs 控制器计数的是 task，通常包括线程，不只是传统意义上的进程。线程池或大量线程创建也可能触发限制。
 
+### 8.9 线程化 cgroup
 
+cgroup v2 默认以进程为主要迁移单位，但支持 threaded cgroup 模式，使某些控制器可以按线程组织。不能绝对表述为“所有线程在任何 cgroup v2 配置下都必须属于同一 cgroup”。
 
-### 7.7 一些疑问
+## 9. 容器底层原理
 
-**namespace 是否能限制资源？**  
-不能。它主要负责隔离视图。
-
-**cgroups 是否能隐藏宿主机进程？**  
-不能。隐藏进程属于 PID namespace 的职责。
-
-**容器内存不足时一定会杀宿主机进程吗？**  
-通常优先在对应 memory cgroup 内选择进程处理，但实际行为还与内核配置和系统内存状态有关。
-
-
-
-## 8. 容器底层原理
-
-### 8.1 容器不是虚拟机
-
-虚拟机和容器的层级结构不同：
+### 9.1 容器不是独立内核虚拟机
 
 ```mermaid
 flowchart TD
     subgraph VM["虚拟机"]
-        VH["宿主机硬件 / 宿主机系统"] --> HV["Hypervisor"]
-        HV --> GK["客户机内核"]
-        GK --> GA["客户机用户程序"]
+        HW1["硬件"] --> HV["Hypervisor"]
+        HV --> GK["Guest Kernel"]
+        GK --> GP["Guest Process"]
     end
 ```
 
 ```mermaid
 flowchart TD
-    subgraph CT["容器"]
-        CH["宿主机硬件"] --> HK["共享的宿主机内核"]
-        HK --> ISO["namespace + cgroups + rootfs"]
+    subgraph CT["普通 Linux 容器"]
+        HW2["硬件"] --> HK["宿主机内核"]
+        HK --> ISO["namespace + cgroup + rootfs + 安全策略"]
         ISO --> CP["容器进程"]
     end
 ```
 
-多个容器共享宿主机内核，因此：
+普通容器共享宿主机内核，因此：
 
-- 启动快；
-- 额外内存开销小；
-- 隔离强度通常弱于虚拟机。
+- 启动和资源开销通常较小；
+- 系统调用 ABI 必须由宿主机内核支持；
+- 内核漏洞可能跨越容器边界；
+- 隔离强度通常低于拥有独立客户机内核的虚拟机。
 
+### 9.2 核心机制
 
+- namespace：隔离视图；
+- cgroup：资源组织和控制；
+- rootfs：容器文件系统视图；
+- OverlayFS：镜像层合并；
+- capability：拆分 root 权限；
+- seccomp：过滤系统调用；
+- LSM：SELinux、AppArmor 等；
+- user namespace：UID/GID 映射；
+- veth、路由、bridge、NAT 或 eBPF：网络；
+- OCI runtime：按规范创建容器进程。
 
-### 8.2 容器的核心组成
+`chroot` 或 rootfs 本身不是完整安全边界，必须与 namespace、权限和 LSM 等机制组合。
 
-一个容器通常由以下机制共同构成：
-
-1. namespace：隔离系统视图。
-2. cgroups：限制资源。
-3. rootfs：提供独立文件系统视图。
-4. OverlayFS：实现镜像分层。
-5. capability：拆分 root 权限。
-6. seccomp：过滤系统调用。
-7. LSM：SELinux/AppArmor 等安全控制。
-8. veth、bridge、NAT：实现容器网络。
-9. runtime：创建并管理容器进程。
-
-
-
-### 8.3 镜像分层
-
-容器镜像由多个只读层组成，启动容器后再叠加一个可写层：
+### 9.3 镜像分层和 copy-up
 
 ```mermaid
 flowchart TB
     W["容器可写层"]
-    L3["只读 Layer 3：应用程序"]
-    L2["只读 Layer 2：运行时"]
-    L1["只读 Layer 1：基础系统"]
-    V["OverlayFS 合并后的统一文件系统视图"]
+    L3["只读应用层"]
+    L2["只读运行时层"]
+    L1["只读基础层"]
+    M["合并视图"]
 
-    W --> V
-    L3 --> V
-    L2 --> V
-    L1 --> V
+    W --> M
+    L3 --> M
+    L2 --> M
+    L1 --> M
 ```
 
-修改只读层中的文件时，会发生 `copy-up`：
+修改只读层文件时，OverlayFS 通常先 copy-up 到可写层：
 
-```mermaid
-flowchart LR
-    R["只读镜像层中的原文件"] -->|"复制到上层"| W["容器可写层"]
-    W --> M["在可写副本上修改"]
-    M --> V["OverlayFS 向容器呈现修改后的文件"]
+```text
+下层文件 → 复制到上层 → 修改上层副本
 ```
 
+代价可能包括：
 
+- 首次写放大；
+- inode 和元数据变化；
+- 大文件 copy-up 延迟；
+- 页缓存与存储空间增加。
 
-### 8.4 容器启动流程
-
-简化流程：
-
-```mermaid
-flowchart TD
-    A["解析镜像与容器配置"] --> B["准备 rootfs 和 OverlayFS"]
-    B --> C["创建各类 namespace"]
-    C --> D["创建 cgroup 并设置资源限制"]
-    D --> E["配置 veth、bridge、路由和 NAT"]
-    E --> F["设置 UID/GID、capability、seccomp"]
-    F --> G["切换根文件系统"]
-    G --> H["exec 容器入口程序"]
-    H --> I["容器进程作为宿主机普通进程运行"]
-```
-
-
-容器进程最终仍然是宿主机上的普通 Linux 进程。
-
-
-
-### 8.5 运行时栈
-
-常见调用链可概括为：
+### 9.4 容器启动流程
 
 ```mermaid
 flowchart TD
-    A["Docker CLI"] --> B["Docker daemon"]
-    B --> C["containerd"]
-    C --> D["OCI Runtime<br/>例如 runc"]
-    D --> E["Linux 内核接口<br/>clone / unshare / mount / cgroups"]
-    E --> F["容器进程"]
+    A["解析 OCI 配置与镜像"] --> B["准备 rootfs/OverlayFS"]
+    B --> C["创建 namespace"]
+    C --> D["创建并配置 cgroup"]
+    D --> E["配置网络"]
+    E --> F["设置 UID/GID/capability/seccomp/LSM"]
+    F --> G["pivot_root/chroot 等切换根视图"]
+    G --> H["exec 入口程序"]
+    H --> I["宿主机内核调度普通 task"]
 ```
 
-OCI runtime 负责最终调用内核接口创建容器进程。
+实际顺序和细节取决于 runtime、网络插件和安全配置。
 
+### 9.5 运行时栈
 
-
-### 8.6 容器网络
-
-典型 bridge 模式：
+常见 Docker 路径：
 
 ```mermaid
-flowchart LR
-    C["容器 eth0"] <-->|"veth pair"| V["宿主机 veth"]
-    V --> B["Linux Bridge"]
-    B --> N["iptables / nftables NAT"]
-    N --> E["外部网络"]
+flowchart TD
+    CLI["Docker CLI"] --> D["dockerd"]
+    D --> C["containerd"]
+    C --> SHIM["containerd-shim"]
+    SHIM --> R["OCI runtime，例如 runc"]
+    R --> K["Linux 内核接口"]
+    K --> P["容器进程"]
 ```
 
-同一宿主机容器之间可通过 bridge 通信。访问外部网络时，通常通过 NAT 转换源地址。
+`containerd-shim` 等组件用于解耦容器生命周期和上层守护进程，不能把所有场景都简化成 Docker daemon 直接调用 runc 后永久管理进程。
 
+### 9.6 容器安全
 
+常见强化措施：
 
-### 8.7 容器安全边界
-
-容器共享宿主机内核，因此内核漏洞可能影响所有容器。
-
-常见强化手段：
-
-- 非 root 用户运行；
-- user namespace；
-- 删除不必要 capability；
-- seccomp 限制系统调用；
+- 非 root；
+- rootless 或 user namespace；
+- 删除不需要的 capability；
+- seccomp allowlist；
 - SELinux/AppArmor；
 - 只读 rootfs；
-- 禁止 privileged；
-- 限制设备访问；
-- 使用独立内核的轻量虚拟化方案。
+- 不使用 `--privileged`；
+- 限制设备和宿主机目录挂载；
+- 设置 cgroup 资源上限；
+- 及时更新内核和 runtime；
+- 对高隔离需求使用 microVM 或沙箱运行时。
+
+容器安全不是单一开关，而是内核攻击面、配置、供应链和运行权限的组合问题。
 
 # 十六、常见排查
 
-## 1. CPU 占用率很高怎么排查？
+性能排查应先确认现象和边界，再选择工具。不要一看到 CPU、内存或 `%util` 某个指标升高就直接下结论。
 
-思路：
+常用方法论：
 
-1. `top` 查看哪个进程 CPU 高。
-2. `top -H -p pid` 查看哪个线程 CPU 高。
-3. 将线程 ID 转成十六进制。
-4. 对 Java 可用 `jstack` 查线程栈。
-5. 对 C/C++ 可用 `perf top`、`gdb`、火焰图。
-6. 判断是死循环、锁竞争、频繁 GC、系统调用过多还是上下文切换过多。
+- **RED**：Rate、Errors、Duration，适合服务请求；
+- **USE**：Utilization、Saturation、Errors，适合系统资源；
+- 对比基线、变更前后和同类实例；
+- 先定位层级，再采集高开销剖析数据。
+
+## 1. CPU 占用率高
+
+### 1.1 基础定位
+
+```bash
+top
+pidstat -u -p ALL 1
+top -H -p <pid>
+ps -L -p <pid> -o pid,tid,psr,stat,pcpu,comm
+```
+
+先判断：
+
+- 单线程打满还是所有核心打满；
+- 用户态 `%usr` 高还是内核态 `%sys` 高；
+- 是否存在 steal time；
+- 是否是短时尖峰还是持续饱和；
+- run queue 是否持续大于可用 CPU。
+
+### 1.2 C/C++
+
+```bash
+perf top -p <pid>
+perf record -F 99 -g -p <pid> -- sleep 30
+perf report
+```
+
+可进一步使用：
+
+- FlameGraph；
+- eBPF profiler；
+- `gdb -p <pid>`；
+- allocator profiler；
+- 硬件性能计数器。
+
+### 1.3 Java
+
+```bash
+top -H -p <pid>
+printf '%x\n' <tid>
+jstack <pid>
+```
+
+十六进制 TID 主要用于把 Linux TID 与 JVM 线程转储中的 `nid` 对应，并不是所有语言和运行时排查都需要转换。
+
+### 1.4 常见原因
+
+- 死循环或忙等；
+- 锁竞争和 CAS 重试；
+- 序列化、压缩、加密；
+- 频繁 GC；
+- 正则回溯；
+- 小系统调用风暴；
+- 日志格式化；
+- cache miss、伪共享；
+- 大量上下文切换；
+- 中断或软中断负载。
+
+CPU 利用率高不一定是坏事。如果吞吐按预期增加、延迟稳定，可能只是资源被充分利用。问题通常是饱和后排队和尾延迟失控。
+
+## 2. 上下文切换和调度延迟
+
+```bash
+pidstat -w -p <pid> 1
+vmstat 1
+perf stat -e context-switches,cpu-migrations -p <pid> -- sleep 10
+perf sched record -- sleep 10
+perf sched timehist
+```
+
+需要区分：
+
+- voluntary context switch：阻塞或主动等待；
+- involuntary context switch：被抢占；
+- CPU migration：任务迁移核心；
+- scheduler latency：可运行后等待多久才真正运行。
 
 常见原因：
 
-* 死循环。
-* 忙等。
-* 锁竞争。
-* 频繁 GC。
-* 线程数过多。
-* 系统调用频繁。
-* 正则、序列化、压缩等 CPU 密集任务。
+- 线程数远多于 CPU；
+- 细粒度锁和条件变量；
+- 大量短任务；
+- 线程池配置不当；
+- CPU quota 节流；
+- 实时任务压制普通任务。
 
+## 3. 内存占用高
 
+### 3.1 先区分指标
 
-## 2. 内存占用高怎么排查？
+- **VSS/VIRT**：虚拟地址空间，不等于实际占用 RAM；
+- **RSS/RES**：驻留物理页，包含共享页的重复计数视角；
+- **PSS**：共享页按比例分摊，更适合估算进程实际贡献；
+- **USS**：进程独占驻留内存；
+- **匿名内存、文件页缓存、共享内存**：来源不同；
+- **cgroup memory.current**：容器或组级记账。
 
-思路：
+```bash
+free -h
+cat /proc/meminfo
+cat /proc/<pid>/status
+cat /proc/<pid>/smaps_rollup
+pmap -x <pid>
+pidstat -r -p <pid> 1
+```
 
-1. `free -h` 查看系统内存。
-2. `top` 查看进程内存。
-3. `pmap` 查看进程内存映射。
-4. 查看是否有内存泄漏。
-5. 查看是否频繁 swap。
-6. Java 程序看堆、直接内存、元空间、线程栈。
-7. C/C++ 程序可用 valgrind、asan、heap profiler。
+### 3.2 检查页面行为
 
-常见原因：
-
-* 内存泄漏。
-* 缓存无限增长。
-* 大对象未释放。
-* 线程太多导致栈占用高。
-* mmap 文件过多。
-* 容器内存限制配置不合理。
-
-
-
-## 3. 磁盘 IO 高怎么排查？
-
-常用工具：
-
-* `iostat`
-* `iotop`
-* `vmstat`
-* `pidstat`
-
-关注指标：
-
-* 磁盘利用率。
-* await 延迟。
-* 读写吞吐。
-* IOPS。
-* 是否频繁 swap。
-* 是否有大量日志写入。
-
-常见原因：
-
-* 日志量过大。
-* 数据库刷盘。
-* 频繁 swap。
-* 大量小文件读写。
-* 页面缓存失效。
-* 磁盘故障或性能瓶颈。
-
-
-
-## 4. 网络 IO 问题怎么排查？
-
-常用工具：
-
-* `ss`
-* `netstat`
-* `iftop`
-* `tcpdump`
-* `sar`
-* `ping`
-* `traceroute`
+```bash
+vmstat 1
+pidstat -r -p <pid> 1
+sar -B 1
+cat /proc/pressure/memory
+```
 
 关注：
 
-* 连接数。
-* TIME_WAIT 数量。
-* CLOSE_WAIT 数量。
-* 丢包。
-* 重传。
-* 带宽。
-* listen backlog。
-* fd 是否耗尽。
+- minor/major fault；
+- swap in/out；
+- direct reclaim；
+- PSI memory pressure；
+- OOM 与 cgroup `memory.events`。
+
+### 3.3 C/C++ 工具
+
+- AddressSanitizer：越界、UAF 等，通常用于测试环境；
+- LeakSanitizer；
+- Valgrind Memcheck：开销较高；
+- heaptrack；
+- jemalloc/tcmalloc profiler；
+- `perf mem`；
+- core dump。
+
+“内存高”不等于“内存泄漏”。还可能是：
+
+- 正常缓存；
+- allocator arena 和碎片；
+- page cache；
+- 线程栈保留；
+- `mmap`；
+- 共享内存；
+- 大页；
+- 延迟归还操作系统。
+
+## 4. 磁盘 I/O 高
+
+```bash
+iostat -x 1
+pidstat -d 1
+iotop
+vmstat 1
+cat /proc/pressure/io
+```
+
+关注：
+
+- IOPS；
+- 吞吐；
+- `await`；
+- 队列深度；
+- 读写比例；
+- I/O PSI；
+- 写回和 fsync 延迟；
+- 是否发生 swap。
+
+不要机械认为 `%util = 100%` 就一定表示现代 NVMe 已完全饱和。并行队列设备上，应结合队列深度、吞吐、延迟和设备规格判断。
 
 常见原因：
 
-* 连接泄漏。
-* 对端不关闭连接。
-* fd 上限不足。
-* backlog 太小。
-* 网络拥塞。
-* DNS 慢。
-* 下游服务慢。
+- 数据库 checkpoint/compaction；
+- 同步日志和 `fsync`；
+- 大量小随机 I/O；
+- page cache 失效；
+- 内存压力触发回收和 swap；
+- 存储设备故障或降速；
+- 容器 I/O 限流；
+- 文件系统锁和 journal。
 
+## 5. 网络问题
 
+### 5.1 基础工具
 
-## 5. 线上服务突然变慢怎么分析？
+```bash
+ss -s
+ss -tanp
+sar -n DEV,TCP,ETCP 1
+nstat
+ip -s link
+ethtool -S <iface>
+tcpdump -i <iface> -nn
+```
 
-可以按这个顺序分析：
+关注：
 
-1. 先确认现象
-   是整体慢，还是部分接口慢？是平均延迟升高，还是 P99 升高？
+- 建连和重置；
+- retransmit；
+- RTT；
+- 丢包；
+- listen queue；
+- send/receive queue；
+- TIME_WAIT；
+- CLOSE_WAIT；
+- conntrack；
+- fd 上限；
+- 网卡 drop 和 error；
+- CPU 软中断。
 
-2. 看 CPU
-   是否打满？是否上下文切换过多？是否锁竞争？
+### 5.2 状态解释
 
-3. 看内存
-   是否内存不足？是否 swap？是否 GC 频繁？
+- **TIME_WAIT 多**：可能是大量主动关闭连接，也可能是正常高请求率，不应直接清理；
+- **CLOSE_WAIT 多**：应用收到对端 FIN 后没有及时关闭本地 fd；
+- **SYN backlog 溢出**：建连压力或服务接受不及时；
+- **accept queue 堆积**：应用没有足够快地 `accept()`；
+- **重传高**：可能是网络丢包、拥塞、MTU、接收端压力或设备问题。
 
-4. 看磁盘
-   是否 IO wait 高？日志或数据库写入是否异常？
+## 6. 锁竞争和死锁
 
-5. 看网络
-   是否丢包、重传、连接数异常？
+```bash
+perf lock record -p <pid> -- sleep 20
+perf lock report
+gdb -p <pid>
+```
 
-6. 看线程
-   是否线程池耗尽？是否大量阻塞？
+观察：
 
-7. 看文件描述符
-   是否 fd 泄漏或达到上限？
+- 哪些锁等待时间长；
+- 持锁者在做什么；
+- 是否持锁执行 I/O；
+- 是否发生锁顺序反转；
+- 原子变量是否造成缓存行争用；
+- 线程池是否因同步等待耗尽。
 
-8. 看依赖服务
-   数据库、缓存、RPC、消息队列是否变慢？
+## 7. 容器问题
 
-9. 看日志
-   是否有错误、超时、OOM、连接失败？
+```bash
+cat /sys/fs/cgroup/cpu.stat
+cat /sys/fs/cgroup/memory.current
+cat /sys/fs/cgroup/memory.events
+cat /sys/fs/cgroup/io.stat
+cat /proc/pressure/cpu
+cat /proc/pressure/memory
+cat /proc/pressure/io
+```
 
-10. 看最近变更
-    是否刚上线代码、改配置、扩缩容、流量突增？
+常见误判：
 
+- 宿主机有空闲 CPU，但容器被 `cpu.max` 节流；
+- 宿主机有内存，但 cgroup 达到 `memory.max`；
+- 容器进程数少，但线程数触发 `pids.max`；
+- overlay copy-up 导致首次写延迟；
+- 容器内看到的指标受 namespace 和 cgroup 视图影响。
 
+## 8. 线上服务突然变慢
+
+推荐顺序：
+
+1. **确认用户现象**：哪些接口、哪些区域、平均还是 P99/P999；
+2. **检查错误率和超时**；
+3. **查看最近变更**：代码、配置、依赖、流量、扩缩容；
+4. **检查资源饱和**：CPU、内存、I/O、网络、fd、连接池；
+5. **检查排队位置**：入口、线程池、数据库池、消息队列、下游；
+6. **分解延迟**：DNS、建连、TLS、排队、业务、存储、下游；
+7. **剖析热点**：CPU profile、off-CPU、锁和 I/O；
+8. **验证假设**：通过指标、日志、trace 和对照实验；
+9. **先止损再根因**：限流、降级、回滚、扩容；
+10. **保留现场**：采集 profile、线程栈、cgroup、网络和系统指标。
+
+不要同时无依据地调整多个参数，否则会破坏因果关系。
 
 # 十七、常见疑问
 
@@ -4728,105 +4951,306 @@ flowchart LR
 
 不一定。
 
-`malloc` 通常只是分配虚拟地址空间，物理内存可能在真正访问时才通过缺页中断分配。
+`malloc()` 是用户态分配器接口。请求可能：
 
-这叫**按需分页**。
+- 从分配器已有空闲块满足；
+- 扩展 heap；
+- 建立新的匿名 `mmap`；
+- 只保留虚拟地址和提交记账；
+- 在首次写入时通过页故障获得物理页。
 
+典型层次：
 
+```mermaid
+flowchart TD
+    A["malloc/new"] --> B["用户态 allocator"]
+    B --> C{"已有空闲块？"}
+    C -->|是| D["直接返回"]
+    C -->|否| E["brk/mmap 等向内核申请地址空间"]
+    E --> F["返回虚拟地址"]
+    F --> G["首次访问触发页故障"]
+    G --> H["分配/映射物理页"]
+```
+
+需要注意：
+
+- `malloc()` 返回非空不保证未来所有页面一定可成功物理化，系统可能启用 overcommit；
+- `calloc()` 的零初始化可能利用共享零页和按需分配；
+- 大块内存释放后，分配器不一定立刻把 RSS 全部还给内核。
 
 ## 2. 进程崩溃会影响其他进程吗？
 
-一般不会。
+通常不会直接破坏其他进程的私有地址空间，因为进程间有页表和权限隔离。
 
-因为进程之间地址空间隔离，一个进程崩溃通常不会破坏其他进程内存。
+但可能产生间接影响：
 
-但**如果它们共享资源，例如共享内存、文件、数据库连接、锁，可能产生间接影响**。
+- 共享内存中留下不一致状态；
+- 持有文件锁或数据库事务；
+- 服务不可用导致级联超时；
+- 写到一半的文件或外部系统副作用；
+- 共享设备、内核驱动或资源耗尽；
+- 进程是关键守护程序；
+- 内核漏洞或特权程序错误。
 
+健壮进程共享互斥锁、事务日志和租约等机制可用于处理所有者异常退出。
 
+## 3. “线程崩溃”一定导致整个进程退出吗？
 
-## 3. 线程崩溃会影响整个进程吗？
+要区分：
 
-通常会。
+- 线程函数正常返回：只结束该线程；
+- 调用 `pthread_exit()`：只结束当前线程；
+- 未捕获的 C++ 异常越过线程入口：通常调用 `std::terminate()`，导致进程终止；
+- `SIGSEGV`、`SIGABRT` 等致命信号使用默认处置：通常终止整个进程；
+- 内存越界未立刻触发信号：可能先破坏共享状态，之后在其他线程崩溃。
 
-同一进程内多个线程共享地址空间，一个线程非法写内存可能破坏整个进程的数据结构，严重时导致整个进程崩溃。
+因为线程共享地址空间，系统通常无法把严重内存破坏安全地限制在一个线程内。
 
+## 4. 栈和堆有什么区别？
 
+| 对比点 | 栈 | 堆/动态分配区域 |
+|---|---|---|
+| 典型用途 | 调用帧、局部对象、保存寄存器 | 动态生命周期对象 |
+| 管理方式 | 编译器、ABI 和运行时自动调整 | allocator、程序或 GC 管理 |
+| 生命周期 | 通常受词法作用域和调用控制 | 可跨函数和线程，取决于所有权 |
+| 分配成本 | 通常只是调整栈指针 | 查找空闲块、同步、元数据等 |
+| 容量 | 每线程通常有限 | 受地址空间、内存限制和 allocator 约束 |
+| 常见问题 | 栈溢出、悬空栈引用 | 泄漏、UAF、碎片、double free |
 
-## 4. 栈和堆区别是什么？
-
-| 对比点  | 栈           | 堆           |
-| - | -- | -- |
-| 管理方式 | 编译器/运行时自动管理 | 程序员或 GC 管理  |
-| 生命周期 | 随函数调用创建和销毁  | 手动释放或 GC 回收 |
-| 空间大小 | 通常较小        | 通常较大        |
-| 分配速度 | 快           | 相对慢         |
-| 常见问题 | 栈溢出         | 内存泄漏、碎片     |
-
-
+“栈一定在高地址向低地址增长”不是跨平台保证；“堆一定连续向上增长”也不适用于现代 allocator 和 `mmap`。
 
 ## 5. 栈溢出是什么？
 
-栈空间耗尽。
+线程栈超过可用映射和保护范围。
 
 常见原因：
 
-* 递归太深。
-* 局部变量过大。
-* 无限递归。
+- 无限或过深递归；
+- 巨大局部数组；
+- 调用链过深；
+- 每线程栈配置过小；
+- 递归中保存大对象；
+- 栈内存破坏导致栈指针异常。
 
-
+部分系统在栈边缘设置 guard page，越界时触发页故障和致命信号。
 
 ## 6. 内存泄漏是什么？
 
-程序申请的堆内存不再使用，但没有释放，导致可用内存越来越少。
+严格意义上的泄漏是程序失去对已分配资源的可达引用，导致无法再释放。
 
-C/C++ 中常见于：
+还需要区分：
 
-* `malloc` 后没有 `free`。
-* `new` 后没有 `delete`。
-* 智能指针循环引用。
+- **真正泄漏**：对象不可达；
+- **逻辑泄漏**：容器或缓存一直持有不再需要的数据；
+- **allocator retention**：内存已 free，但分配器保留未归还内核；
+- **碎片**：空闲总量足够，但布局难以满足请求；
+- **有界缓存**：占用高但属于设计容量。
 
+C++ 常见原因：
 
+- 所有权不清晰；
+- 异常路径漏释放；
+- `shared_ptr` 环；
+- 全局注册表不清理；
+- 线程局部缓存；
+- C API 与 RAII 混用。
 
 ## 7. 文件描述符是什么？
 
-文件描述符是内核为进程打开的文件、socket、管道等资源分配的整数编号。
+文件描述符是当前进程 fd 表中的非负整数索引。
 
-常见：
+```text
+fd 整数
+   ↓
+fd table entry
+   ↓
+open file description
+   ↓
+inode / socket / pipe / eventfd / epoll instance ...
+```
 
-* 0：标准输入
-* 1：标准输出
-* 2：标准错误
+需要注意：
 
-**文件描述符属于进程资源**。
+- fd 是进程级表项，但同一进程线程共享 fd 表；
+- `fork()` 后父子 fd 表独立，但表项可指向同一 open file description；
+- fd 被关闭后整数可能很快复用，异步代码要防止 fd reuse bug；
+- `FD_CLOEXEC` 可防止不需要的 fd 泄漏到 exec 后的新程序。
 
+标准约定：
 
+- 0：stdin；
+- 1：stdout；
+- 2：stderr。
 
-## 8. FILE* 和文件描述符区别
+它们可以被关闭或重定向，不保证永远指向终端。
 
-| 对比点  | 文件描述符 fd        | FILE*              |
-| - |  |  |
-| 层次   | 系统调用层           | C 标准库层             |
-| 类型   | int             | 结构体指针              |
-| 缓冲   | 通常无用户态缓冲        | 有 stdio 缓冲         |
-| 常用函数 | read/write/open | fread/fwrite/fopen |
+## 8. FILE* 和 fd 的区别
 
-`FILE*` 底层通常封装了 fd。
+| 对比点 | fd | `FILE*` |
+|---|---|---|
+| 层次 | POSIX/系统调用接口 | C 标准 I/O 库 |
+| 类型 | `int` | `FILE` 对象指针 |
+| 用户态缓冲 | 通常由调用者自行管理 | 通常有 stdio 缓冲 |
+| 常用接口 | `open/read/write/close` | `fopen/fread/fwrite/fclose` |
+| 格式化 | 无 | `fprintf/fscanf` 等 |
+| 线程同步 | 依接口和应用 | stdio 通常含内部锁 |
 
+`FILE*` 在 POSIX 实现中通常封装一个 fd，但 C 标准本身不要求底层一定是 POSIX fd。
 
+不要混用后忘记：
 
-## 9. 缓冲 IO 和非缓冲 IO
+- stdio 缓冲可能尚未 flush；
+- `fileno()` 取得 fd 后直接操作可能破坏缓冲区对偏移的假设；
+- `fork()` 会复制用户态 stdio 缓冲，未 flush 内容可能被父子重复输出；
+- `exec()` 不保留 `FILE*` 对象，但未设置 CLOEXEC 的 fd 可能保留。
 
-缓冲 IO：
+## 9. 缓冲 I/O 和“非缓冲 I/O”
 
-* 数据先进入用户态缓冲区。
-* 减少系统调用次数。
-* 例如 `stdio` 的 `fread/fwrite`。
+在 C 标准库语境中：
 
-非缓冲 IO：
+- 缓冲 I/O：`stdio` 在用户态聚合数据，再调用系统调用；
+- 低级 fd I/O：`read/write` 没有 `FILE*` 的用户态 stdio 缓冲。
 
-* 每次更直接调用系统调用。
-* 控制更精细。
-* 但频繁调用开销大。
+但 `read/write` 通常仍经过内核 page cache 或 Socket 缓冲，所以“非缓冲”不等于完全没有任何缓冲。
 
+`O_DIRECT` 尝试绕过 page cache，但：
+
+- 有严格对齐和文件系统限制；
+- 不保证设备没有缓存；
+- 不保证所有 I/O 都真正零拷贝；
+- 需要应用自己处理缓存、对齐和并发一致性。
+
+## 10. read/write 是否保证一次完成全部长度？
+
+不保证。
+
+可能原因：
+
+- 管道或 Socket 当前只有部分数据；
+- 非阻塞 fd；
+- 信号中断；
+- 设备和文件语义；
+- 发送缓冲区空间不足；
+- 到达 EOF。
+
+因此可靠代码需要：
+
+- 循环处理剩余长度；
+- 正确处理 `EINTR`；
+- 非阻塞时处理 `EAGAIN`；
+- 区分 0、正数和 -1；
+- 对 TCP 自行设计消息边界。
+
+TCP 是字节流：
+
+```text
+一次 write ≠ 对端一次 read
+多次 write 可能合并
+一次 write 也可能被多次 read
+```
+
+## 11. TLB miss 和 page fault 有什么区别？
+
+- TLB miss：处理器地址转换缓存未命中；
+- page walk 找到有效页表项后可继续，不需要内核处理；
+- page fault：映射不存在、权限不允许或需要 COW/按需装页等内核处理。
+
+因此：
+
+```text
+TLB miss 不一定 page fault
+page fault 通常发生在 TLB miss 后发现页表条件不满足
+```
+
+## 12. 用户态/内核态切换一定发生上下文切换吗？
+
+不一定。
+
+系统调用可以：
+
+```text
+线程 A 用户态 → 线程 A 内核态 → 线程 A 用户态
+```
+
+整个过程仍是线程 A。
+
+只有调度器从 A 切换到 B 时，才发生任务上下文切换。
+
+## 13. volatile 能用于线程同步吗？
+
+普通 `volatile` 不能代替原子和锁。
+
+在 C/C++ 中，`volatile` 主要约束编译器对特定对象访问的省略和合并，常用于：
+
+- 内存映射 I/O；
+- 信号处理中的 `volatile sig_atomic_t`；
+- 特定底层场景。
+
+它不提供：
+
+- 原子性；
+- 线程间 happens-before；
+- 锁语义；
+- 一般内存屏障。
+
+多线程共享状态应使用 `std::atomic`、互斥锁或其他同步原语。
+
+## 14. 共享内存为什么还需要同步？
+
+两个进程映射同一物理页，只解决“双方能看到同一存储”。
+
+它不解决：
+
+- 谁先写；
+- 何时可以读；
+- 写入是否完成；
+- 多字段更新是否一致；
+- 对象生命周期；
+- 崩溃恢复。
+
+典型协议需要：
+
+- 原子状态；
+- 进程共享 mutex/condition variable；
+- semaphore；
+- sequence number；
+- ring buffer head/tail；
+- 内存序；
+- 所有者死亡恢复。
+
+## 15. 协程数量可以无限增加吗？
+
+不可以。
+
+单个协程通常比线程轻量，但仍占用：
+
+- 协程帧或栈；
+- 调度队列节点；
+- Future、回调和定时器；
+- 请求缓冲区；
+- 连接和 fd；
+- 日志、trace 和业务对象。
+
+缺少并发上限和背压时，百万级“轻量任务”同样可能导致内存耗尽和尾延迟失控。
+
+---
+
+# 参考资料
+
+以下资料用于核对本文中的 Linux/POSIX 实现细节：
+
+1. [Linux Kernel Documentation: EEVDF Scheduler](https://docs.kernel.org/scheduler/sched-eevdf.html)
+2. [Linux Kernel Documentation: Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
+3. [Linux man-pages: epoll(7)](https://man7.org/linux/man-pages/man7/epoll.7.html)
+4. [Linux man-pages: select(2)](https://man7.org/linux/man-pages/man2/select.2.html)
+5. [Linux man-pages: poll(2)](https://man7.org/linux/man-pages/man2/poll.2.html)
+6. [Linux man-pages: fork(2)](https://man7.org/linux/man-pages/man2/fork.2.html)
+7. [Linux man-pages: execve(2)](https://man7.org/linux/man-pages/man2/execve.2.html)
+8. [Linux man-pages: signal-safety(7)](https://man7.org/linux/man-pages/man7/signal-safety.7.html)
+9. [Linux man-pages: futex(2)](https://man7.org/linux/man-pages/man2/futex.2.html)
+10. [Linux man-pages: mmap(2)](https://man7.org/linux/man-pages/man2/mmap.2.html)
+11. [Linux man-pages: io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
+12. [Linux man-pages: namespaces(7)](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+
+> 内核文档和 man-pages 会持续更新。阅读具体机器行为时，应同时检查发行版内核版本、配置选项和对应源码。
 

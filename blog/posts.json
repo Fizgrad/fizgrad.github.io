@@ -6,10 +6,10 @@
     "descriptionEn": "The LLVM Compiler Infrastructure Project."
   },
   {
-    "title": "OS Review",
+    "title": "Linux 系统基础复习",
     "slug": "os_review",
-    "description": "操作系统复习笔记",
-    "descriptionEn": "Operating Systems review notes."
+    "description": "Linux系统基础复习笔记",
+    "descriptionEn": "Linux System Fundamentals review notes."
   },
   {
     "title": "WASM",
