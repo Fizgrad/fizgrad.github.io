@@ -345,7 +345,7 @@
       arrow()
     ]);
 
-    var title = el("h3", { class: "card-title" }, post.title);
+    var title = el("h3", { class: "card-title" }, lang === "en" ? (post.titleEn || post.title) : post.title);
     var descText = lang === "en" ? (post.descriptionEn || post.description) : post.description;
     var desc = el("p", { class: "card-desc" }, descText);
 
@@ -474,7 +474,6 @@
     lang = l;
     dict = I18N[lang];
     phrases = dict.phrases;
-    document.documentElement.lang = dict.lang;
     updStaticText();
     renderCards(!isInitial);
     if (!isInitial) {

@@ -14,6 +14,16 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" crossorigin="anonymous"></script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      }
+    };
+  </script>
 </head>
 <body>
   <div class="grid-overlay" aria-hidden="true"></div>
@@ -22,13 +32,22 @@
     <a href="../" class="nav-logo">&lt;fizgrad/&gt;</a>
     <nav class="nav-links">
       <a href="../">← 主页 / Home</a>
+      <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
     </nav>
   </header>
 
   <main id="main" class="post-page">
-    <article class="markdown-body post-wrap" id="post-content">
-      <p class="post-loading">加载中 / Loading...</p>
-    </article>
+    <div class="post-layout">
+      <article class="markdown-body post-wrap post-main" id="post-content">
+        <p class="post-loading">加载中 / Loading...</p>
+      </article>
+
+      <aside class="toc-sidebar" id="toc-sidebar">
+        <div class="toc-title">目录/TOC</div>
+        <div class="toc-progress"><div class="toc-progress-bar" id="toc-progress-bar"></div></div>
+        <ul class="toc-nav" id="toc-nav"></ul>
+      </aside>
+    </div>
   </main>
 
   <footer class="footer">
@@ -40,7 +59,35 @@
     (function () {
       var params = new URLSearchParams(window.location.search);
       var slug = params.get("slug");
+      var currentPost = null;
+      var lang = (function () {
+        var stored = localStorage.getItem("lang");
+        if (stored === "en" || stored === "zh") return stored;
+        return (navigator.language || "zh").toLowerCase().indexOf("en") === 0 ? "en" : "zh";
+      })();
+
+      function updateTitle() {
+        var title = currentPost ? (lang === "en" ? (currentPost.titleEn || currentPost.title) : currentPost.title) : "博客";
+        document.title = title + " - Fizgrad";
+      }
+
+      function updateLangBtn() {
+        var btn = document.getElementById("lang-toggle");
+        if (btn) {
+          btn.textContent = lang === "zh" ? "EN" : "中";
+          btn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
+        }
+      }
+
       document.getElementById("year").textContent = new Date().getFullYear();
+      updateLangBtn();
+
+      document.getElementById("lang-toggle").addEventListener("click", function () {
+        lang = lang === "zh" ? "en" : "zh";
+        updateTitle();
+        updateLangBtn();
+        localStorage.setItem("lang", lang);
+      });
 
       if (!slug) {
         document.getElementById("post-content").innerHTML = '<p class="post-loading">没有找到文章 / Post not found</p>';
@@ -51,7 +98,10 @@
         .then(function (r) { return r.json(); })
         .then(function (posts) {
           var post = posts.find(function (p) { return p.slug === slug; });
-          if (post) document.title = post.title + " - Fizgrad";
+          if (post) {
+            currentPost = post;
+            updateTitle();
+          }
           return fetch(slug + ".md");
         })
         .then(function (r) {
@@ -70,6 +120,9 @@
             container.querySelectorAll("pre code:not(.language-mermaid)").forEach(function (block) {
               hljs.highlightElement(block);
             });
+          }
+          if (typeof MathJax !== "undefined") {
+            MathJax.typesetPromise([container]).catch(function () {});
           }
           container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
             if (pre.querySelector(".copy-btn")) return;
@@ -178,6 +231,86 @@
             link.setAttribute("aria-label", "Anchor: " + text);
             h.appendChild(link);
           });
+
+          /* ===================== Build TOC ===================== */
+          var headings = container.querySelectorAll("h1, h2, h3, h4, h5");
+          if (headings.length >= 2) {
+            var tocNav = document.getElementById("toc-nav");
+            var headingData = [];
+
+            headings.forEach(function (h) {
+              var level = parseInt(h.tagName.charAt(1), 10);
+              var text = h.textContent.replace(/#\s*$/, "").trim();
+              headingData.push({ el: h, id: h.id, level: level, text: text });
+            });
+
+            var tocHTML = "";
+            headingData.forEach(function (item) {
+              var cls = "toc-h" + item.level;
+              tocHTML += '<li><a href="#' + item.id + '" class="' + cls + '" data-toc-target="' + item.id + '">' + item.text + '</a></li>';
+            });
+            tocNav.innerHTML = tocHTML;
+
+            /* Smooth scroll for TOC links (account for fixed nav) */
+            document.querySelectorAll("#toc-sidebar .toc-nav a").forEach(function (a) {
+              a.addEventListener("click", function (e) {
+                e.preventDefault();
+                var targetId = a.getAttribute("href").slice(1);
+                var target = document.getElementById(targetId);
+                if (target) {
+                  var top = target.getBoundingClientRect().top + window.scrollY - 70;
+                  window.scrollTo({ top: top, behavior: "smooth" });
+                  history.replaceState(null, "", "#" + targetId);
+                }
+              });
+            });
+
+            /* Scroll spy: highlight current section */
+            var tocLinks = document.querySelectorAll("#toc-sidebar .toc-nav a");
+            var progressBar = document.getElementById("toc-progress-bar");
+            var scrollPadding = 80;
+
+            function updateTOC() {
+              var scrollPos = window.scrollY + scrollPadding;
+              var currentIdx = 0;
+              for (var i = 0; i < headingData.length; i++) {
+                if (headingData[i].el.getBoundingClientRect().top + window.scrollY <= scrollPos) {
+                  currentIdx = i;
+                } else {
+                  break;
+                }
+              }
+              tocLinks.forEach(function (link) {
+                link.classList.toggle("active", link.dataset.tocTarget === headingData[currentIdx].id);
+              });
+
+              /* Auto-scroll TOC sidebar to keep active item visible */
+              var tocSidebar = document.getElementById("toc-sidebar");
+              var activeLink = tocSidebar.querySelector("a.active");
+              if (activeLink) {
+                var sidebarRect = tocSidebar.getBoundingClientRect();
+                var linkRect = activeLink.getBoundingClientRect();
+                if (linkRect.top < sidebarRect.top || linkRect.bottom > sidebarRect.bottom) {
+                  activeLink.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                }
+              }
+
+              /* Progress bar */
+              var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+              var scrollPct = docHeight > 0 ? Math.min(window.scrollY / docHeight, 1) : 0;
+              progressBar.style.width = (scrollPct * 100) + "%";
+            }
+
+            var scrollTimer = null;
+            window.addEventListener("scroll", function () {
+              if (scrollTimer) return;
+              scrollTimer = requestAnimationFrame(function () {
+                updateTOC();
+                scrollTimer = null;
+              });
+            }, { passive: true });
+            updateTOC();
+          }
           container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
             var code = pre.querySelector("code");
             if (!code) return;

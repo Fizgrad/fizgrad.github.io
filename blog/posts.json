@@ -1,36 +1,49 @@
 [
   {
+    "title": "杂七杂八的计算机网络",
+    "titleEn": "Miscellaneous Computer Networking",
+    "slug": "Network",
+    "description": "计算机网络基础知识杂记",
+    "descriptionEn": "Miscellaneous notes on computer networking fundamentals."
+  },
+  {
     "title": "LLVM",
+    "titleEn": "LLVM",
     "slug": "llvm_review",
     "description": "LLVM编译器基础设施",
     "descriptionEn": "The LLVM Compiler Infrastructure Project."
   },
   {
     "title": "Linux 系统基础复习",
+    "titleEn": "Linux System Fundamentals Review",
     "slug": "os_review",
     "description": "Linux系统基础复习笔记",
     "descriptionEn": "Linux System Fundamentals review notes."
   },
   {
     "title": "WASM",
+    "titleEn": "WASM",
     "slug": "wasm",
     "description": "WASM简介",
     "descriptionEn": "Introduction to WASM."
   },
   {
     "title": "我使用的C++复习笔记",
+    "titleEn": "My C++ Review Notes",
     "slug": "cpp_review",
     "description": "C++入土笔记",
     "descriptionEn": "C++ review notes."
   },
   {
     "title": "JVM notes",
+    "titleEn": "JVM Notes",
     "slug": "jvm_notes",
     "description": "JVM复习笔记",
     "descriptionEn": "JVM review notes."
   },
   {
     "title": "Hello World",
+    "titleEn": "Hello World",
     "slug": "hello-world",
     "description": "我的第一篇博客文章。",
     "descriptionEn": "My first blog post."
