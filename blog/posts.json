@@ -7,8 +7,8 @@
     "descriptionEn": "Miscellaneous notes on computer networking fundamentals."
   },
   {
-    "title": "LLVM",
-    "titleEn": "LLVM",
+    "title": "LLVM而不是LLM",
+    "titleEn": "LLVM, Not LLM",
     "slug": "llvm_review",
     "description": "LLVM编译器基础设施",
     "descriptionEn": "The LLVM Compiler Infrastructure Project."
@@ -21,22 +21,22 @@
     "descriptionEn": "Linux System Fundamentals review notes."
   },
   {
-    "title": "WASM",
-    "titleEn": "WASM",
+    "title": "WASM虚拟机",
+    "titleEn": "WASM Virtual Machine",
     "slug": "wasm",
     "description": "WASM简介",
     "descriptionEn": "Introduction to WASM."
   },
   {
-    "title": "我使用的C++复习笔记",
+    "title": "我使用的C++入土笔记",
     "titleEn": "My C++ Review Notes",
     "slug": "cpp_review",
     "description": "C++入土笔记",
     "descriptionEn": "C++ review notes."
   },
   {
-    "title": "JVM notes",
-    "titleEn": "JVM Notes",
+    "title": "JVM里面长啥样",
+    "titleEn": "What JVM Looks Like Inside",
     "slug": "jvm_notes",
     "description": "JVM复习笔记",
     "descriptionEn": "JVM review notes."
