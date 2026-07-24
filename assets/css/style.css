@@ -763,9 +763,20 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 }
 
 @media (max-width: 640px) {
-  .nav-links { gap: 1rem; }
-  .nav-links a { font-size: 0.85rem; }
+  .nav-links { gap: 0.7rem; }
+  .nav-links a { font-size: 0.82rem; }
+  .nav-hide-sm { display: none; }
+  .nav-github-text { display: none; }
+  .nav-github-icon { display: inline-block; vertical-align: middle; }
+  .nav-github { padding: 0.25rem; }
+  .nav-back-full { display: none; }
+  .nav-back-short { display: inline; }
   .card-grid { grid-template-columns: 1fr; }
   .socials a span { display: none; }
   .socials a { padding: 0.6rem; }
+}
+
+@media (min-width: 641px) {
+  .nav-github-icon { display: none; }
+  .nav-back-short { display: none; }
 }

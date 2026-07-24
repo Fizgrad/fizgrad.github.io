@@ -21,6 +21,13 @@
     "descriptionEn": "Linux System Fundamentals review notes."
   },
   {
+    "title": "大模型之火",
+    "titleEn": "The Fire of LLMs",
+    "slug": "fuck_ai",
+    "description": "干啥都离不开大模型了现在，该学学了", 
+    "descriptionEn": "Everything is about LLMs now, it's time to learn."
+  },
+  {
     "title": "WASM虚拟机",
     "titleEn": "WASM Virtual Machine",
     "slug": "wasm",

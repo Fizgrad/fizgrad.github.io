@@ -14,16 +14,21 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" crossorigin="anonymous"></script>
-  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <script>
     window.MathJax = {
+      startup: { typeset: false },
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true
+      },
+      options: {
+        ignoreHtmlClass: 'tex2jax_ignore',
+        processHtmlClass: 'tex2jax_process'
       }
     };
   </script>
+  <script id="MathJax-script" defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
 </head>
 <body>
   <div class="grid-overlay" aria-hidden="true"></div>
@@ -31,7 +36,7 @@
   <header class="nav scrolled">
     <a href="../" class="nav-logo">&lt;fizgrad/&gt;</a>
     <nav class="nav-links">
-      <a href="../">← 主页 / Home</a>
+      <a href="../"><span class="nav-back-full">← 主页 / Home</span><span class="nav-back-short">←</span></a>
       <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
     </nav>
   </header>
@@ -57,6 +62,83 @@
 
   <script>
     (function () {
+      var mathItems = new Map();
+      var mathSeq = 0;
+
+      function emitMathToken(tex, display) {
+        var id = "math-" + (mathSeq++);
+        mathItems.set(id, { tex: tex, display: display });
+        var tag = display ? "div" : "span";
+        return '<' + tag + ' class="math-slot tex2jax_process" data-math-id="' + id + '"></' + tag + '>';
+      }
+
+      function hydrateMathSlots(container) {
+        var slots = container.querySelectorAll("[data-math-id]");
+        for (var i = 0; i < slots.length; i++) {
+          var slot = slots[i];
+          var id = slot.getAttribute("data-math-id");
+          var item = mathItems.get(id);
+          if (!item) { slot.textContent = "[公式数据缺失]"; continue; }
+          slot.textContent = item.display ? "\\[" + item.tex + "\\]" : "\\(" + item.tex + "\\)";
+        }
+      }
+
+      var parseMathExtension = {
+        name: "math",
+        level: "block",
+        start: function (src) {
+          var idx = src.indexOf("$$");
+          if (idx !== -1) return idx;
+          idx = src.indexOf("\\[");
+          return idx;
+        },
+        tokenizer: function (src) {
+          var dlMatch = src.match(/^\$\$([\s\S]*?)\$\$/);
+          if (!dlMatch) dlMatch = src.match(/^\\\[([\s\S]*?)\\\]/);
+          if (!dlMatch) return undefined;
+          var tex = dlMatch[1].trim();
+          var html = emitMathToken(tex, true);
+          return { type: "math", raw: dlMatch[0], html: html, tokens: [] };
+        },
+        renderer: function (token) { return token.html; }
+      };
+
+      var inlineMathExtension = {
+        name: "inlineMath",
+        level: "inline",
+        start: function (src) {
+          var m = src.match(/\\\(|\$(?!\$)/);
+          return m ? m.index : -1;
+        },
+        tokenizer: function (src) {
+          if (src[0] === "\\" && src[1] === "(") {
+            var end = src.indexOf("\\)", 2);
+            if (end === -1) return undefined;
+            var tex = src.slice(2, end).trim();
+            return { type: "inlineMath", raw: src.slice(0, end + 2), html: emitMathToken(tex, false), tokens: [] };
+          }
+          if (src[0] === "$" && src[1] !== "$") {
+            var idx = src.indexOf("$", 1);
+            if (idx === -1) return undefined;
+            if (src[idx - 1] === "\\") return undefined;
+            var tex2 = src.slice(1, idx).trim();
+            return { type: "inlineMath", raw: src.slice(0, idx + 1), html: emitMathToken(tex2, false), tokens: [] };
+          }
+          return undefined;
+        },
+        renderer: function (token) { return token.html; }
+      };
+
+      var markedReady = false;
+      if (typeof marked !== "undefined" && marked.parse) {
+        try {
+          marked.use({ extensions: [parseMathExtension, inlineMathExtension] });
+          markedReady = true;
+        } catch (e) {
+          markedReady = false;
+        }
+      }
+
       var params = new URLSearchParams(window.location.search);
       var slug = params.get("slug");
       var currentPost = null;
@@ -110,8 +192,12 @@
         })
         .then(function (md) {
           var container = document.getElementById("post-content");
-          if (typeof marked !== "undefined" && marked.parse) {
-            container.innerHTML = marked.parse(md);
+          if (markedReady) {
+            mathItems.clear();
+            mathSeq = 0;
+            var html = marked.parse(md);
+            container.innerHTML = html;
+            hydrateMathSlots(container);
           } else {
             container.innerHTML = "<pre>" + md.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</pre>";
             return;
@@ -121,7 +207,12 @@
               hljs.highlightElement(block);
             });
           }
-          if (typeof MathJax !== "undefined") {
+          if (typeof MathJax !== "undefined" && MathJax.startup && MathJax.startup.promise) {
+            MathJax.startup.promise.then(function () {
+              MathJax.typesetClear([container]);
+              MathJax.typesetPromise([container]).catch(function () {});
+            });
+          } else if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
             MathJax.typesetPromise([container]).catch(function () {});
           }
           container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
