@@ -785,9 +785,9 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
     position: fixed;
     top: 0;
     right: 0;
-    width: 220px;
+    width: 180px;
     height: 100vh;
-    padding: 4.5rem 1.5rem 2rem;
+    padding: 4.5rem 1.2rem 2rem;
     flex-direction: column;
     gap: 0.3rem;
     background: rgba(12, 12, 20, 0.97);
@@ -801,7 +801,7 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   .nav-links.open { transform: translateX(0); }
   .nav-links a {
     display: block;
-    padding: 0.7rem 0;
+    padding: 0.6rem 0;
     font-size: 0.95rem;
     border-bottom: 1px solid var(--border);
   }
@@ -840,15 +840,15 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   .nav-hamburger.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
   .nav-overlay {
+    display: none;
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.4);
     z-index: 48;
     opacity: 0;
-    pointer-events: none;
     transition: opacity 0.3s ease;
   }
-  .nav-overlay.open { opacity: 1; pointer-events: auto; }
+  .nav-overlay.open { display: block; opacity: 1; }
 }
 
 @media (min-width: 481px) {
