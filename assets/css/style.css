@@ -786,7 +786,8 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
     position: fixed;
     top: 0;
     right: 0;
-    width: 180px;
+    width: fit-content;
+    min-width: 160px;
     height: 100vh;
     padding: 4.5rem 1.2rem 2rem;
     flex-direction: column;
