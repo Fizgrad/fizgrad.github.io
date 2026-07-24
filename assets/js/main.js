@@ -580,7 +580,7 @@
 
     resize();
     initNodes();
-    if (reduce) { draw(); cancelAnimationFrame(raf); }
+    if (reduce) { draw(); }
     else draw();
 
     var rt;
@@ -600,11 +600,6 @@
       observeCards();
     });
     var toggle = document.getElementById("lang-toggle");
-    if (toggle) {
-      toggle.addEventListener("click", function () {
-        applyLang(lang === "zh" ? "en" : "zh", false);
-      });
-    }
     var hamburger = document.getElementById("nav-hamburger");
     var navMenu = document.getElementById("nav-menu");
     var navOverlay = document.getElementById("nav-overlay");
@@ -634,9 +629,14 @@
       navMenu.querySelectorAll("a").forEach(function (link) {
         link.addEventListener("click", closeMenu);
       });
-      if (toggle) {
-        toggle.addEventListener("click", closeMenu);
-      }
+    }
+    if (toggle) {
+      toggle.addEventListener("click", function () {
+        applyLang(lang === "zh" ? "en" : "zh", false);
+        if (navMenu && navMenu.classList.contains("open")) {
+          closeMenu();
+        }
+      });
     }
   });
 })();

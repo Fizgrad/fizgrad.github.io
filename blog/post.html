@@ -168,13 +168,6 @@
       document.getElementById("year").textContent = new Date().getFullYear();
       updateLangBtn();
 
-      document.getElementById("lang-toggle").addEventListener("click", function () {
-        lang = lang === "zh" ? "en" : "zh";
-        updateTitle();
-        updateLangBtn();
-        localStorage.setItem("lang", lang);
-      });
-
       var hamburger = document.getElementById("nav-hamburger");
       var navMenu = document.getElementById("nav-menu");
       var navOverlay = document.getElementById("nav-overlay");
@@ -204,11 +197,17 @@
         navMenu.querySelectorAll("a").forEach(function (link) {
           link.addEventListener("click", closeMenu);
         });
-        var langToggle = document.getElementById("lang-toggle");
-        if (langToggle) {
-          langToggle.addEventListener("click", closeMenu);
-        }
       }
+
+      document.getElementById("lang-toggle").addEventListener("click", function () {
+        lang = lang === "zh" ? "en" : "zh";
+        updateTitle();
+        updateLangBtn();
+        localStorage.setItem("lang", lang);
+        if (navMenu && navMenu.classList.contains("open")) {
+          closeMenu();
+        }
+      });
 
       if (!slug) {
         document.getElementById("post-content").innerHTML = '<p class="post-loading">没有找到文章 / Post not found</p>';
