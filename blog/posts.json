@@ -1,10 +1,24 @@
 [
   {
+    "title": "我的NebulaIM",
+    "titleEn": "My NebulaIM",
+    "slug": "nebula",
+    "description": "NebulaIM后端设计与实现",
+    "descriptionEn": "Design and implementation of the NebulaIM backend."
+  },
+  {
     "title": "杂七杂八的计算机网络",
     "titleEn": "Miscellaneous Computer Networking",
     "slug": "Network",
     "description": "计算机网络基础知识杂记",
     "descriptionEn": "Miscellaneous notes on computer networking fundamentals."
+  },
+  {
+    "title": "C++后端全景",
+    "titleEn": "C++ Backend Panorama",
+    "slug": "cpp_backend",
+    "description": "C++后端开发全景",
+    "descriptionEn": "A comprehensive overview of C++ backend development."
   },
   {
     "title": "LLVM而不是LLM",
@@ -33,6 +47,13 @@
     "slug": "wasm",
     "description": "WASM简介",
     "descriptionEn": "Introduction to WASM."
+  },
+  {
+    "title": "数据库探微",
+    "titleEn": "Database Exploration",
+    "slug": "database",
+    "description": "SQL、InnoDB、Redis、MongoDB...",
+    "descriptionEn": "SQL, InnoDB, Redis, MongoDB..."
   },
   {
     "title": "我使用的C++入土笔记",

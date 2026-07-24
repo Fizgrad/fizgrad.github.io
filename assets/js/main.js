@@ -605,5 +605,21 @@
         applyLang(lang === "zh" ? "en" : "zh", false);
       });
     }
+    var hamburger = document.getElementById("nav-hamburger");
+    var navMenu = document.getElementById("nav-menu");
+    if (hamburger && navMenu) {
+      hamburger.addEventListener("click", function () {
+        var open = navMenu.classList.toggle("open");
+        hamburger.classList.toggle("open");
+        hamburger.setAttribute("aria-expanded", open);
+      });
+      navMenu.querySelectorAll("a").forEach(function (link) {
+        link.addEventListener("click", function () {
+          navMenu.classList.remove("open");
+          hamburger.classList.remove("open");
+          hamburger.setAttribute("aria-expanded", "false");
+        });
+      });
+    }
   });
 })();
