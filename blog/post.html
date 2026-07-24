@@ -32,14 +32,10 @@
 </head>
 <body>
   <div class="grid-overlay" aria-hidden="true"></div>
-  <div class="nav-overlay" id="nav-overlay"></div>
 
   <header class="nav scrolled">
     <a href="../" class="nav-logo">&lt;fizgrad/&gt;</a>
-    <button class="nav-hamburger" id="nav-hamburger" type="button" aria-label="Toggle menu">
-      <span></span><span></span><span></span>
-    </button>
-    <nav class="nav-links" id="nav-menu">
+    <nav class="nav-links">
       <a href="../"><span class="nav-back-full">← 主页 / Home</span><span class="nav-back-short">←</span></a>
       <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
     </nav>
@@ -168,45 +164,11 @@
       document.getElementById("year").textContent = new Date().getFullYear();
       updateLangBtn();
 
-      var hamburger = document.getElementById("nav-hamburger");
-      var navMenu = document.getElementById("nav-menu");
-      var navOverlay = document.getElementById("nav-overlay");
-      var bodyEl = document.body;
-      if (hamburger && navMenu) {
-        function closeMenu() {
-          navMenu.classList.remove("open");
-          hamburger.classList.remove("open");
-          hamburger.setAttribute("aria-expanded", "false");
-          if (navOverlay) navOverlay.classList.remove("open");
-          bodyEl.style.overflow = "";
-        }
-        function openMenu() {
-          navMenu.classList.add("open");
-          hamburger.classList.add("open");
-          hamburger.setAttribute("aria-expanded", "true");
-          if (navOverlay) navOverlay.classList.add("open");
-          bodyEl.style.overflow = "hidden";
-        }
-        hamburger.addEventListener("click", function () {
-          if (navMenu.classList.contains("open")) { closeMenu(); }
-          else { openMenu(); }
-        });
-        if (navOverlay) {
-          navOverlay.addEventListener("click", closeMenu);
-        }
-        navMenu.querySelectorAll("a").forEach(function (link) {
-          link.addEventListener("click", closeMenu);
-        });
-      }
-
       document.getElementById("lang-toggle").addEventListener("click", function () {
         lang = lang === "zh" ? "en" : "zh";
         updateTitle();
         updateLangBtn();
         localStorage.setItem("lang", lang);
-        if (navMenu && navMenu.classList.contains("open")) {
-          closeMenu();
-        }
       });
 
       if (!slug) {
