@@ -816,7 +816,7 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   .nav-links .lang-btn {
     margin-top: 0.5rem;
     align-self: stretch;
-    text-align: left;
+    text-align: center;
     padding: 0.6rem 0;
     border: none;
     border-bottom: 1px solid var(--border);
