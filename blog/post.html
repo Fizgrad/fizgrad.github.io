@@ -178,22 +178,25 @@
       var hamburger = document.getElementById("nav-hamburger");
       var navMenu = document.getElementById("nav-menu");
       var navOverlay = document.getElementById("nav-overlay");
+      var bodyEl = document.body;
       if (hamburger && navMenu) {
         function closeMenu() {
           navMenu.classList.remove("open");
           hamburger.classList.remove("open");
           hamburger.setAttribute("aria-expanded", "false");
           if (navOverlay) navOverlay.classList.remove("open");
+          bodyEl.style.overflow = "";
+        }
+        function openMenu() {
+          navMenu.classList.add("open");
+          hamburger.classList.add("open");
+          hamburger.setAttribute("aria-expanded", "true");
+          if (navOverlay) navOverlay.classList.add("open");
+          bodyEl.style.overflow = "hidden";
         }
         hamburger.addEventListener("click", function () {
-          var open = navMenu.classList.contains("open");
-          if (open) { closeMenu(); }
-          else {
-            navMenu.classList.add("open");
-            hamburger.classList.add("open");
-            hamburger.setAttribute("aria-expanded", "true");
-            if (navOverlay) navOverlay.classList.add("open");
-          }
+          if (navMenu.classList.contains("open")) { closeMenu(); }
+          else { openMenu(); }
         });
         if (navOverlay) {
           navOverlay.addEventListener("click", closeMenu);
@@ -201,6 +204,10 @@
         navMenu.querySelectorAll("a").forEach(function (link) {
           link.addEventListener("click", closeMenu);
         });
+        var langToggle = document.getElementById("lang-toggle");
+        if (langToggle) {
+          langToggle.addEventListener("click", closeMenu);
+        }
       }
 
       if (!slug) {
