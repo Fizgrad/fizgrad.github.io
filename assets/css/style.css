@@ -92,14 +92,19 @@ a { color: inherit; text-decoration: none; }
   background-clip: text;
   color: transparent;
 }
-.nav-links { display: flex; gap: 1.6rem; }
+.nav-links { display: flex; align-items: center; gap: 1.6rem; }
 .nav-links a {
+  display: inline-flex;
+  align-items: center;
   font-size: 0.92rem;
   color: var(--text-dim);
   font-weight: 500;
   transition: color 0.2s;
   position: relative;
+  text-decoration: none;
 }
+.nav-github-icon { vertical-align: middle; }
+.nav-github-text { line-height: 1; }
 .nav-links a:hover { color: var(--text); }
 .nav-links a::after {
   content: "";
