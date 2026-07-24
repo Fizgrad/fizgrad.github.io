@@ -664,8 +664,9 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .back-top:hover { color: var(--accent-2); }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   .card { opacity: 1; transform: none; }
+  .hero-greet, .hero-name, .hero-tagline, .socials, .hero-scroll { opacity: 1; transform: none; }
 }
 
 /* ===================== TOC Sidebar ===================== */
@@ -811,7 +812,18 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
     gap: 0.5rem;
   }
   .nav-links a::after { display: none; }
-  .nav-links .lang-btn { margin-top: 0.5rem; align-self: flex-start; }
+  .nav-links .lang-btn {
+    margin-top: 0.5rem;
+    align-self: stretch;
+    text-align: left;
+    padding: 0.6rem 0;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+  }
   .nav-links .nav-github-text { display: inline; }
 
   .nav-hamburger {
