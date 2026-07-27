@@ -67,6 +67,10 @@ LEFT JOIN orders AS o ON o.user_id = u.id;
 
 注意：对于 `LEFT JOIN`，右表过滤条件放在 `ON` 和 `WHERE` 中含义可能不同。
 
+- ON 条件决定右表中的哪些记录可以参与匹配。
+- WHERE 条件在连接完成后，对最终结果再次过滤。
+
+### 第一种写法
 ```sql
 -- 保留没有订单的用户
 SELECT u.id, o.id
@@ -74,13 +78,43 @@ FROM users u
 LEFT JOIN orders o
     ON o.user_id = u.id
    AND o.amount > 100;
+```
 
+以 users 为主表，**为每个用户查找金额大于 100 的订单**。如果某个用户没有金额大于 100 的订单，仍然保留该用户，只是订单字段为 NULL。
+
+需要注意，保留的不只是“完全没有订单的用户”，还包括：
+- 没有任何订单的用户；
+- 有订单，但所有订单金额都不大于 100 的用户；
+- 有订单，但订单金额为 NULL 的用户。
+
+```sql
 -- WHERE 会过滤掉右表为 NULL 的记录，效果接近 INNER JOIN
 SELECT u.id, o.id
 FROM users u
 LEFT JOIN orders o ON o.user_id = u.id
 WHERE o.amount > 100;
 ```
+
+### 第二种写法
+
+只保留存在大额订单的用户
+它先进行普通的左连接：
+```sql
+LEFT JOIN orders o ON o.user_id = u.id
+```
+此时，没有订单的用户，其右表字段都是 NULL。
+
+然后执行：
+```sql
+WHERE o.amount > 100
+```
+对于没有匹配订单的用户，判断相当于：
+```sql
+NULL > 100
+```
+结果不是 TRUE，而是 UNKNOWN，因此被 WHERE 过滤掉。
+
+这种写法最终只保留金额大于 100 的订单记录
 
 ## 2.3 GROUP BY 与 HAVING
 
@@ -120,6 +154,15 @@ WHERE EXISTS (
 `EXISTS` 表达“是否至少存在一条匹配记录”。现代优化器经常能将 `EXISTS` 和 `IN` 改写为相似的半连接计划，因此不能机械地断言某一种写法永远更快，应结合执行计划判断。
 
 ## 2.5 窗口函数
+
+窗口函数用于：
+
+> 在保留每一行明细数据的同时，基于这一行所属的一组数据进行排名、累计、比较或统计。
+
+窗口函数和 GROUP BY 最大的区别是：
+
+- GROUP BY 会把多行压缩成一行；
+- 窗口函数不会减少结果行数，而是在每一行旁边增加计算结果。
 
 查询每个用户金额最高的订单：
 

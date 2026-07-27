@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Markdown 阅读器 - Fizgrad</title>
+  <link rel="icon" href="assets/img/avatar.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" crossorigin="anonymous"></script>
+  <script>
+    window.MathJax = {
+      startup: { typeset: false },
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      options: {
+        ignoreHtmlClass: 'tex2jax_ignore',
+        processHtmlClass: 'tex2jax_process'
+      }
+    };
+  </script>
+  <script id="MathJax-script" defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+  <div class="grid-overlay" aria-hidden="true"></div>
+
+  <header class="nav scrolled">
+    <a href="./" class="nav-logo">&lt;fizgrad/&gt;</a>
+    <nav class="nav-links">
+      <a href="./"><span class="nav-back-full">← 主页 / Home</span><span class="nav-back-short">←</span></a>
+      <button id="reader-new" class="lang-btn" type="button" aria-label="Upload new file">新文件</button>
+    </nav>
+  </header>
+
+  <main id="main" class="post-page">
+    <div id="reader-dropzone" class="reader-dropzone">
+      <input type="file" id="reader-file-input" accept=".md,.markdown,.txt" hidden />
+      <div class="reader-dropzone-inner">
+        <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M14 3v4a1 1 0 0 0 1 1h4M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2zM12 11v6M9 14l3-3 3 3"/></svg>
+        <p class="reader-dropzone-title">拖拽 Markdown 文件到此处</p>
+        <p class="reader-dropzone-sub">或点击选择文件 · 也可直接粘贴文本</p>
+      </div>
+    </div>
+
+    <div class="post-layout" id="reader-view" style="display:none;">
+      <article class="markdown-body post-wrap post-main" id="post-content"></article>
+      <aside class="toc-sidebar" id="toc-sidebar">
+        <div class="toc-title">目录/TOC</div>
+        <div class="toc-progress"><div class="toc-progress-bar" id="toc-progress-bar"></div></div>
+        <ul class="toc-nav" id="toc-nav"></ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>&copy; <span id="year"></span> Fizgrad · Built with GLM-5.2</p>
+    <a href="./" class="back-top">← 返回主页 / Back to home</a>
+  </footer>
+
+  <script>
+    (function () {
+      var mathItems = new Map();
+      var mathSeq = 0;
+
+      function emitMathToken(tex, display) {
+        var id = "math-" + (mathSeq++);
+        mathItems.set(id, { tex: tex, display: display });
+        var tag = display ? "div" : "span";
+        return '<' + tag + ' class="math-slot tex2jax_process" data-math-id="' + id + '"></' + tag + '>';
+      }
+
+      function hydrateMathSlots(container) {
+        var slots = container.querySelectorAll("[data-math-id]");
+        for (var i = 0; i < slots.length; i++) {
+          var slot = slots[i];
+          var id = slot.getAttribute("data-math-id");
+          var item = mathItems.get(id);
+          if (!item) { slot.textContent = "[公式数据缺失]"; continue; }
+          slot.textContent = item.display ? "\\[" + item.tex + "\\]" : "\\(" + item.tex + "\\)";
+        }
+      }
+
+      var parseMathExtension = {
+        name: "math",
+        level: "block",
+        start: function (src) {
+          var idx = src.indexOf("$$");
+          if (idx !== -1) return idx;
+          idx = src.indexOf("\\[");
+          return idx;
+        },
+        tokenizer: function (src) {
+          var dlMatch = src.match(/^\$\$([\s\S]*?)\$\$/);
+          if (!dlMatch) dlMatch = src.match(/^\\\[([\s\S]*?)\\\]/);
+          if (!dlMatch) return undefined;
+          var tex = dlMatch[1].trim();
+          var html = emitMathToken(tex, true);
+          return { type: "math", raw: dlMatch[0], html: html, tokens: [] };
+        },
+        renderer: function (token) { return token.html; }
+      };
+
+      var inlineMathExtension = {
+        name: "inlineMath",
+        level: "inline",
+        start: function (src) {
+          var m = src.match(/\\\(|\$(?!\$)/);
+          return m ? m.index : -1;
+        },
+        tokenizer: function (src) {
+          if (src[0] === "\\" && src[1] === "(") {
+            var end = src.indexOf("\\)", 2);
+            if (end === -1) return undefined;
+            var tex = src.slice(2, end).trim();
+            return { type: "inlineMath", raw: src.slice(0, end + 2), html: emitMathToken(tex, false), tokens: [] };
+          }
+          if (src[0] === "$" && src[1] !== "$") {
+            var idx = src.indexOf("$", 1);
+            if (idx === -1) return undefined;
+            if (src[idx - 1] === "\\") return undefined;
+            var tex2 = src.slice(1, idx).trim();
+            return { type: "inlineMath", raw: src.slice(0, idx + 1), html: emitMathToken(tex2, false), tokens: [] };
+          }
+          return undefined;
+        },
+        renderer: function (token) { return token.html; }
+      };
+
+      var markedReady = false;
+      if (typeof marked !== "undefined" && marked.parse) {
+        try {
+          marked.use({ extensions: [parseMathExtension, inlineMathExtension] });
+          markedReady = true;
+        } catch (e) {
+          markedReady = false;
+        }
+      }
+
+      document.getElementById("year").textContent = new Date().getFullYear();
+
+      var dropzone = document.getElementById("reader-dropzone");
+      var fileInput = document.getElementById("reader-file-input");
+      var readerView = document.getElementById("reader-view");
+
+      function renderMarkdown(md) {
+        var container = document.getElementById("post-content");
+        dropzone.style.display = "none";
+        readerView.style.display = "";
+        window.scrollTo(0, 0);
+
+        if (markedReady) {
+          mathItems.clear();
+          mathSeq = 0;
+          var html = marked.parse(md);
+          container.innerHTML = html;
+          hydrateMathSlots(container);
+        } else {
+          container.innerHTML = "<pre>" + md.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</pre>";
+          return;
+        }
+        if (typeof hljs !== "undefined") {
+          container.querySelectorAll("pre code:not(.language-mermaid)").forEach(function (block) {
+            hljs.highlightElement(block);
+          });
+        }
+        if (typeof MathJax !== "undefined" && MathJax.startup && MathJax.startup.promise) {
+          MathJax.startup.promise.then(function () {
+            MathJax.typesetClear([container]);
+            MathJax.typesetPromise([container]).catch(function () {});
+          });
+        } else if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
+          MathJax.typesetPromise([container]).catch(function () {});
+        }
+        container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
+          if (pre.querySelector(".copy-btn")) return;
+          var btn = document.createElement("button");
+          btn.className = "copy-btn";
+          btn.textContent = "Copy";
+          btn.addEventListener("click", function () {
+            var code = pre.querySelector("code");
+            var text = code ? code.textContent : "";
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(function () {
+                btn.textContent = "Copied!";
+                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+              }).catch(function () {
+                btn.textContent = "Failed";
+                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+              });
+            } else {
+              btn.textContent = "Failed";
+              setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+            }
+          });
+          pre.appendChild(btn);
+        });
+        var mermaidBlocks = container.querySelectorAll("pre code.language-mermaid");
+        if (mermaidBlocks.length > 0 && typeof mermaid !== "undefined") {
+          mermaid.initialize({ startOnLoad: false, theme: "dark" });
+          mermaidBlocks.forEach(function (code) {
+            var wrapper = document.createElement("div");
+            wrapper.className = "mermaid-wrapper";
+            var scrollDiv = document.createElement("div");
+            scrollDiv.className = "mermaid-scroll";
+            var div = document.createElement("div");
+            div.className = "mermaid";
+            div.textContent = code.textContent;
+            scrollDiv.appendChild(div);
+            wrapper.appendChild(scrollDiv);
+            var controls = document.createElement("div");
+            controls.className = "mermaid-controls";
+            var scale = 1;
+            var baseW = null, baseH = null;
+            function applyMermaidZoom() {
+              var svg = div.querySelector("svg");
+              if (!svg) return;
+              if (baseW === null) {
+                var rect = svg.getBoundingClientRect();
+                baseW = rect.width || 500;
+                baseH = rect.height || 300;
+              }
+              svg.removeAttribute("width");
+              svg.removeAttribute("height");
+              svg.style.maxWidth = "none";
+              svg.style.width = (baseW * scale) + "px";
+              svg.style.height = (baseH * scale) + "px";
+            }
+            var zoomIn = document.createElement("button");
+            zoomIn.className = "mermaid-zoom-btn";
+            zoomIn.textContent = "+";
+            zoomIn.setAttribute("aria-label", "Zoom in");
+            zoomIn.addEventListener("click", function () {
+              scale = Math.min(scale + 0.1, 3);
+              applyMermaidZoom();
+            });
+            var zoomOut = document.createElement("button");
+            zoomOut.className = "mermaid-zoom-btn";
+            zoomOut.textContent = "\u2212";
+            zoomOut.setAttribute("aria-label", "Zoom out");
+            zoomOut.addEventListener("click", function () {
+              scale = Math.max(scale - 0.1, 0.5);
+              applyMermaidZoom();
+            });
+            controls.appendChild(zoomIn);
+            controls.appendChild(zoomOut);
+            wrapper.appendChild(controls);
+            code.parentElement.replaceWith(wrapper);
+          });
+          try { mermaid.run().catch(function () {}); } catch (e) {}
+          setTimeout(function () {
+            container.querySelectorAll(".mermaid svg").forEach(function (svg) {
+              var vb = svg.getAttribute("viewBox");
+              if (!vb) return;
+              var parts = vb.split(/\s+/);
+              var w = parseFloat(parts[2]);
+              var h = parseFloat(parts[3]);
+              if (!w || !h) return;
+              svg.removeAttribute("width");
+              svg.removeAttribute("height");
+              svg.style.maxWidth = "none";
+              svg.style.width = (w * 0.8) + "px";
+              svg.style.height = (h * 0.8) + "px";
+            });
+          }, 800);
+        }
+        var slugSet = {};
+        container.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach(function (h) {
+          var text = h.textContent.trim();
+          var slug = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5\s-]/g, "").replace(/\s+/g, "-");
+          if (!slug) slug = "heading";
+          if (slugSet[slug]) { slugSet[slug]++; slug = slug + "-" + slugSet[slug]; }
+          else { slugSet[slug] = 1; }
+          h.id = slug;
+          var link = document.createElement("a");
+          link.className = "heading-anchor";
+          link.href = "#" + slug;
+          link.textContent = "#";
+          link.setAttribute("aria-label", "Anchor: " + text);
+          h.appendChild(link);
+        });
+
+        var headings = container.querySelectorAll("h1, h2, h3, h4, h5");
+        if (headings.length >= 2) {
+          var tocNav = document.getElementById("toc-nav");
+          var headingData = [];
+
+          headings.forEach(function (h) {
+            var level = parseInt(h.tagName.charAt(1), 10);
+            var text = h.textContent.replace(/#\s*$/, "").trim();
+            headingData.push({ el: h, id: h.id, level: level, text: text });
+          });
+
+          var tocHTML = "";
+          headingData.forEach(function (item) {
+            var cls = "toc-h" + item.level;
+            tocHTML += '<li><a href="#' + item.id + '" class="' + cls + '" data-toc-target="' + item.id + '">' + item.text + '</a></li>';
+          });
+          tocNav.innerHTML = tocHTML;
+
+          document.querySelectorAll("#toc-sidebar .toc-nav a").forEach(function (a) {
+            a.addEventListener("click", function (e) {
+              e.preventDefault();
+              var targetId = a.getAttribute("href").slice(1);
+              var target = document.getElementById(targetId);
+              if (target) {
+                var top = target.getBoundingClientRect().top + window.scrollY - 70;
+                window.scrollTo({ top: top, behavior: "smooth" });
+                history.replaceState(null, "", "#" + targetId);
+              }
+            });
+          });
+
+          var tocLinks = document.querySelectorAll("#toc-sidebar .toc-nav a");
+          var progressBar = document.getElementById("toc-progress-bar");
+          var scrollPadding = 80;
+
+          function updateTOC() {
+            var scrollPos = window.scrollY + scrollPadding;
+            var currentIdx = 0;
+            for (var i = 0; i < headingData.length; i++) {
+              if (headingData[i].el.getBoundingClientRect().top + window.scrollY <= scrollPos) {
+                currentIdx = i;
+              } else {
+                break;
+              }
+            }
+            tocLinks.forEach(function (link) {
+              link.classList.toggle("active", link.dataset.tocTarget === headingData[currentIdx].id);
+            });
+
+            var tocSidebar = document.getElementById("toc-sidebar");
+            var activeLink = tocSidebar.querySelector("a.active");
+            if (activeLink) {
+              var sidebarRect = tocSidebar.getBoundingClientRect();
+              var linkRect = activeLink.getBoundingClientRect();
+              if (linkRect.top < sidebarRect.top || linkRect.bottom > sidebarRect.bottom) {
+                activeLink.scrollIntoView({ block: "nearest", behavior: "smooth" });
+              }
+            }
+
+            var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+            var scrollPct = docHeight > 0 ? Math.min(window.scrollY / docHeight, 1) : 0;
+            progressBar.style.width = (scrollPct * 100) + "%";
+          }
+
+          var scrollTimer = null;
+          window.addEventListener("scroll", function () {
+            if (scrollTimer) return;
+            scrollTimer = requestAnimationFrame(function () {
+              updateTOC();
+              scrollTimer = null;
+            });
+          }, { passive: true });
+          updateTOC();
+        }
+        container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
+          var code = pre.querySelector("code");
+          if (!code) return;
+          var lines = code.textContent.replace(/\n$/, "").split("\n").length;
+          if (lines <= 15) return;
+          var wrapper = document.createElement("div");
+          wrapper.className = "code-block-wrapper";
+          wrapper.dataset.expanded = "false";
+          var existingBtn = pre.querySelector(".copy-btn");
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.appendChild(pre);
+          if (existingBtn) wrapper.appendChild(existingBtn);
+          var expandBtn = document.createElement("button");
+          expandBtn.className = "code-expand-btn";
+          expandBtn.textContent = "展开 (共 " + lines + " 行)";
+          expandBtn.addEventListener("click", function () {
+            if (wrapper.dataset.expanded === "true") {
+              wrapper.dataset.expanded = "false";
+              expandBtn.textContent = "展开 (共 " + lines + " 行)";
+            } else {
+              wrapper.dataset.expanded = "true";
+              expandBtn.textContent = "收起";
+            }
+          });
+          wrapper.appendChild(expandBtn);
+        });
+        container.querySelectorAll("h2, h3").forEach(function (heading) {
+          var toggle = document.createElement("button");
+          toggle.className = "section-toggle";
+          toggle.textContent = "▼";
+          toggle.setAttribute("aria-label", "Toggle section");
+          toggle.addEventListener("click", function () {
+            var collapsed = heading.classList.toggle("collapsed");
+            toggle.textContent = collapsed ? "▶" : "▼";
+            var node = heading.nextElementSibling;
+            var level = parseInt(heading.tagName.charAt(1), 10);
+            while (node) {
+              var nodeLevel = parseInt(node.tagName.charAt(1), 10);
+              if (nodeLevel && nodeLevel <= level) break;
+              node.style.display = collapsed ? "none" : "";
+              node = node.nextElementSibling;
+            }
+          });
+          heading.insertBefore(toggle, heading.firstChild);
+        });
+      }
+
+      function readFile(file) {
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function (e) {
+          renderMarkdown(e.target.result);
+        };
+        reader.readAsText(file);
+      }
+
+      dropzone.addEventListener("click", function () {
+        fileInput.click();
+      });
+      fileInput.addEventListener("change", function (e) {
+        readFile(e.target.files[0]);
+      });
+
+      dropzone.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        dropzone.classList.add("reader-dragover");
+      });
+      dropzone.addEventListener("dragleave", function () {
+        dropzone.classList.remove("reader-dragover");
+      });
+      dropzone.addEventListener("drop", function (e) {
+        e.preventDefault();
+        dropzone.classList.remove("reader-dragover");
+        var file = e.dataTransfer.files[0];
+        if (file) readFile(file);
+      });
+
+      document.addEventListener("paste", function (e) {
+        if (readerView.style.display !== "none") return;
+        var text = e.clipboardData.getData("text");
+        if (text && text.trim()) {
+          renderMarkdown(text);
+        }
+      });
+
+      document.getElementById("reader-new").addEventListener("click", function () {
+        readerView.style.display = "none";
+        dropzone.style.display = "";
+        fileInput.value = "";
+        window.scrollTo(0, 0);
+      });
+    })();
+  </script>
+</body>
+</html>

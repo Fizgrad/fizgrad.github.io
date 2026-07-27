@@ -381,9 +381,41 @@
     var grid = document.getElementById("blog-grid");
     if (!grid || !blogPosts) return;
     grid.innerHTML = "";
+    grid.appendChild(buildReaderCard());
     blogPosts.forEach(function (post) {
       grid.appendChild(buildBlogCard(post));
     });
+  }
+
+  function buildReaderCard() {
+    var card = el("article", { class: "card blog-card reader-card" });
+    card.style.setProperty("--card-glow", "#22d3ee");
+
+    var top = el("div", { class: "card-top" }, [
+      el("div", { class: "card-icon" }, "MD"),
+      arrow()
+    ]);
+
+    var title = el("h3", { class: "card-title" }, lang === "en" ? "Markdown Reader" : "Markdown 阅读器");
+    var desc = el("p", { class: "card-desc" }, lang === "en"
+      ? "Upload a .md file to render with the blog engine."
+      : "上传 Markdown 文件，用博客引擎渲染阅读。");
+
+    var tags = el("div", { class: "card-tags" }, [
+      el("span", { class: "tag blog-tag" }, lang === "en" ? "Open" : "打开")
+    ]);
+
+    var link = el("a", {
+      class: "card-link",
+      href: "reader.html"
+    });
+
+    card.appendChild(top);
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(tags);
+    card.appendChild(link);
+    return card;
   }
 
   function renderCards(forceReveal) {

@@ -646,6 +646,53 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   padding: 4rem 0;
 }
 
+.reader-dropzone {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  cursor: pointer;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: border-color 0.25s, background 0.25s;
+}
+.reader-dropzone:hover {
+  border-color: var(--accent);
+  background: rgba(124, 140, 255, 0.04);
+}
+.reader-dropzone.reader-dragover {
+  border-color: var(--accent-2);
+  background: rgba(34, 211, 238, 0.06);
+}
+.reader-dropzone-inner {
+  text-align: center;
+  color: var(--text-dim);
+}
+.reader-dropzone-inner svg {
+  margin-bottom: 1rem;
+  color: var(--text-faint);
+  transition: color 0.25s;
+}
+.reader-dropzone:hover .reader-dropzone-inner svg,
+.reader-dropzone.reader-dragover .reader-dropzone-inner svg {
+  color: var(--accent-2);
+}
+.reader-dropzone-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.3rem;
+}
+.reader-dropzone-sub {
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+.reader-card .card-icon { background: rgba(34, 211, 238, 0.12); }
+
 .footer {
   max-width: var(--maxw);
   margin: 2rem auto 0;
