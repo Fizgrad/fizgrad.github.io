@@ -47,7 +47,10 @@
       <div class="reader-dropzone-inner">
         <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M14 3v4a1 1 0 0 0 1 1h4M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2zM12 11v6M9 14l3-3 3 3"/></svg>
         <p class="reader-dropzone-title">拖拽 Markdown 文件到此处</p>
-        <p class="reader-dropzone-sub">或点击选择文件 · 也可直接粘贴文本</p>
+        <p class="reader-dropzone-sub">或点击选择文件</p>
+        <div class="reader-divider"><span>或粘贴 / 输入文本</span></div>
+        <textarea id="reader-textarea" class="reader-textarea" placeholder="# 在这里粘贴 Markdown 文本&#10;&#10;支持公式 $E=mc^2$、代码块、Mermaid 图表等" spellcheck="false"></textarea>
+        <button id="reader-render-btn" class="reader-render-btn" type="button">渲染 Render</button>
       </div>
     </div>
 
@@ -150,6 +153,8 @@
       var dropzone = document.getElementById("reader-dropzone");
       var fileInput = document.getElementById("reader-file-input");
       var readerView = document.getElementById("reader-view");
+      var textarea = document.getElementById("reader-textarea");
+      var renderBtn = document.getElementById("reader-render-btn");
 
       function renderMarkdown(md) {
         var container = document.getElementById("post-content");
@@ -418,7 +423,8 @@
         reader.readAsText(file);
       }
 
-      dropzone.addEventListener("click", function () {
+      dropzone.addEventListener("click", function (e) {
+        if (e.target === textarea || e.target === renderBtn) return;
         fileInput.click();
       });
       fileInput.addEventListener("change", function (e) {
@@ -439,17 +445,15 @@
         if (file) readFile(file);
       });
 
-      document.addEventListener("paste", function (e) {
-        if (readerView.style.display !== "none") return;
-        var text = e.clipboardData.getData("text");
-        if (text && text.trim()) {
-          renderMarkdown(text);
-        }
+      renderBtn.addEventListener("click", function () {
+        var text = textarea.value.trim();
+        if (text) renderMarkdown(text);
       });
 
       document.getElementById("reader-new").addEventListener("click", function () {
         readerView.style.display = "none";
         dropzone.style.display = "";
+        textarea.value = "";
         fileInput.value = "";
         window.scrollTo(0, 0);
       });

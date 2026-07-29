@@ -693,6 +693,64 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 }
 .reader-card .card-icon { background: rgba(34, 211, 238, 0.12); }
 
+.reader-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 1.5rem 0 0.8rem;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  width: 100%;
+  max-width: 600px;
+}
+.reader-divider::before,
+.reader-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.reader-textarea {
+  width: 100%;
+  max-width: 600px;
+  min-height: 160px;
+  padding: 0.8rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.reader-textarea:focus {
+  border-color: var(--accent);
+}
+.reader-textarea::placeholder {
+  color: var(--text-faint);
+}
+.reader-render-btn {
+  margin-top: 0.8rem;
+  padding: 0.5rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-2);
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid var(--accent-2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.reader-render-btn:hover {
+  color: #08080c;
+  background: var(--accent-2);
+}
+
 .footer {
   max-width: var(--maxw);
   margin: 2rem auto 0;
