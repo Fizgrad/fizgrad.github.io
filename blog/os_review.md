@@ -1741,6 +1741,10 @@ int main() {
     }
 
     std::strcpy(address.sun_path, kPath);
+    /*
+    * 删除上一次运行遗留的 Socket 路径。
+    * unlink() 删除的是文件系统目录项，不会关闭现有 Socket fd。
+    */
     ::unlink(kPath);
 
     if (::bind(
@@ -3064,6 +3068,13 @@ inode 表示文件系统对象的元数据和数据定位信息，通常包括�
 - 数据块或 extent 信息；
 - 扩展属性等。
 
+**文件的逻辑大小不一定等于实际占用的磁盘空间。**
+
+> **稀疏文件**可以包含未分配数据块的文件空洞，读取空洞通常得到全零数据，因此其逻辑大小可能远大于实际磁盘占用。 不支持保留空洞的复制方式可能把空洞写成真实的零数据块，从而增加磁盘占用。
+
+- `ls -l` 通常显示逻辑大小
+- `du` 更接近实际分配的磁盘空间
+
 inode 不保存某个目录中的文件名。
 
 ### 2.2 dentry
@@ -3086,6 +3097,25 @@ inode 不保存某个目录中的文件名。
 
 进程文件描述符表中的整数 fd 指向这个打开文件描述。`dup()` 和 `fork()` 后的多个 fd 可能引用同一个打开文件描述，因此共享文件偏移和状态标志。
 
+```text
+进程的文件描述符表, fd 只是表中的一个整数索引
+fd table entry
+├─ descriptor flag：FD_CLOEXEC
+└───────────────┐
+                ↓
+open file description
+├─ 当前文件偏移
+├─ file status flags：O_APPEND、O_NONBLOCK
+└─ 对文件对象/inode 的引用
+                ↓
+inode
+├─ 文件类型和权限
+├─ 文件大小
+├─ 所有者
+└─ 数据块位置
+```
+
+
 ## 3. 硬链接
 
 硬链接是多个目录项指向同一个 inode。
@@ -3099,6 +3129,8 @@ inode 不保存某个目录中的文件名。
 - 文件数据通常在链接计数为 0 且没有任何打开文件引用后才真正释放。
 
 因此，文件被 `unlink()` 后，已打开的 fd 仍然可以继续访问它，直到最后一个引用关闭。
+
+> unlink() 删除的是路径对应的目录项，不会关闭已经打开的文件描述符；只有硬链接和打开引用都消失后，文件数据才会被真正回收。
 
 ## 4. 符号链接
 
@@ -3147,6 +3179,16 @@ Page Cache
 - `O_SYNC/O_DSYNC`：改变写入完成语义。
 
 即使调用 `fsync()`，最终持久性仍受文件系统、设备写缓存、电源保护和硬件实现影响。数据库还需要正确处理目录项持久化、日志顺序和原子重命名协议。
+
+> 需要区分不同的刷新层次：
+> 
+> fflush(FILE*) 主要把 C 标准库的用户态缓冲提交给内核；
+> 
+> write()、fflush() 或 close() 成功通常只表示数据已被内核接受，不保证已经满足断电持久化要求；
+> 
+> 需要持久化普通文件时，通常还要使用 fsync() 或 fdatasync()。
+> 
+> 创建、删除或重命名文件时，若还需要保证目录项在崩溃后可恢复，通常还需要同步相关目录。
 
 # 九、I/O 模型
 
@@ -3819,13 +3861,37 @@ ET 可能减少重复就绪通知，但也增加：
 
 ## 7. 常见事件语义
 
-- `EPOLLIN`：可读，也可能是 EOF 到达；
-- `EPOLLOUT`：当前发送缓冲区有空间，不代表一次可以写完所有数据；
-- `EPOLLRDHUP`：对端关闭写方向；
-- `EPOLLHUP`：挂起；
-- `EPOLLERR`：错误，通常无须显式注册也会报告；
-- `EPOLLONESHOT`：事件交付后临时禁用，需要 `MOD` 重新激活；
-- `EPOLLEXCLUSIVE`：用于部分多等待者场景，降低惊群。
+内核观察到某个文件描述符 fd 当前满足了某种状态条件，并通过 epoll_wait() 把该状态通知给应用。
+
+```cpp
+epoll_event ev{};
+// 我关心 client_fd 的可读状态和对端关闭写方向状态。
+ev.events = EPOLLIN | EPOLLRDHUP; 
+ev.data.fd = client_fd;
+
+epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &ev);
+```
+
+- `EPOLLIN`：可读，也可能是 EOF 到达, 当前可以尝试读取;
+- `EPOLLOUT`：当前发送缓冲区有空间，不代表一次可以写完所有数据, 当前可以尝试写入;
+- `EPOLLRDHUP`：流式 Socket 对端关闭了写方向;
+- `EPOLLHUP`：fd 发生挂断，例如通信端点关闭;
+- `EPOLLERR`：fd 存在错误，通常无须显式注册也会报告;
+
+下面这些严格来说不是“fd 发生了某种状态”，而是控制 epoll 如何交付通知：
+
+- `EPOLLET`: 使用边缘触发
+- `EPOLLONESHOT`：交付一次事件后暂时禁用该 fd，需要 `MOD` 重新激活；
+- `EPOLLEXCLUSIVE`：多个 epoll 等待者中尽量只唤醒部分等待者，减少惊群。
+
+```cpp
+// 关注可读状态 + 使用边缘触发 + 通知一次后暂时停止继续通知
+event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
+// ...
+// 处理完成后需要重新激活
+epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event);
+```
+
 
 对 `EPOLLERR` 可使用 `getsockopt(fd, SOL_SOCKET, SO_ERROR, ...)` 取得具体 Socket 错误。
 
@@ -3859,7 +3925,15 @@ ET 可能减少重复就绪通知，但也增加：
 - open file status flags；
 - 某些信号驱动 I/O 属性。
 
-但每个进程拥有独立的 fd 表项，`FD_CLOEXEC` 等 descriptor flag 属于表项层面。
+父子进程拥有各自的 fd 表；FD_CLOEXEC 保存在具体 fd 表项中，而文件偏移、O_APPEND、O_NONBLOCK 等状态保存在父子共享的 open file description 中。
+
+这里需要区分两类标志：
+
+* **文件描述符标志（descriptor flags）**保存在当前进程的 fd 表项中，只作用于某一个 fd。Linux 中最常见的是 `FD_CLOEXEC`，表示进程成功执行 `execve()` 后自动关闭该 fd。它可通过 `fcntl(fd, F_GETFD/F_SETFD)` 查询和修改。
+* **文件状态标志（file status flags）**保存在 open file description 中，例如 `O_APPEND`、`O_NONBLOCK`。多个通过 `dup()` 或 `fork()` 指向同一 open file description 的 fd 通常共享这些标志和文件偏移。
+
+因此，两个 fd 即使指向同一个 open file description，也可以具有不同的 `FD_CLOEXEC`；但修改其中一个 fd 对应的 `O_NONBLOCK` 等文件状态标志，通常会影响其他指向同一 open file description 的 fd。
+
 
 ### 1.2 多线程程序中的 fork
 
@@ -3958,10 +4032,12 @@ waitid()
 
 ## 5. vfork
 
+`vfork()` 是针对“子进程创建后立即 `exec()`”优化的特殊进程创建方式，它通过暂时共享父进程地址空间，减少 `fork()` 建立独立地址空间和页表的成本，但代价是子进程在`exec()` 或 `_exit()` 前受到极严格的执行限制。
+
 `vfork()` 的语义比“更快的 fork”严格得多：
 
-- 子进程在 `execve()` 或 `_exit()` 前与父进程共享地址空间；
-- 父进程通常被挂起；
+- 子进程在 `execve()` 或 `_exit()` 前**与父进程共享地址空间**；
+- **父进程通常被挂起**；
 - 子进程不能从调用 `vfork()` 的函数正常返回；
 - 不能调用 `exit()`，应调用 `_exit()`；
 - 不能安全修改栈和普通父进程状态；
@@ -4415,7 +4491,7 @@ Reactor 与 Proactor 的核心区别：
 | 常见接口 | epoll、kqueue | IOCP、AIO、io_uring 部分用法 |
 | 主要状态 | 连接就绪状态 | 请求与完成状态 |
 
-表中不应写成“Reactor 由用户线程复制数据、Proactor 由内核复制数据”。两者的区别是操作提交和完成语义，而不是哪段代码亲自执行字节复制。
+两者的区别是操作提交和完成语义，而不是哪段代码亲自执行字节复制。
 
 `io_uring` 能提交读写并取得 CQE，可构建 completion 风格模型；它也支持 poll 等操作，所以不应把整个接口机械等同于单一 Proactor。
 
