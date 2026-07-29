@@ -358,6 +358,7 @@ flowchart TD
 | 共享内存 | 共享字节区域 | 同一主机 | 由应用自行定义 | 建立映射后无需每次通信都复制载荷 |
 | 信号量 | 计数与同步状态 | 线程或进程 | 不适用 | 用于同步和资源计数，不是大数据通道 |
 | 信号 Signal | 异步事件 | 同一主机 | 信号编号 | 适合事件通知，不适合传输复杂数据 |
+| eventfd | 64 位累计计数 | 同一主机、共享或传递 fd 的线程/进程 | 否 | 轻量事件通知，可直接接入 select、poll 和 epoll |
 | Unix Domain Socket | 字节流或数据报 | 同一主机 | 取决于 Socket 类型 | 双向、接口统一，还可传递文件描述符 |
 | TCP/UDP Socket | 字节流或数据报 | 本机或跨主机 | TCP 否，UDP 是 | 最通用的网络通信方式 |
 
@@ -887,7 +888,792 @@ int main(void) {
 
 `volatile sig_atomic_t` 只解决信号处理函数与普通执行路径之间的最小标志传递，不应被当作一般多线程同步工具。
 
-## 8. Unix Domain Socket
+## 8. eventfd：事件计数与事件通知
+
+`eventfd` 是 Linux 提供的一种轻量级事件通知机制。它在内核中维护一个 **64 位无符号计数器**，并把这个计数器包装成普通文件描述符。
+
+应用可以：
+
+* 向 `eventfd` 写入数值，对计数器进行累加；
+* 从 `eventfd` 读取数值，消费当前计数；
+* 使用 `select`、`poll` 或 `epoll` 监听它；
+* 在线程之间传递事件；
+* 在继承或传递 fd 的进程之间传递事件。
+
+其主要接口为：
+
+```c
+#include <sys/eventfd.h>
+
+int eventfd(unsigned int initval, int flags);
+```
+
+其中：
+
+* `initval`：计数器初始值；
+* `flags`：控制非阻塞、关闭继承和读取语义；
+* 成功时返回一个文件描述符；
+* 失败时返回 `-1` 并设置 `errno`。
+
+虽然 `initval` 参数是 `unsigned int`，但内核中实际维护的是一个 64 位计数器。
+
+### 8.1 eventfd 的基本结构
+
+可以把 `eventfd` 简化理解为：
+
+```mermaid
+flowchart LR
+    W1["线程/进程 A<br/>write(eventfd)"] --> C["内核中的<br/>64 位计数器"]
+    W2["线程/进程 B<br/>write(eventfd)"] --> C
+    C --> R["线程/进程 C<br/>read(eventfd)"]
+    C --> E["select / poll / epoll<br/>就绪通知"]
+```
+
+它不是一个字节流，也不是消息队列。其核心状态只有一个计数值：
+
+```text
+eventfd counter = 0, 1, 2, 3, ...
+```
+
+多个写入会累加到同一个计数器中。例如：
+
+```text
+初始值：0
+写入 1：计数器变为 1
+写入 2：计数器变为 3
+写入 5：计数器变为 8
+```
+
+因此，`eventfd` 适合表示：
+
+* 有多少次事件发生；
+* 是否有新任务到达；
+* 是否需要唤醒事件循环；
+* 某个异步操作是否完成；
+* 某个共享队列中是否可能存在待处理数据。
+
+它不适合直接传输请求正文、字符串或复杂对象。
+
+### 8.2 创建 eventfd
+
+常见创建方式：
+
+```c
+int fd = eventfd(
+    0,
+    EFD_NONBLOCK | EFD_CLOEXEC
+);
+```
+
+常用标志如下。
+
+#### EFD_NONBLOCK
+
+把文件描述符设置为非阻塞模式。
+
+当计数器为 0 时读取，不会让当前线程睡眠，而是返回：
+
+```text
+-1，errno = EAGAIN
+```
+
+当计数器无法继续安全累加时，写入也会返回 `EAGAIN`。
+
+它等价于在创建后为 fd 设置 `O_NONBLOCK`，但在创建时一次完成可以避免多线程程序中的竞态窗口。
+
+#### EFD_CLOEXEC
+
+为文件描述符设置 close-on-exec 标志。
+
+进程成功执行 `execve()` 后，该文件描述符会自动关闭，避免意外泄漏到新程序。
+
+它等价于设置 `FD_CLOEXEC`，但同样可以避免“创建 fd 后、设置标志前”被其他线程执行 `fork()+exec()` 的竞态。
+
+#### EFD_SEMAPHORE
+
+改变 `read()` 的消费方式，使 `eventfd` 表现得更接近计数信号量。
+
+如果没有设置该标志：
+
+```text
+counter = 5
+read() 返回 5
+counter 变为 0
+```
+
+如果设置了 `EFD_SEMAPHORE`：
+
+```text
+counter = 5
+第一次 read() 返回 1，counter 变为 4
+第二次 read() 返回 1，counter 变为 3
+……
+```
+
+`EFD_SEMAPHORE` 只改变读取行为，并不会让 `eventfd` 获得 POSIX 信号量的全部语义，例如命名、进程共享属性配置或完整的信号量接口。
+
+### 8.3 写入语义
+
+向 `eventfd` 写入时，必须写入一个完整的 64 位无符号整数：
+
+```c
+uint64_t value = 1;
+
+ssize_t n = write(
+    fd,
+    &value,
+    sizeof(value)
+);
+```
+
+正常情况下：
+
+```text
+eventfd counter += value
+```
+
+必须注意：
+
+1. 写入长度必须是 8 字节；
+2. 写入 `UINT64_MAX` 是非法操作；
+3. 用户态正常写入不能使计数器超过 `UINT64_MAX - 1`；
+4. 如果累加会超过允许范围：
+
+   * 阻塞 fd 会等待其他线程读取计数器；
+   * 非阻塞 fd 返回 `EAGAIN`；
+5. 写入 0 不会产生有意义的计数变化，通常应写入正数。
+
+健壮的写入函数可以写成：
+
+```cpp
+#include <cerrno>
+#include <cstdint>
+#include <unistd.h>
+
+bool notify_eventfd(int fd, std::uint64_t value = 1) {
+    while (true) {
+        const ssize_t n = ::write(
+            fd,
+            &value,
+            sizeof(value)
+        );
+
+        if (n == static_cast<ssize_t>(sizeof(value))) {
+            return true;
+        }
+
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+
+        /*
+         * 非阻塞模式下还可能得到 EAGAIN。
+         * 调用方应根据业务决定重试、记录错误或实施背压。
+         */
+        return false;
+    }
+}
+```
+
+### 8.4 读取语义
+
+读取时同样必须提供一个 8 字节缓冲区：
+
+```c
+uint64_t value;
+
+ssize_t n = read(
+    fd,
+    &value,
+    sizeof(value)
+);
+```
+
+未设置 `EFD_SEMAPHORE` 时：
+
+```text
+读取前 counter = N
+read() 返回 N
+读取后 counter = 0
+```
+
+设置 `EFD_SEMAPHORE` 时：
+
+```text
+读取前 counter = N，且 N > 0
+read() 返回 1
+读取后 counter = N - 1
+```
+
+如果计数器为 0：
+
+* 阻塞模式下，读取线程进入睡眠，直到其他执行流写入；
+* 非阻塞模式下，返回 `-1`，并设置 `errno = EAGAIN`。
+
+一个非阻塞读取函数可以写成：
+
+```cpp
+#include <cerrno>
+#include <cstdint>
+#include <unistd.h>
+
+enum class EventfdReadResult {
+    kSuccess,
+    kWouldBlock,
+    kError
+};
+
+EventfdReadResult read_eventfd(
+    int fd,
+    std::uint64_t& value
+) {
+    while (true) {
+        const ssize_t n = ::read(
+            fd,
+            &value,
+            sizeof(value)
+        );
+
+        if (n == static_cast<ssize_t>(sizeof(value))) {
+            return EventfdReadResult::kSuccess;
+        }
+
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+
+        if (n == -1 &&
+            (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return EventfdReadResult::kWouldBlock;
+        }
+
+        return EventfdReadResult::kError;
+    }
+}
+```
+
+### 8.5 eventfd 的就绪条件
+
+由于 `eventfd` 是文件描述符，因此可以被 `select`、`poll` 和 `epoll` 监听。
+
+#### 可读
+
+当计数器大于 0 时，`eventfd` 处于可读状态：
+
+```text
+counter > 0
+    ↓
+EPOLLIN / POLLIN
+```
+
+#### 可写
+
+当至少还能安全地向计数器增加 1 时，`eventfd` 处于可写状态：
+
+```text
+counter < UINT64_MAX - 1
+    ↓
+EPOLLOUT / POLLOUT
+```
+
+绝大多数应用只监听 `EPOLLIN`，因为主要用途是接收唤醒通知，而不是等待计数器重新可写。
+
+### 8.6 eventfd 与 epoll 配合
+
+`eventfd` 的典型用途之一，是从工作线程唤醒阻塞在 `epoll_wait()` 中的事件循环线程。
+
+例如：
+
+```text
+工作线程：
+    向任务队列加入任务
+    write(eventfd, 1)
+
+事件循环线程：
+    epoll_wait()
+    收到 eventfd 的 EPOLLIN
+    read(eventfd)
+    处理任务队列
+```
+
+```mermaid
+sequenceDiagram
+    participant W as 工作线程
+    participant Q as 线程安全任务队列
+    participant E as eventfd
+    participant P as epoll
+    participant L as 事件循环线程
+
+    L->>P: epoll_wait
+    W->>Q: 放入任务
+    W->>E: write(1)
+    E-->>P: EPOLLIN
+    P-->>L: 返回就绪事件
+    L->>E: read()
+    L->>Q: 取出并执行任务
+```
+
+这里需要区分两个通道：
+
+* **任务队列**保存真正的任务、指针、回调或数据；
+* **eventfd**只负责通知事件循环“可能有新任务需要处理”。
+
+不能只向 `eventfd` 写入一次，然后假设它能够保存完整任务内容。
+
+任务队列本身仍必须使用：
+
+* 互斥锁；
+* 原子操作；
+* 无锁队列；
+* 或其他正确的线程同步机制。
+
+`eventfd` 不会自动消除 C++ 数据竞争，也不能代替任务队列的内存序和生命周期管理。
+
+### 8.7 eventfd + epoll 完整示例
+
+下面演示：
+
+1. 主线程创建 `epoll` 和 `eventfd`；
+2. 把 `eventfd` 注册到 `epoll`；
+3. 工作线程向 `eventfd` 写入数值；
+4. 主线程从 `epoll_wait()` 中被唤醒；
+5. 主线程读取累计的事件数量。
+
+```cpp
+#include <cerrno>
+#include <cstdint>
+#include <cstdio>
+#include <iostream>
+#include <thread>
+
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+
+namespace {
+
+bool write_eventfd(int fd, std::uint64_t value) {
+    while (true) {
+        const ssize_t n = ::write(
+            fd,
+            &value,
+            sizeof(value)
+        );
+
+        if (n == static_cast<ssize_t>(sizeof(value))) {
+            return true;
+        }
+
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+
+        return false;
+    }
+}
+
+}  // namespace
+
+int main() {
+    const int event_fd = ::eventfd(
+        0,
+        EFD_NONBLOCK | EFD_CLOEXEC
+    );
+
+    if (event_fd == -1) {
+        std::perror("eventfd");
+        return 1;
+    }
+
+    const int epoll_fd = ::epoll_create1(EPOLL_CLOEXEC);
+
+    if (epoll_fd == -1) {
+        std::perror("epoll_create1");
+        ::close(event_fd);
+        return 1;
+    }
+
+    epoll_event registration{};
+    registration.events = EPOLLIN | EPOLLET;
+    registration.data.fd = event_fd;
+
+    if (::epoll_ctl(
+            epoll_fd,
+            EPOLL_CTL_ADD,
+            event_fd,
+            &registration
+        ) == -1) {
+        std::perror("epoll_ctl");
+        ::close(epoll_fd);
+        ::close(event_fd);
+        return 1;
+    }
+
+    std::thread worker([event_fd] {
+        /*
+         * 表示一次性增加 3 个事件。
+         * 多次 write() 的数值也会累加到同一计数器中。
+         */
+        constexpr std::uint64_t event_count = 3;
+
+        if (!write_eventfd(event_fd, event_count)) {
+            std::perror("write eventfd");
+        }
+    });
+
+    epoll_event ready[4];
+
+    while (true) {
+        int count;
+
+        do {
+            count = ::epoll_wait(
+                epoll_fd,
+                ready,
+                4,
+                -1
+            );
+        } while (count == -1 && errno == EINTR);
+
+        if (count == -1) {
+            std::perror("epoll_wait");
+            break;
+        }
+
+        bool notification_received = false;
+
+        for (int i = 0; i < count; ++i) {
+            if (ready[i].data.fd != event_fd) {
+                continue;
+            }
+
+            /*
+             * 使用 EPOLLET 和非阻塞 fd 时，应持续读取，
+             * 直到返回 EAGAIN。
+             */
+            while (true) {
+                std::uint64_t value = 0;
+
+                const ssize_t n = ::read(
+                    event_fd,
+                    &value,
+                    sizeof(value)
+                );
+
+                if (n ==
+                    static_cast<ssize_t>(sizeof(value))) {
+                    std::cout
+                        << "received event count: "
+                        << value
+                        << '\n';
+
+                    notification_received = true;
+                    continue;
+                }
+
+                if (n == -1 && errno == EINTR) {
+                    continue;
+                }
+
+                if (n == -1 &&
+                    (errno == EAGAIN ||
+                     errno == EWOULDBLOCK)) {
+                    break;
+                }
+
+                std::perror("read eventfd");
+                notification_received = true;
+                break;
+            }
+        }
+
+        if (notification_received) {
+            break;
+        }
+    }
+
+    worker.join();
+
+    ::close(epoll_fd);
+    ::close(event_fd);
+    return 0;
+}
+```
+
+可能输出：
+
+```text
+received event count: 3
+```
+
+设置了 `EPOLLET` 后，应将 `eventfd` 设置为非阻塞，并循环读取到 `EAGAIN`。这与 ET 模式下读取 Socket 的原则一致。
+
+### 8.8 多次通知为什么可能合并？
+
+假设三个工作线程分别执行：
+
+```text
+write(eventfd, 1)
+write(eventfd, 1)
+write(eventfd, 1)
+```
+
+如果事件循环尚未读取，计数器可能变为：
+
+```text
+counter = 3
+```
+
+事件循环随后一次读取就可能得到：
+
+```text
+value = 3
+```
+
+因此：
+
+```text
+一次 epoll 事件
+不一定只对应一次 write()
+```
+
+这称为通知合并或计数累积。
+
+它通常是优点，因为可以减少频繁唤醒。但如果业务要求保存每个事件的独立数据和顺序，应该把数据写入队列，再用 `eventfd` 负责唤醒，而不是依赖计数器保存消息。
+
+### 8.9 线程间和进程间共享
+
+同一进程中的线程通常共享文件描述符表，因此可以直接使用同一个 `eventfd`。
+
+进程之间则可以通过以下方式共享：
+
+#### fork 继承
+
+在 `fork()` 前创建 `eventfd`：
+
+```text
+父进程 eventfd fd ─┐
+                   ├──> 同一个内核 eventfd 对象
+子进程 eventfd fd ─┘
+```
+
+父子进程的 fd 表虽然独立，但对应表项引用同一个内核 `eventfd` 对象和计数器。
+
+#### dup 复制
+
+通过：
+
+```c
+dup()
+dup2()
+dup3()
+```
+
+产生的新 fd 仍然引用同一个 `eventfd` 对象。
+
+#### Unix Domain Socket 传递
+
+可以通过 Unix Domain Socket 的 `SCM_RIGHTS` 把 `eventfd` 传递给其他无亲缘关系的进程。
+
+需要注意：
+
+* `eventfd` 没有文件系统路径；
+* 其他进程不能仅通过名称重新打开它；
+* 必须通过继承或 fd 传递建立共享关系；
+* 最后一个引用该对象的文件描述符关闭后，内核对象才会释放。
+
+### 8.10 eventfd 不是广播机制
+
+如果多个线程或进程同时读取同一个 `eventfd`，它们会竞争同一个计数器。
+
+默认模式下：
+
+```text
+counter = 10
+读取者 A 先读取，得到 10，并把 counter 清零
+读取者 B 再读取时，没有数据
+```
+
+`EFD_SEMAPHORE` 模式下，每次读取只减一，可以让多个等待者分别消费计数，但具体由哪个等待者获得事件仍由调度和并发时序决定。
+
+因此，`eventfd` 不是可靠的“向所有监听者广播一次事件”机制。广播需求通常需要：
+
+* 为每个消费者建立独立的 `eventfd`；
+* 使用发布—订阅队列；
+* 或建立额外的消费者状态管理。
+
+### 8.11 eventfd 与其他机制的区别
+
+| 机制                 | 传递内容        | 是否可被 epoll 监听          | 主要用途             |
+| ------------------ | ----------- | ---------------------- | ---------------- |
+| `eventfd`          | 64 位累计计数    | 是                      | 事件通知、事件循环唤醒、完成计数 |
+| Pipe               | 字节流         | 是                      | 传递字节数据，也可用作自管道通知 |
+| POSIX 信号量          | 资源计数        | 通常不能直接监听               | 线程或进程同步、并发资源限制   |
+| Signal             | 信号编号及少量附加信息 | 不能直接监听，除非配合 `signalfd` | 异步系统事件           |
+| `signalfd`         | 结构化信号信息     | 是                      | 把信号纳入事件循环        |
+| `timerfd`          | 定时器到期次数     | 是                      | 把定时器纳入事件循环       |
+| Unix Domain Socket | 字节流、数据报或记录  | 是                      | 双向本地通信和 fd 传递    |
+
+与 Pipe 相比，`eventfd` 的特点是：
+
+* 只维护一个计数器，不保存字节序列；
+* 每次读写固定为 8 字节；
+* 多次通知可以自然合并；
+* 适合纯通知，不适合传输业务载荷；
+* 通常比为了唤醒事件循环而专门维护一对管道端点更直接。
+
+与信号量相比：
+
+* `eventfd` 是 fd，可以接入 `epoll`；
+* POSIX 信号量更适合直接表达资源数量和同步；
+* `EFD_SEMAPHORE` 只提供类似的逐次减一读取语义，不应视为完整替代品。
+
+### 8.12 在 Reactor 中的典型用途
+
+在 Reactor 模型中，事件循环可能阻塞在：
+
+```c
+epoll_wait()
+```
+
+其他线程如果需要让事件循环立即执行某项任务，可以：
+
+```text
+业务线程
+    ↓
+把任务放进线程安全队列
+    ↓
+write(eventfd, 1)
+    ↓
+事件循环收到 EPOLLIN
+    ↓
+read(eventfd)
+    ↓
+处理任务队列
+```
+
+常见场景包括：
+
+* 工作线程通知网络线程发送响应；
+* 定时器管理线程通知事件循环；
+* 主线程要求事件循环停止；
+* 异步任务完成后通知 Reactor；
+* 跨线程提交连接关闭、注册或修改操作。
+
+例如可以定义：
+
+```text
+eventfd value 只表示“需要醒来”
+任务内容保存在 command queue
+```
+
+这种设计比直接跨线程修改事件循环内部状态更容易控制所有权。
+
+### 8.13 常见错误
+
+#### 错误一：把 eventfd 当作消息队列
+
+错误理解：
+
+```text
+写入 100 表示发送一条内容为 100 的消息
+写入 200 表示发送另一条内容为 200 的消息
+```
+
+实际结果可能是：
+
+```text
+read() 得到 300
+```
+
+因为写入值会累加，不会保留消息边界。
+
+#### 错误二：读写长度不是 8 字节
+
+下面是错误的：
+
+```c
+int value = 1;
+write(fd, &value, sizeof(value));  // 通常只有 4 字节
+```
+
+应使用：
+
+```c
+uint64_t value = 1;
+write(fd, &value, sizeof(value));
+```
+
+#### 错误三：ET 模式只读取一次
+
+使用：
+
+```text
+EFD_NONBLOCK + EPOLLET
+```
+
+时应读取到 `EAGAIN`，否则可能没有完全消费当前状态。
+
+#### 错误四：只通知，不维护共享队列同步
+
+下面的顺序不代表共享对象自动线程安全：
+
+```text
+修改普通共享容器
+write(eventfd, 1)
+```
+
+共享容器仍需要互斥锁、原子操作或正确的无锁协议。否则 C/C++ 层面仍可能发生数据竞争。
+
+#### 错误五：认为 eventfd 会广播给所有消费者
+
+多个读取者共享同一个计数器，通常是竞争消费，而不是每个读取者都收到相同事件。
+
+#### 错误六：忘记设置 EFD_CLOEXEC
+
+服务器启动外部程序时，如果不希望 `eventfd` 被继承，应在创建时设置：
+
+```c
+EFD_CLOEXEC
+```
+
+避免文件描述符泄漏和对象生命周期异常。
+
+### 8.14 总结
+
+`eventfd` 可以概括为：
+
+> **一个能够通过文件描述符读写和监听的 64 位内核事件计数器。**
+
+它的主要价值不是传输数据，而是：
+
+* 低成本事件通知；
+* 线程或进程间唤醒；
+* 与 `epoll` 统一事件源；
+* 累计多次事件；
+* 把跨线程任务提交接入 Reactor。
+
+典型使用模式是：
+
+```text
+共享队列负责保存数据
+eventfd 负责通知和唤醒
+epoll 负责统一等待
+```
+
+使用时需要记住：
+
+* 每次读写必须是 8 字节；
+* 多次写入会累加，不保留消息边界；
+* 默认读取会返回累计值并清零；
+* `EFD_SEMAPHORE` 模式每次读取减一；
+* 非阻塞模式下要处理 `EAGAIN`；
+* ET 模式下应读取到 `EAGAIN`；
+* 多个读取者是竞争消费，不是广播；
+* 业务共享状态仍然需要正确同步。
+
+
+## 9. Unix Domain Socket
 
 Unix Domain Socket（UDS）使用 Socket 编程模型完成本机 IPC。
 
@@ -900,7 +1686,7 @@ Unix Domain Socket（UDS）使用 Socket 编程模型完成本机 IPC。
 - 保留凭据、权限检查等本机特性；
 - 不经过 IP 路由，但仍有内核协议栈和缓冲管理成本。
 
-### 8.1 服务端
+### 9.1 服务端
 
 ```cpp
 #include <cerrno>
@@ -1017,7 +1803,7 @@ int main() {
 }
 ```
 
-### 8.2 客户端
+### 9.2 客户端
 
 ```cpp
 #include <cerrno>
@@ -5251,6 +6037,7 @@ page fault 通常发生在 TLB miss 后发现页表条件不满足
 10. [Linux man-pages: mmap(2)](https://man7.org/linux/man-pages/man2/mmap.2.html)
 11. [Linux man-pages: io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
 12. [Linux man-pages: namespaces(7)](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+13. [Linux man-pages: eventfd(2)](https://man7.org/linux/man-pages/man2/eventfd.2.html)
 
 > 内核文档和 man-pages 会持续更新。阅读具体机器行为时，应同时检查发行版内核版本、配置选项和对应源码。
 
