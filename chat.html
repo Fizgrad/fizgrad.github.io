@@ -56,8 +56,9 @@
       <label class="chat-field">
         <span data-i18n="modelId">Model ID</span>
         <select id="cfg-model-select" class="chat-select">
+          <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          <option value="deepseek-v4-flash">deepseek-v4-flash</option>
           <option value="ark-code-latest">ark-code-latest</option>
-          <option value="doubao-seed-2.0-lite">doubao-seed-2.0-lite</option>
           <option value="doubao-seed-2.0-mini">doubao-seed-2.0-mini</option>
           <option value="glm-5.2">glm-5.2</option>
           <option value="kimi-k2.7-code">kimi-k2.7-code</option>
@@ -276,7 +277,7 @@
       var cfg = {
         baseurl: "https://ark.cn-beijing.volces.com/api/plan/v3",
         apikey: "",
-        model: "ark-code-latest",
+        model: "deepseek-v4-pro",
         proxy: "",
         system: "",
         temp: 0.7,
@@ -297,7 +298,7 @@
         cfg.maxtokens = parseInt(document.getElementById("cfg-maxtokens").value, 10) || 4096;
         var sel = document.getElementById("cfg-model-select");
         if (sel.value === "__custom__") {
-          cfg.model = document.getElementById("cfg-model-custom").value.trim() || "ark-code-latest";
+          cfg.model = document.getElementById("cfg-model-custom").value.trim() || "deepseek-v4-pro";
         } else {
           cfg.model = sel.value;
         }

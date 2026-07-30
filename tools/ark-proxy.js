@@ -1,39 +1,58 @@
 const http = require("http");
+const https = require("https");
 
-const PORT = 8787;
-const TARGET = "https://ark.cn-beijing.volces.com";
+const PORT = process.env.PORT || 8787;
 
-const server = http.createServer((clientReq, clientRes) => {
-  const url = new URL(clientReq.url, TARGET);
+function proxyRequest(clientReq, clientRes) {
+  if (clientReq.method === "OPTIONS") {
+    clientRes.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "*",
+      "Access-Control-Allow-Headers": "*",
+    });
+    clientRes.end();
+    return;
+  }
 
+  const decoded = decodeURIComponent(clientReq.url.slice(1));
+  if (!decoded.startsWith("https://") && !decoded.startsWith("http://")) {
+    clientRes.writeHead(400);
+    clientRes.end(JSON.stringify({ error: "invalid target URL" }));
+    return;
+  }
+
+  const targetUrl = new URL(decoded);
   const headers = { ...clientReq.headers };
   delete headers.host;
   delete headers.origin;
   delete headers.referer;
 
-  const proxyReq = https.request(url, {
-    method: clientReq.method,
-    headers,
-  }, (proxyRes) => {
-    const respHeaders = { ...proxyRes.headers };
-    respHeaders["access-control-allow-origin"] = "*";
-    respHeaders["access-control-allow-headers"] = "*";
-    respHeaders["access-control-allow-methods"] = "*";
-    clientRes.writeHead(proxyRes.statusCode, respHeaders);
-    proxyRes.pipe(clientRes);
+  const proxyReq = https.request(
+    targetUrl,
+    { method: clientReq.method, headers },
+    (proxyRes) => {
+      const respHeaders = {
+        ...proxyRes.headers,
+        "access-control-allow-origin": "*",
+      };
+      clientRes.writeHead(proxyRes.statusCode, respHeaders);
+      proxyRes.pipe(clientRes);
+    }
+  );
+
+  proxyReq.on("error", () => {
+    if (!clientRes.headersSent) {
+      clientRes.writeHead(502);
+      clientRes.end('{"error":"proxy error"}');
+    }
   });
 
-  proxyReq.on("error", (e) => {
-    clientRes.writeHead(502);
-    clientRes.end(JSON.stringify({ error: e.message }));
-  });
-
+  clientReq.on("error", () => proxyReq.destroy());
   clientReq.pipe(proxyReq);
-});
+}
 
-const https = require("https");
-
+const server = http.createServer(proxyRequest);
 server.listen(PORT, () => {
-  console.log(`ARK proxy running on http://localhost:${PORT}`);
-  console.log(`Base URL to use in chat: http://YOUR_SERVER:8787/api/plan/v3`);
+  console.log(`ARK proxy running on :${PORT}`);
+  console.log(`Use in chat: http://YOUR_IP:${PORT}/`);
 });
