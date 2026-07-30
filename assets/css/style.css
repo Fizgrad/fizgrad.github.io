@@ -745,6 +745,27 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-field input:focus,
 .chat-field textarea:focus { border-color: var(--accent); }
 .chat-field input[type="range"] { padding: 0; }
+.chat-field select {
+  padding: 0.5rem 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%239a9aac' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  padding-right: 2rem;
+}
+.chat-field select:focus { border-color: var(--accent); }
+.chat-field-input-hidden { display: none; }
+.chat-field-input-hidden.show { display: block; margin-top: 0.4rem; }
 .chat-settings-actions { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; }
 .chat-settings-actions button {
   flex: 1;

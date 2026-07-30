@@ -39,7 +39,23 @@
       </label>
       <label class="chat-field">
         <span data-i18n="modelId">Model ID</span>
-        <input type="text" id="cfg-model" value="ark-code-latest" spellcheck="false" list="model-presets" />
+        <select id="cfg-model-select" class="chat-select">
+          <option value="ark-code-latest">ark-code-latest</option>
+          <option value="doubao-seed-2.0-lite">doubao-seed-2.0-lite</option>
+          <option value="doubao-seed-2.0-mini">doubao-seed-2.0-mini</option>
+          <option value="glm-5.2">glm-5.2</option>
+          <option value="kimi-k2.7-code">kimi-k2.7-code</option>
+          <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+          <option value="minimax-m3">minimax-m3</option>
+          <option value="minimax-m2.7">minimax-m2.7</option>
+          <option value="kimi-k2.6">kimi-k2.6</option>
+          <option value="doubao-seed-evolving">doubao-seed-evolving</option>
+          <option value="kimi-k3">kimi-k3</option>
+          <option value="doubao-seed-2.1-turbo">doubao-seed-2.1-turbo</option>
+          <option value="__custom__" data-i18n="modelCustom">自定义...</option>
+        </select>
+        <input type="text" id="cfg-model-custom" class="chat-field-input-hidden" placeholder="输入自定义 Model ID" spellcheck="false" />
       </label>
       <datalist id="model-presets">
         <option value="doubao-seed-2.0-lite"></option>
@@ -132,8 +148,8 @@
       document.getElementById("year").textContent = new Date().getFullYear();
 
       var I18N = {
-        zh: { settings: "设置", apiConfig: "API 配置", modelId: "Model ID", corsProxy: "CORS 代理 (可选)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "保存", clearChat: "清空对话", cfgHint: "配置仅保存在浏览器 localStorage，不发送到服务器。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinking: "思考中...", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", statsTitle: "会话统计", statModel: "模型", statMessages: "消息数", statUserMsgs: "用户消息", statAiMsgs: "AI 回复", statRequests: "请求次数", statStatus: "状态", statIdle: "空闲", statBusy: "生成中", corsHint: "若遇到 CORS 报错，可填入 CORS 代理前缀。" },
-        en: { settings: "Settings", apiConfig: "API Config", modelId: "Model ID", corsProxy: "CORS Proxy (optional)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "Save", clearChat: "Clear Chat", cfgHint: "Config is stored in browser localStorage only, not sent to any server.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinking: "Thinking...", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", statsTitle: "Session Stats", statModel: "Model", statMessages: "Messages", statUserMsgs: "User msgs", statAiMsgs: "AI replies", statRequests: "Requests", statStatus: "Status", statIdle: "Idle", statBusy: "Generating", corsHint: "If you get CORS errors, enter a CORS proxy prefix." }
+        zh: { settings: "设置", apiConfig: "API 配置", modelId: "Model ID", corsProxy: "CORS 代理 (可选)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "保存", clearChat: "清空对话", cfgHint: "配置仅保存在浏览器 localStorage，不发送到服务器。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinking: "思考中...", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", statsTitle: "会话统计", statModel: "模型", statMessages: "消息数", statUserMsgs: "用户消息", statAiMsgs: "AI 回复", statRequests: "请求次数", statStatus: "状态", statIdle: "空闲", statBusy: "生成中", corsHint: "若遇到 CORS 报错，可填入 CORS 代理前缀。", modelCustom: "自定义..." },
+        en: { settings: "Settings", apiConfig: "API Config", modelId: "Model ID", corsProxy: "CORS Proxy (optional)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "Save", clearChat: "Clear Chat", cfgHint: "Config is stored in browser localStorage only, not sent to any server.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinking: "Thinking...", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", statsTitle: "Session Stats", statModel: "Model", statMessages: "Messages", statUserMsgs: "User msgs", statAiMsgs: "AI replies", statRequests: "Requests", statStatus: "Status", statIdle: "Idle", statBusy: "Generating", corsHint: "If you get CORS errors, enter a CORS proxy prefix.", modelCustom: "Custom..." }
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -150,6 +166,8 @@
           var key = el.getAttribute("data-i18n-ph");
           if (I18N[lang][key]) el.placeholder = I18N[lang][key];
         });
+        var customOpt = document.querySelector("#cfg-model-select option[data-i18n]");
+        if (customOpt) customOpt.textContent = I18N[lang].modelCustom || "Custom...";
         var btn = document.getElementById("lang-toggle");
         if (btn) {
           btn.textContent = lang === "zh" ? "EN" : "中";
@@ -181,11 +199,16 @@
       function saveCfg() {
         cfg.baseurl = document.getElementById("cfg-baseurl").value.replace(/\/+$/, "");
         cfg.apikey = document.getElementById("cfg-apikey").value.trim();
-        cfg.model = document.getElementById("cfg-model").value.trim();
         cfg.proxy = document.getElementById("cfg-proxy").value.trim();
         cfg.system = document.getElementById("cfg-system").value.trim();
         cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
         cfg.maxtokens = parseInt(document.getElementById("cfg-maxtokens").value, 10) || 4096;
+        var sel = document.getElementById("cfg-model-select");
+        if (sel.value === "__custom__") {
+          cfg.model = document.getElementById("cfg-model-custom").value.trim() || "ark-code-latest";
+        } else {
+          cfg.model = sel.value;
+        }
         localStorage.setItem("chat-cfg", JSON.stringify(cfg));
         fillCfgForm();
       }
@@ -193,12 +216,23 @@
       function fillCfgForm() {
         document.getElementById("cfg-baseurl").value = cfg.baseurl;
         document.getElementById("cfg-apikey").value = cfg.apikey;
-        document.getElementById("cfg-model").value = cfg.model;
         document.getElementById("cfg-proxy").value = cfg.proxy;
         document.getElementById("cfg-system").value = cfg.system;
         document.getElementById("cfg-temp").value = cfg.temp;
         document.getElementById("temp-val").textContent = cfg.temp;
         document.getElementById("cfg-maxtokens").value = cfg.maxtokens;
+        var sel = document.getElementById("cfg-model-select");
+        var found = false;
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === cfg.model) { sel.value = cfg.model; found = true; break; }
+        }
+        if (!found) {
+          sel.value = "__custom__";
+          document.getElementById("cfg-model-custom").value = cfg.model;
+          document.getElementById("cfg-model-custom").classList.add("show");
+        } else {
+          document.getElementById("cfg-model-custom").classList.remove("show");
+        }
       }
 
       fillCfgForm();
@@ -207,6 +241,16 @@
       });
 
       document.getElementById("cfg-save").addEventListener("click", saveCfg);
+
+      document.getElementById("cfg-model-select").addEventListener("change", function () {
+        var custom = document.getElementById("cfg-model-custom");
+        if (this.value === "__custom__") {
+          custom.classList.add("show");
+          custom.focus();
+        } else {
+          custom.classList.remove("show");
+        }
+      });
 
       var settingsPanel = document.getElementById("chat-settings");
       document.getElementById("chat-settings-toggle").addEventListener("click", function () {
