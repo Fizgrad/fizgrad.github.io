@@ -781,6 +781,7 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   color: var(--text-faint);
   line-height: 1.5;
 }
+.chat-page ~ .footer { display: none; }
 
 .chat-stats {
   margin-top: 1.5rem;
