@@ -82,6 +82,7 @@
         <span data-i18n="labelTopp">Top P <b id="topp-val">1.0</b></span>
         <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
       </label>
+      <p class="chat-settings-hint" id="sampling-hint" data-i18n="thinkingIgnoresHint">⚠ 思考模式下此参数不生效</p>
       </div>
       <label class="chat-field">
         <span data-i18n="maxTokens">Max Tokens</span>
@@ -222,8 +223,8 @@
       }
 
       var I18N = {
-        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤" },
-        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", userId: "User ID (optional)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank.", reasoning: "Reasoning", finishLength: "Response truncated due to max token limit", finishFilter: "Response filtered due to content safety" },
+        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤", thinkingIgnoresHint: "⚠ 思考模式下此参数不生效" },
+        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", userId: "User ID (optional)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank.", reasoning: "Reasoning", finishLength: "Response truncated due to max token limit", finishFilter: "Response filtered due to content safety", thinkingIgnoresHint: "⚠ Ignored in thinking mode" },
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -350,10 +351,15 @@
       var samplingDiv = document.getElementById("sampling-params");
       var thinkingSel = document.getElementById("cfg-thinking");
       var reasoningField = document.getElementById("cfg-reasoning").parentElement;
+      var samplingHint = document.getElementById("sampling-hint");
+      var tempInput = document.getElementById("cfg-temp");
+      var toppInput = document.getElementById("cfg-topp");
       function updateThinkingUI() {
-        var show = thinkingSel.value === "disabled";
-        samplingDiv.style.display = show ? "" : "none";
-        reasoningField.style.display = show ? "none" : "";
+        var thinking = thinkingSel.value !== "disabled";
+        samplingDiv.style.opacity = thinking ? "0.4" : "1";
+        samplingDiv.style.pointerEvents = thinking ? "none" : "auto";
+        samplingHint.style.display = thinking ? "" : "none";
+        reasoningField.style.display = thinking ? "" : "none";
       }
       thinkingSel.addEventListener("change", updateThinkingUI);
       updateThinkingUI();
