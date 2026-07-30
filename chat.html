@@ -47,7 +47,7 @@
       <h2 class="chat-settings-title" data-i18n="apiConfig">API 配置</h2>
       <label class="chat-field">
         <span>Base URL</span>
-        <input type="text" id="cfg-baseurl" value="https://ark.cn-beijing.volces.com/api/plan/v3" spellcheck="false" />
+        <input type="text" id="cfg-baseurl" value="https://api.deepseek.com" spellcheck="false" />
       </label>
       <label class="chat-field">
         <span>API Key</span>
@@ -58,12 +58,11 @@
         <select id="cfg-model-select" class="chat-select">
           <option value="deepseek-v4-pro">deepseek-v4-pro</option>
           <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+          <option value="kimi-k2.7-code">kimi-k2.7-code</option>
           <option value="ark-code-latest">ark-code-latest</option>
+          <option value="doubao-seed-2.0-lite">doubao-seed-2.0-lite</option>
           <option value="doubao-seed-2.0-mini">doubao-seed-2.0-mini</option>
           <option value="glm-5.2">glm-5.2</option>
-          <option value="kimi-k2.7-code">kimi-k2.7-code</option>
-          <option value="deepseek-v4-pro">deepseek-v4-pro</option>
-          <option value="deepseek-v4-flash">deepseek-v4-flash</option>
           <option value="minimax-m3">minimax-m3</option>
           <option value="minimax-m2.7">minimax-m2.7</option>
           <option value="kimi-k2.6">kimi-k2.6</option>
@@ -100,6 +99,10 @@
       <label class="chat-field">
         <span>Temperature <b id="temp-val">0.7</b></span>
         <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="0.7" />
+      </label>
+      <label class="chat-field">
+        <span>Top P <b id="topp-val">1.0</b></span>
+        <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
       </label>
       <label class="chat-field">
         <span data-i18n="maxTokens">Max Tokens</span>
@@ -275,12 +278,13 @@
       });
 
       var cfg = {
-        baseurl: "https://ark.cn-beijing.volces.com/api/plan/v3",
+        baseurl: "https://api.deepseek.com",
         apikey: "",
         model: "deepseek-v4-pro",
         proxy: "",
         system: "",
         temp: 0.7,
+        topp: 1.0,
         maxtokens: 4096
       };
 
@@ -295,6 +299,7 @@
         cfg.proxy = document.getElementById("cfg-proxy").value.trim();
         cfg.system = document.getElementById("cfg-system").value.trim();
         cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
+        cfg.topp = parseFloat(document.getElementById("cfg-topp").value);
         cfg.maxtokens = parseInt(document.getElementById("cfg-maxtokens").value, 10) || 4096;
         var sel = document.getElementById("cfg-model-select");
         if (sel.value === "__custom__") {
@@ -313,6 +318,8 @@
         document.getElementById("cfg-system").value = cfg.system;
         document.getElementById("cfg-temp").value = cfg.temp;
         document.getElementById("temp-val").textContent = cfg.temp;
+        document.getElementById("cfg-topp").value = cfg.topp;
+        document.getElementById("topp-val").textContent = cfg.topp;
         document.getElementById("cfg-maxtokens").value = cfg.maxtokens;
         var sel = document.getElementById("cfg-model-select");
         var found = false;
@@ -331,6 +338,10 @@
       fillCfgForm();
       document.getElementById("cfg-temp").addEventListener("input", function () {
         document.getElementById("temp-val").textContent = this.value;
+      });
+
+      document.getElementById("cfg-topp").addEventListener("input", function () {
+        document.getElementById("topp-val").textContent = this.value;
       });
 
       document.getElementById("cfg-save").addEventListener("click", saveCfg);
@@ -633,6 +644,7 @@
           model: cfg.model,
           messages: apiMessages,
           temperature: cfg.temp,
+          top_p: cfg.topp,
           max_tokens: cfg.maxtokens,
           stream: true
         });
