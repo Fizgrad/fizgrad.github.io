@@ -13,6 +13,21 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
+  <script>
+    window.MathJax = {
+      startup: { typeset: false },
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      options: {
+        ignoreHtmlClass: 'tex2jax_ignore',
+        processHtmlClass: 'tex2jax_process'
+      }
+    };
+  </script>
+  <script id="MathJax-script" defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
 </head>
 <body>
   <div class="grid-overlay" aria-hidden="true"></div>
@@ -73,7 +88,7 @@
       </datalist>
       <label class="chat-field">
         <span data-i18n="corsProxy">CORS 代理 (可选)</span>
-        <input type="text" id="cfg-proxy" placeholder="CORS 代理前缀" spellcheck="false" />
+        <input type="text" id="cfg-proxy" placeholder="" spellcheck="false" />
       </label>
       <p class="chat-settings-hint" data-i18n="corsHint">若遇到 CORS 报错，可填入 CORS 代理前缀。</p>
       <label class="chat-field">
@@ -146,6 +161,81 @@
   <script>
     (function () {
       document.getElementById("year").textContent = new Date().getFullYear();
+
+      var mathItems = new Map();
+      var mathSeq = 0;
+
+      function emitMathToken(tex, display) {
+        var id = "math-" + (mathSeq++);
+        mathItems.set(id, { tex: tex, display: display });
+        var tag = display ? "div" : "span";
+        return '<' + tag + ' class="math-slot tex2jax_process" data-math-id="' + id + '"></' + tag + '>';
+      }
+
+      function hydrateMathSlots(container) {
+        var slots = container.querySelectorAll("[data-math-id]");
+        for (var i = 0; i < slots.length; i++) {
+          var slot = slots[i];
+          var id = slot.getAttribute("data-math-id");
+          var item = mathItems.get(id);
+          if (!item) { slot.textContent = "[公式数据缺失]"; continue; }
+          slot.textContent = item.display ? "\\[" + item.tex + "\\]" : "\\(" + item.tex + "\\)";
+        }
+      }
+
+      var parseMathExtension = {
+        name: "math",
+        level: "block",
+        start: function (src) {
+          var idx = src.indexOf("$$");
+          if (idx !== -1) return idx;
+          idx = src.indexOf("\\[");
+          return idx;
+        },
+        tokenizer: function (src) {
+          var dlMatch = src.match(/^\$\$([\s\S]*?)\$\$/);
+          if (!dlMatch) dlMatch = src.match(/^\\\[([\s\S]*?)\\\]/);
+          if (!dlMatch) return undefined;
+          var tex = dlMatch[1].trim();
+          var html = emitMathToken(tex, true);
+          return { type: "math", raw: dlMatch[0], html: html, tokens: [] };
+        },
+        renderer: function (token) { return token.html; }
+      };
+
+      var inlineMathExtension = {
+        name: "inlineMath",
+        level: "inline",
+        start: function (src) {
+          var m = src.match(/\\\(|\$(?!\$)/);
+          return m ? m.index : -1;
+        },
+        tokenizer: function (src) {
+          if (src[0] === "\\" && src[1] === "(") {
+            var end = src.indexOf("\\)", 2);
+            if (end === -1) return undefined;
+            var tex = src.slice(2, end).trim();
+            return { type: "inlineMath", raw: src.slice(0, end + 2), html: emitMathToken(tex, false), tokens: [] };
+          }
+          if (src[0] === "$" && src[1] !== "$") {
+            var idx = src.indexOf("$", 1);
+            if (idx === -1) return undefined;
+            if (src[idx - 1] === "\\") return undefined;
+            var tex2 = src.slice(1, idx).trim();
+            return { type: "inlineMath", raw: src.slice(0, idx + 1), html: emitMathToken(tex2, false), tokens: [] };
+          }
+          return undefined;
+        },
+        renderer: function (token) { return token.html; }
+      };
+
+      var markedReady = false;
+      if (typeof marked !== "undefined" && marked.parse) {
+        try {
+          marked.use({ extensions: [parseMathExtension, inlineMathExtension] });
+          markedReady = true;
+        } catch (e) {}
+      }
 
       var I18N = {
         zh: { settings: "设置", apiConfig: "API 配置", modelId: "Model ID", corsProxy: "CORS 代理 (可选)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "保存", clearChat: "清空对话", cfgHint: "配置仅保存在浏览器 localStorage，不发送到服务器。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinking: "思考中...", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", statsTitle: "会话统计", statModel: "模型", statMessages: "消息数", statUserMsgs: "用户消息", statAiMsgs: "AI 回复", statRequests: "请求次数", statStatus: "状态", statIdle: "空闲", statBusy: "生成中", corsHint: "若遇到 CORS 报错，可填入 CORS 代理前缀。", modelCustom: "自定义..." },
@@ -263,19 +353,27 @@
       var sendBtn = document.getElementById("chat-send");
       var isStreaming = false; setStatus(false);
 
-      function renderMarkdown(text) {
-        if (typeof marked !== "undefined" && marked.parse) {
-          var html = marked.parse(text);
-          var div = document.createElement("div");
-          div.innerHTML = html;
-          if (typeof hljs !== "undefined") {
-            div.querySelectorAll("pre code").forEach(function (block) {
-              hljs.highlightElement(block);
-            });
-          }
-          return div.innerHTML;
+      function renderMarkdown(text, targetEl, final) {
+        if (!markedReady) {
+          targetEl.innerHTML = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+          return;
         }
-        return text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+        mathItems.clear();
+        mathSeq = 0;
+        var html = marked.parse(text);
+        targetEl.innerHTML = html;
+        hydrateMathSlots(targetEl);
+        if (typeof hljs !== "undefined") {
+          targetEl.querySelectorAll("pre code").forEach(function (block) {
+            hljs.highlightElement(block);
+          });
+        }
+        if (final && typeof MathJax !== "undefined" && MathJax.startup && MathJax.startup.promise) {
+          MathJax.startup.promise.then(function () {
+            MathJax.typesetClear([targetEl]);
+            MathJax.typesetPromise([targetEl]).catch(function () {});
+          });
+        }
       }
 
       function addMessage(role, content) {
@@ -293,7 +391,7 @@
           bubble.textContent = content;
         } else {
           bubble.className = "chat-bubble markdown-body";
-          bubble.innerHTML = renderMarkdown(content);
+          renderMarkdown(content, bubble, true);
         }
 
         wrap.appendChild(avatar);
@@ -419,7 +517,7 @@
                 if (fullText) {
                   messages[messages.length - 1].content = fullText;
                   bubble.className = "chat-bubble markdown-body";
-                  bubble.innerHTML = renderMarkdown(fullText);
+                  renderMarkdown(fullText, bubble, true);
                 } else {
                   bubble.innerHTML = '<span class="chat-error">' + t("emptyReply") + '</span>';
                 }
@@ -440,7 +538,7 @@
                   if (delta && delta.content) {
                     fullText += delta.content;
                     bubble.className = "chat-bubble markdown-body";
-                    bubble.innerHTML = renderMarkdown(fullText);
+renderMarkdown(fullText, bubble, false);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                   }
                 } catch (e) {}
