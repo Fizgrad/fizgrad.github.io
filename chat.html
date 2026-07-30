@@ -448,7 +448,9 @@
         if (final && typeof MathJax !== "undefined" && MathJax.startup && MathJax.startup.promise) {
           MathJax.startup.promise.then(function () {
             MathJax.typesetClear([targetEl]);
-            MathJax.typesetPromise([targetEl]).catch(function () {});
+            MathJax.typesetPromise([targetEl]).then(function () {
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            }).catch(function () {});
           });
         }
 
@@ -503,23 +505,6 @@
             }
           });
           wrapper.appendChild(expandBtn);
-        });
-
-        /* Heading anchors */
-        var slugSet = {};
-        targetEl.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach(function (h) {
-          var text = h.textContent.trim();
-          var slug = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5\s-]/g, "").replace(/\s+/g, "-");
-          if (!slug) slug = "heading";
-          if (slugSet[slug]) { slugSet[slug]++; slug = slug + "-" + slugSet[slug]; }
-          else { slugSet[slug] = 1; }
-          h.id = slug;
-          var link = document.createElement("a");
-          link.className = "heading-anchor";
-          link.href = "#" + slug;
-          link.textContent = "#";
-          link.setAttribute("aria-label", "Anchor: " + text);
-          h.appendChild(link);
         });
       }
 
