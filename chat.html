@@ -39,7 +39,21 @@
       </label>
       <label class="chat-field">
         <span data-i18n="modelId">Model ID</span>
-        <input type="text" id="cfg-model" value="ark-code-latest" spellcheck="false" />
+        <input type="text" id="cfg-model" value="ark-code-latest" spellcheck="false" list="model-presets" />
+        <datalist id="model-presets">
+          <option value="doubao-seed-2.0-lite">
+          <option value="doubao-seed-2.0-mini">
+          <option value="glm-5.2">
+          <option value="kimi-k2.7-code">
+          <option value="deepseek-v4-pro">
+          <option value="deepseek-v4-flash">
+          <option value="minimax-m3">
+          <option value="minimax-m2.7">
+          <option value="kimi-k2.6">
+          <option value="doubao-seed-evolving">
+          <option value="kimi-k3">
+          <option value="doubao-seed-2.1-turbo">
+        </datalist>
       </label>
       <label class="chat-field">
         <span data-i18n="corsProxy">CORS 代理 (可选)</span>
