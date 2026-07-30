@@ -354,6 +354,16 @@
       var inputEl = document.getElementById("chat-input");
       var sendBtn = document.getElementById("chat-send");
       var isStreaming = false; setStatus(false);
+      var isPinned = true;
+
+      function scrollToBottom() {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      messagesEl.addEventListener("scroll", function () {
+        var dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+        isPinned = dist < 40;
+      }, { passive: true });
 
       function renderMarkdown(text, targetEl, final) {
         if (!markedReady) {
@@ -365,7 +375,7 @@
         var html = marked.parse(text);
         targetEl.innerHTML = html;
         if (!final) {
-          messagesEl.scrollTop = messagesEl.scrollHeight;
+          if (isPinned) scrollToBottom();
           return;
         }
         hydrateMathSlots(targetEl);
@@ -453,7 +463,7 @@
           MathJax.startup.promise.then(function () {
             MathJax.typesetClear([targetEl]);
             MathJax.typesetPromise([targetEl]).then(function () {
-              messagesEl.scrollTop = messagesEl.scrollHeight;
+              scrollToBottom();
             }).catch(function () {});
           });
         }
@@ -533,7 +543,7 @@
         wrap.appendChild(avatar);
         wrap.appendChild(bubble);
         messagesEl.appendChild(wrap);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        scrollToBottom();
         updateStats();
         return bubble;
       }
@@ -675,7 +685,6 @@
                     fullText += delta.content;
                     bubble.className = "chat-bubble markdown-body";
 renderMarkdown(fullText, bubble, false);
-                    messagesEl.scrollTop = messagesEl.scrollHeight;
                   }
                 } catch (e) {}
               }
