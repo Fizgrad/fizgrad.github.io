@@ -74,16 +74,16 @@
         </select>
       </label>
       <div id="sampling-params">
-      <label class="chat-field">
-        <span data-i18n="labelTemp">Temperature <b id="temp-val">1.0</b></span>
-        <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="1.0" />
-      </label>
-      <p class="chat-disabled-hint" id="temp-disabled-hint" data-i18n="thinkingIgnoresHint">⚠ 思考模式下此参数不生效</p>
-      <label class="chat-field">
-        <span data-i18n="labelTopp">Top P <b id="topp-val">1.0</b></span>
-        <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
-      </label>
-      <p class="chat-disabled-hint" id="topp-disabled-hint" data-i18n="thinkingIgnoresHint">⚠ 思考模式下此参数不生效</p>
+        <label class="chat-field">
+          <span><span data-i18n="labelTemp">Temperature</span> <b id="temp-val">1.0</b></span>
+          <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="1.0" />
+        </label>
+        <p class="chat-disabled-hint" id="temp-disabled-hint" data-i18n="thinkingIgnoresHint" hidden>⚠ 思考模式下此参数不生效</p>
+        <label class="chat-field">
+          <span><span data-i18n="labelTopp">Top P</span> <b id="topp-val">1.0</b></span>
+          <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
+        </label>
+        <p class="chat-disabled-hint" id="topp-disabled-hint" data-i18n="thinkingIgnoresHint" hidden>⚠ 思考模式下此参数不生效</p>
       </div>
       <label class="chat-field">
         <span data-i18n="maxTokens">Max Tokens</span>
@@ -100,7 +100,7 @@
           <option value="max">max</option>
         </select>
       </label>
-      <p class="chat-disabled-hint" id="reasoning-disabled-hint" data-i18n="nonThinkingIgnoresHint">⚠ 非思考模式下此参数不生效</p>
+      <p class="chat-disabled-hint" id="reasoning-disabled-hint" data-i18n="nonThinkingIgnoresHint" hidden>⚠ 非思考模式下此参数不生效</p>
       <label class="chat-field">
         <span data-i18n="responseFormat">输出格式</span>
         <select id="cfg-respformat" class="chat-select">
@@ -340,7 +340,7 @@
         var display = document.getElementById(id.replace("cfg-", "") + "-val");
         if (display) slider.addEventListener("input", function () { display.textContent = this.value; });
       });
-      ["cfg-baseurl", "cfg-apikey", "cfg-system", "cfg-maxtokens", "cfg-stop", "cfg-userid"].forEach(function (id) {
+      ["cfg-baseurl", "cfg-apikey", "cfg-model-custom", "cfg-system", "cfg-maxtokens", "cfg-stop", "cfg-userid"].forEach(function (id) {
         document.getElementById(id).addEventListener("change", autoSave);
       });
       ["cfg-temp", "cfg-topp", "cfg-thinking", "cfg-reasoning", "cfg-respformat"].forEach(function (id) {
@@ -350,10 +350,8 @@
       document.getElementById("cfg-stream-usage").addEventListener("change", autoSave);
 
       /* Toggle sampling params based on thinking mode */
-      var samplingDiv = document.getElementById("sampling-params");
       var thinkingSel = document.getElementById("cfg-thinking");
       var reasoningField = document.getElementById("cfg-reasoning").parentElement;
-      var samplingHint = document.getElementById("sampling-hint");
       var tempInput = document.getElementById("cfg-temp");
       var toppInput = document.getElementById("cfg-topp");
       var reasoningSel = document.getElementById("cfg-reasoning");
@@ -365,10 +363,10 @@
         tempInput.disabled = thinking;
         toppInput.disabled = thinking;
         reasoningSel.disabled = !thinking;
-        tempHint.style.display = thinking ? "" : "none";
-        toppHint.style.display = thinking ? "" : "none";
-        reasoningHint.style.display = thinking ? "none" : "";
-        reasoningField.style.opacity = thinking ? "1" : "0.4";
+        tempHint.hidden = !thinking;
+        toppHint.hidden = !thinking;
+        reasoningHint.hidden = thinking;
+        reasoningField.classList.toggle("chat-field-disabled", !thinking);
       }
       thinkingSel.addEventListener("change", updateThinkingUI);
       updateThinkingUI();
@@ -609,6 +607,7 @@
 
       function doSend() {
         if (isStreaming) return;
+        autoSave();
         var text = inputEl.value.trim();
         if (!text) return;
         if (!cfg.apikey) {
