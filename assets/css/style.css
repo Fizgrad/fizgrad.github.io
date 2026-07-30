@@ -746,8 +746,36 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-field textarea:focus { border-color: var(--accent); }
 .chat-field input[type="range"] { padding: 0; }
 .chat-settings-actions { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; }
-.chat-settings-actions .reader-render-btn { flex: 1; }
-.chat-settings-actions .lang-btn { flex: 1; padding: 0.5rem 1.5rem; font-size: 0.85rem; }
+.chat-settings-actions button {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+  line-height: 1.4;
+}
+.chat-settings-actions button:first-child {
+  color: var(--accent-2);
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid var(--accent-2);
+}
+.chat-settings-actions button:first-child:hover {
+  color: #08080c;
+  background: var(--accent-2);
+}
+.chat-settings-actions button:last-child {
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+.chat-settings-actions button:last-child:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(124, 140, 255, 0.08);
+}
 .chat-settings-hint {
   font-size: 0.72rem;
   color: var(--text-faint);
