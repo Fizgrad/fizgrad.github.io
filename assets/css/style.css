@@ -745,6 +745,17 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-field input:focus,
 .chat-field textarea:focus { border-color: var(--accent); }
 .chat-field input[type="range"] { padding: 0; }
+.chat-field input[type="range"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.chat-disabled-hint {
+  font-size: 0.7rem;
+  color: #f59e0b;
+  margin: -0.5rem 0 0.6rem;
+  padding-left: 0.2rem;
+  display: none;
+}
 .chat-field input[type="number"] {
   color-scheme: dark;
 }

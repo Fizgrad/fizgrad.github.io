@@ -78,11 +78,12 @@
         <span data-i18n="labelTemp">Temperature <b id="temp-val">1.0</b></span>
         <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="1.0" />
       </label>
+      <p class="chat-disabled-hint" id="temp-disabled-hint" data-i18n="thinkingIgnoresHint">⚠ 思考模式下此参数不生效</p>
       <label class="chat-field">
         <span data-i18n="labelTopp">Top P <b id="topp-val">1.0</b></span>
         <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
       </label>
-      <p class="chat-settings-hint" id="sampling-hint" data-i18n="thinkingIgnoresHint">⚠ 思考模式下此参数不生效</p>
+      <p class="chat-disabled-hint" id="topp-disabled-hint" data-i18n="thinkingIgnoresHint">⚠ 思考模式下此参数不生效</p>
       </div>
       <label class="chat-field">
         <span data-i18n="maxTokens">Max Tokens</span>
@@ -354,11 +355,14 @@
       var samplingHint = document.getElementById("sampling-hint");
       var tempInput = document.getElementById("cfg-temp");
       var toppInput = document.getElementById("cfg-topp");
+      var tempHint = document.getElementById("temp-disabled-hint");
+      var toppHint = document.getElementById("topp-disabled-hint");
       function updateThinkingUI() {
         var thinking = thinkingSel.value !== "disabled";
-        samplingDiv.style.opacity = thinking ? "0.4" : "1";
-        samplingDiv.style.pointerEvents = thinking ? "none" : "auto";
-        samplingHint.style.display = thinking ? "" : "none";
+        tempInput.disabled = thinking;
+        toppInput.disabled = thinking;
+        tempHint.style.display = thinking ? "" : "none";
+        toppHint.style.display = thinking ? "" : "none";
         reasoningField.style.display = thinking ? "" : "none";
       }
       thinkingSel.addEventListener("change", updateThinkingUI);
