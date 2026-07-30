@@ -364,6 +364,10 @@
         mathSeq = 0;
         var html = marked.parse(text);
         targetEl.innerHTML = html;
+        if (!final) {
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+          return;
+        }
         hydrateMathSlots(targetEl);
 
         /* Mermaid */
