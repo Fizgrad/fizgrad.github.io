@@ -888,6 +888,94 @@ int main(void) {
 
 `volatile sig_atomic_t` 只解决信号处理函数与普通执行路径之间的最小标志传递，不应被当作一般多线程同步工具。
 
+### 7.1 signalfd：把信号接入事件循环
+
+`signalfd` 是 Linux 特有的接口，可以把指定信号转换为一个**可读取的文件描述符**。当目标信号到达时，该 fd 变为可读，程序可通过 `read()` 取得信号编号、发送者 PID 等信息，也可以把它注册到 `epoll` 中统一处理。
+
+```text
+信号产生
+    ↓
+signalfd 变为可读
+    ↓
+epoll_wait() 返回 EPOLLIN
+    ↓
+read(signalfd)
+    ↓
+在普通事件循环上下文中处理信号
+```
+
+基本使用方式：
+
+```c
+#include <signal.h>
+#include <sys/signalfd.h>
+#include <unistd.h>
+
+sigset_t mask;
+sigemptyset(&mask);
+sigaddset(&mask, SIGINT);
+sigaddset(&mask, SIGTERM);
+
+/*
+ * 必须先阻塞这些信号，防止它们按普通方式
+ * 执行信号处理函数或终止进程。
+ */
+if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
+    /* handle error */
+}
+
+int signal_fd = signalfd(
+    -1,
+    &mask,
+    SFD_NONBLOCK | SFD_CLOEXEC
+);
+
+if (signal_fd == -1) {
+    /* handle error */
+}
+```
+
+信号到达后，可以读取 `signalfd_siginfo`：
+
+```c
+struct signalfd_siginfo info;
+
+ssize_t n = read(
+    signal_fd,
+    &info,
+    sizeof(info)
+);
+
+if (n == sizeof(info)) {
+    if (info.ssi_signo == SIGTERM ||
+        info.ssi_signo == SIGINT) {
+        /* 执行正常的退出和资源清理逻辑 */
+    }
+}
+```
+
+`signalfd` 的主要价值是避免在异步信号处理函数中执行复杂操作。事件循环可以像处理 Socket、`eventfd` 和 `timerfd` 一样处理信号：
+
+```text
+Socket fd   ─┐
+eventfd     ─┤
+timerfd     ─┼──> epoll_wait()
+signalfd    ─┘
+```
+
+需要注意：
+
+* 交给 `signalfd` 处理的信号必须先被阻塞；
+* 多线程程序通常应在创建线程前阻塞信号，或者确保所有相关线程都设置了正确的信号屏蔽字；
+* `SIGKILL` 和 `SIGSTOP` 不能被阻塞，因此不能通过 `signalfd` 接收；
+* 普通信号仍可能合并，不能假设每次信号产生都一定形成一条独立记录；
+* `signalfd` 是 Linux 接口，不属于通用 POSIX 标准。
+
+一句话概括：
+
+> **`signalfd` 把异步信号转换为可由 `read()`、`poll()` 和 `epoll` 处理的 fd 事件，使信号能够进入普通事件循环。**
+
+
 ## 8. eventfd：事件计数与事件通知
 
 `eventfd` 是 Linux 提供的一种轻量级事件通知机制。它在内核中维护一个 **64 位无符号计数器**，并把这个计数器包装成普通文件描述符。
