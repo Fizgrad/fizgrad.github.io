@@ -152,8 +152,8 @@
       document.getElementById("year").textContent = new Date().getFullYear();
 
       var I18N = {
-        zh: { newFile: "新文件", dropTitle: "拖拽 Markdown 文件到此处", dropSub: "或点击选择文件", pasteLabel: "或粘贴 / 输入文本", pastePlaceholder: "# 在这里粘贴 Markdown 文本\n\n支持公式 $E=mc^2$、代码块、Mermaid 图表等", render: "渲染 Render" },
-        en: { newFile: "New File", dropTitle: "Drop a Markdown file here", dropSub: "or click to select", pasteLabel: "or paste / type text", pastePlaceholder: "# Paste Markdown here\n\nSupports math $E=mc^2$, code blocks, Mermaid diagrams", render: "Render" }
+        zh: { newFile: "新文件", dropTitle: "拖拽 Markdown 文件到此处", dropSub: "或点击选择文件", pasteLabel: "或粘贴 / 输入文本", pastePlaceholder: "# 在这里粘贴 Markdown 文本\n\n支持公式 $E=mc^2$、代码块、Mermaid 图表等", render: "渲染 Render", title: "Markdown 阅读器 - Fizgrad" },
+        en: { newFile: "New File", dropTitle: "Drop a Markdown file here", dropSub: "or click to select", pasteLabel: "or paste / type text", pastePlaceholder: "# Paste Markdown here\n\nSupports math $E=mc^2$, code blocks, Mermaid diagrams", render: "Render", title: "Markdown Reader - Fizgrad" }
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -163,6 +163,7 @@
 
       function applyI18n() {
         var dict = I18N[lang];
+        document.title = dict.title || "Markdown 阅读器 - Fizgrad";
         document.querySelectorAll("[data-i18n]").forEach(function (el) {
           var key = el.getAttribute("data-i18n");
           if (dict[key]) el.textContent = dict[key];
