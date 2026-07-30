@@ -13,6 +13,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" crossorigin="anonymous"></script>
   <script>
     window.MathJax = {
       startup: { typeset: false },
@@ -364,6 +365,23 @@
         var html = marked.parse(text);
         targetEl.innerHTML = html;
         hydrateMathSlots(targetEl);
+        var mermaidBlocks = targetEl.querySelectorAll("pre code.language-mermaid");
+        if (mermaidBlocks.length > 0 && typeof mermaid !== "undefined") {
+          mermaid.initialize({ startOnLoad: false, theme: "dark" });
+          mermaidBlocks.forEach(function (code) {
+            var wrapper = document.createElement("div");
+            wrapper.className = "mermaid-wrapper";
+            var scrollDiv = document.createElement("div");
+            scrollDiv.className = "mermaid-scroll";
+            var div = document.createElement("div");
+            div.className = "mermaid";
+            div.textContent = code.textContent;
+            scrollDiv.appendChild(div);
+            wrapper.appendChild(scrollDiv);
+            code.parentElement.replaceWith(wrapper);
+          });
+          try { mermaid.run().catch(function () {}); } catch (e) {}
+        }
         if (typeof hljs !== "undefined") {
           targetEl.querySelectorAll("pre code").forEach(function (block) {
             hljs.highlightElement(block);
