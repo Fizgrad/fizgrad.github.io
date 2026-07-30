@@ -73,20 +73,6 @@
         </select>
         <input type="text" id="cfg-model-custom" class="chat-field-input-hidden" placeholder="输入自定义 Model ID" spellcheck="false" />
       </label>
-      <datalist id="model-presets">
-        <option value="doubao-seed-2.0-lite"></option>
-        <option value="doubao-seed-2.0-mini"></option>
-        <option value="glm-5.2"></option>
-        <option value="kimi-k2.7-code"></option>
-        <option value="deepseek-v4-pro"></option>
-        <option value="deepseek-v4-flash"></option>
-        <option value="minimax-m3"></option>
-        <option value="minimax-m2.7"></option>
-        <option value="kimi-k2.6"></option>
-        <option value="doubao-seed-evolving"></option>
-        <option value="kimi-k3"></option>
-        <option value="doubao-seed-2.1-turbo"></option>
-      </datalist>
       <label class="chat-field">
         <span data-i18n="corsProxy">CORS 代理 (可选)</span>
         <input type="text" id="cfg-proxy" placeholder="" spellcheck="false" />
@@ -97,32 +83,53 @@
         <textarea id="cfg-system" rows="3" placeholder="You are a helpful assistant." spellcheck="false"></textarea>
       </label>
       <label class="chat-field">
-        <span>Temperature <b id="temp-val">0.7</b></span>
-        <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="0.7" />
+        <span>Temperature <b id="temp-val">1.0</b></span>
+        <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="1.0" />
       </label>
       <label class="chat-field">
         <span>Top P <b id="topp-val">1.0</b></span>
         <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
       </label>
       <label class="chat-field">
-        <span>Frequency Penalty <b id="freqpen-val">0</b></span>
-        <input type="range" id="cfg-freqpen" min="-2" max="2" step="0.1" value="0" />
-      </label>
-      <label class="chat-field">
-        <span>Presence Penalty <b id="prespen-val">0</b></span>
-        <input type="range" id="cfg-prespen" min="-2" max="2" step="0.1" value="0" />
-      </label>
-      <label class="chat-field">
         <span data-i18n="maxTokens">Max Tokens</span>
         <input type="number" id="cfg-maxtokens" value="4096" min="1" max="32768" />
       </label>
       <label class="chat-field">
-        <span>Stop (逗号分隔, 可选)</span>
-        <input type="text" id="cfg-stop" placeholder="" spellcheck="false" />
+        <span>Stop</span>
+        <input type="text" id="cfg-stop" placeholder="逗号分隔, 可选" spellcheck="false" />
+      </label>
+      <label class="chat-field">
+        <span data-i18n="thinking">思考模式</span>
+        <select id="cfg-thinking" class="chat-select">
+          <option value="enabled" data-i18n="thinkingOn">开启 (默认)</option>
+          <option value="disabled" data-i18n="thinkingOff">关闭</option>
+        </select>
+      </label>
+      <label class="chat-field">
+        <span data-i18n="reasoningEffort">推理强度</span>
+        <select id="cfg-reasoning" class="chat-select">
+          <option value="high">high (默认)</option>
+          <option value="max">max</option>
+        </select>
+      </label>
+      <label class="chat-field">
+        <span data-i18n="responseFormat">输出格式</span>
+        <select id="cfg-respformat" class="chat-select">
+          <option value="text" data-i18n="respText">普通文本</option>
+          <option value="json_object" data-i18n="respJson">JSON</option>
+        </select>
       </label>
       <label class="chat-field chat-field-check">
-        <span>Stream 流式输出</span>
+        <span data-i18n="stream">Stream 流式输出</span>
         <input type="checkbox" id="cfg-stream" checked />
+      </label>
+      <label class="chat-field chat-field-check">
+        <span data-i18n="streamUsage">返回 Token 用量统计</span>
+        <input type="checkbox" id="cfg-stream-usage" />
+      </label>
+      <label class="chat-field">
+        <span data-i18n="userId">用户标识 (可选)</span>
+        <input type="text" id="cfg-userid" placeholder="user_10001" spellcheck="false" />
       </label>
 
       <button id="cfg-clear" type="button" data-i18n="clearChat">清空对话</button>
@@ -228,8 +235,8 @@
       }
 
       var I18N = {
-        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", modelId: "Model ID", corsProxy: "CORS 代理 (可选)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "保存", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinking: "思考中...", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义..." },
-        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", modelId: "Model ID", corsProxy: "CORS Proxy (optional)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinking: "Thinking...", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom..." }
+        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", modelId: "Model ID", corsProxy: "CORS 代理 (可选)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", corsHint: "若遇到 CORS 报错，请使用 CORS 代理。" },
+        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", modelId: "Model ID", corsProxy: "CORS Proxy (optional)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamUsage: "Show Token Usage", userId: "User ID (optional)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", corsHint: "If you get CORS errors, use a CORS proxy." },
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -268,13 +275,16 @@
         model: "deepseek-v4-pro",
         proxy: "",
         system: "",
-        temp: 0.7,
+        temp: 1.0,
         topp: 1.0,
-        freqpen: 0,
-        prespen: 0,
         maxtokens: 4096,
         stop: "",
-        stream: true
+        thinking: "enabled",
+        reasoning: "high",
+        respformat: "text",
+        stream: true,
+        streamUsage: false,
+        userid: ""
       };
 
       try {
@@ -289,11 +299,14 @@
         cfg.system = document.getElementById("cfg-system").value.trim();
         cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
         cfg.topp = parseFloat(document.getElementById("cfg-topp").value);
-        cfg.freqpen = parseFloat(document.getElementById("cfg-freqpen").value);
-        cfg.prespen = parseFloat(document.getElementById("cfg-prespen").value);
         cfg.maxtokens = parseInt(document.getElementById("cfg-maxtokens").value, 10) || 4096;
         cfg.stop = document.getElementById("cfg-stop").value.trim();
+        cfg.thinking = document.getElementById("cfg-thinking").value;
+        cfg.reasoning = document.getElementById("cfg-reasoning").value;
+        cfg.respformat = document.getElementById("cfg-respformat").value;
         cfg.stream = document.getElementById("cfg-stream").checked;
+        cfg.streamUsage = document.getElementById("cfg-stream-usage").checked;
+        cfg.userid = document.getElementById("cfg-userid").value.trim();
         var sel = document.getElementById("cfg-model-select");
         if (sel.value === "__custom__") {
           cfg.model = document.getElementById("cfg-model-custom").value.trim() || "deepseek-v4-pro";
@@ -312,13 +325,14 @@
         document.getElementById("temp-val").textContent = cfg.temp;
         document.getElementById("cfg-topp").value = cfg.topp;
         document.getElementById("topp-val").textContent = cfg.topp;
-        document.getElementById("cfg-freqpen").value = cfg.freqpen;
-        document.getElementById("freqpen-val").textContent = cfg.freqpen;
-        document.getElementById("cfg-prespen").value = cfg.prespen;
-        document.getElementById("prespen-val").textContent = cfg.prespen;
         document.getElementById("cfg-maxtokens").value = cfg.maxtokens;
         document.getElementById("cfg-stop").value = cfg.stop;
+        document.getElementById("cfg-thinking").value = cfg.thinking;
+        document.getElementById("cfg-reasoning").value = cfg.reasoning;
+        document.getElementById("cfg-respformat").value = cfg.respformat;
         document.getElementById("cfg-stream").checked = cfg.stream;
+        document.getElementById("cfg-stream-usage").checked = cfg.streamUsage;
+        document.getElementById("cfg-userid").value = cfg.userid;
         var sel = document.getElementById("cfg-model-select");
         var found = false;
         for (var i = 0; i < sel.options.length; i++) {
@@ -334,18 +348,19 @@
       }
 
       fillCfgForm();
-      ["cfg-temp", "cfg-topp", "cfg-freqpen", "cfg-prespen"].forEach(function (id) {
+      ["cfg-temp", "cfg-topp"].forEach(function (id) {
         var slider = document.getElementById(id);
         var display = document.getElementById(id.replace("cfg-", "") + "-val");
         if (display) slider.addEventListener("input", function () { display.textContent = this.value; });
       });
-      ["cfg-baseurl", "cfg-apikey", "cfg-proxy", "cfg-system", "cfg-maxtokens", "cfg-stop"].forEach(function (id) {
+      ["cfg-baseurl", "cfg-apikey", "cfg-proxy", "cfg-system", "cfg-maxtokens", "cfg-stop", "cfg-userid"].forEach(function (id) {
         document.getElementById(id).addEventListener("change", autoSave);
       });
-      ["cfg-temp", "cfg-topp", "cfg-freqpen", "cfg-prespen"].forEach(function (id) {
+      ["cfg-temp", "cfg-topp", "cfg-thinking", "cfg-reasoning", "cfg-respformat"].forEach(function (id) {
         document.getElementById(id).addEventListener("change", autoSave);
       });
       document.getElementById("cfg-stream").addEventListener("change", autoSave);
+      document.getElementById("cfg-stream-usage").addEventListener("change", autoSave);
       document.getElementById("cfg-model-select").addEventListener("change", function () {
         autoSave();
         var custom = document.getElementById("cfg-model-custom");
@@ -605,24 +620,29 @@
         }
 
         var bubble = addMessage("assistant", "");
-        bubble.innerHTML = '<span class="chat-typing">' + t("thinking") + '</span>';
+        bubble.innerHTML = '<span class="chat-typing">' + t("thinkingText") + '</span>';
         isStreaming = true;
         sendBtn.disabled = true;
         sendBtn.textContent = t("genBtn");
 
         var targetUrl = cfg.baseurl + "/chat/completions";
         var url = cfg.proxy ? cfg.proxy + encodeURIComponent(targetUrl) : targetUrl;
-        var body = JSON.stringify({
+        var bodyObj = {
           model: cfg.model,
           messages: apiMessages,
+          max_tokens: cfg.maxtokens,
           temperature: cfg.temp,
           top_p: cfg.topp,
-          frequency_penalty: cfg.freqpen,
-          presence_penalty: cfg.prespen,
-          max_tokens: cfg.maxtokens,
-          stop: cfg.stop ? cfg.stop.split(",").map(function (s) { return s.trim(); }).filter(Boolean) : undefined,
           stream: cfg.stream
-        });
+        };
+        if (cfg.stop) bodyObj.stop = cfg.stop.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+        if (cfg.thinking === "disabled") bodyObj.thinking = { type: "disabled" };
+        else bodyObj.thinking = { type: "enabled" };
+        if (cfg.thinking === "enabled") bodyObj.reasoning_effort = cfg.reasoning;
+        if (cfg.respformat === "json_object") bodyObj.response_format = { type: "json_object" };
+        if (cfg.stream && cfg.streamUsage) bodyObj.stream_options = { include_usage: true };
+        if (cfg.userid) bodyObj.user_id = cfg.userid;
+        var body = JSON.stringify(bodyObj);
 
         fetch(url, {
           method: "POST",
