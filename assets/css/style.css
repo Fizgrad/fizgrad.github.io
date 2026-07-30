@@ -850,7 +850,15 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   overflow-y: auto;
   padding: 1.5rem clamp(1rem, 4vw, 3rem);
   scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
+.chat-messages::-webkit-scrollbar { width: 5px; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+.chat-messages::-webkit-scrollbar-track { background: transparent; }
+.chat-settings::-webkit-scrollbar { width: 4px; }
+.chat-settings::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+.chat-settings::-webkit-scrollbar-track { background: transparent; }
 .chat-empty {
   text-align: center;
   color: var(--text-dim);
