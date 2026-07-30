@@ -745,7 +745,8 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-field input:focus,
 .chat-field textarea:focus { border-color: var(--accent); }
 .chat-field input[type="range"] { padding: 0; }
-.chat-field input[type="range"]:disabled {
+.chat-field input[type="range"]:disabled,
+.chat-field select:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
