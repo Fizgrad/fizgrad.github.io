@@ -395,6 +395,38 @@
     if (!grid) return;
     grid.innerHTML = "";
     grid.appendChild(buildReaderCard());
+    grid.appendChild(buildChatCard());
+  }
+
+  function buildChatCard() {
+    var card = el("article", { class: "card reader-card" });
+    card.style.setProperty("--card-glow", "#c084fc");
+
+    var top = el("div", { class: "card-top" }, [
+      el("div", { class: "card-icon" }, "AI"),
+      arrow()
+    ]);
+
+    var title = el("h3", { class: "card-title" }, lang === "en" ? "AI Chat" : "AI 对话");
+    var desc = el("p", { class: "card-desc" }, lang === "en"
+      ? "Configure your API key and chat with any OpenAI-compatible LLM."
+      : "配置 API Key，与 OpenAI 兼容的大模型对话。");
+
+    var tags = el("div", { class: "card-tags" }, [
+      el("span", { class: "tag" }, lang === "en" ? "Open" : "打开")
+    ]);
+
+    var link = el("a", {
+      class: "card-link",
+      href: "chat.html"
+    });
+
+    card.appendChild(top);
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(tags);
+    card.appendChild(link);
+    return card;
   }
 
   function buildReaderCard() {

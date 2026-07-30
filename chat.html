@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 对话 - Fizgrad</title>
+  <link rel="icon" href="assets/img/avatar.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
+</head>
+<body>
+  <div class="grid-overlay" aria-hidden="true"></div>
+
+  <header class="nav scrolled">
+    <a href="./" class="nav-logo">&lt;fizgrad/&gt;</a>
+    <nav class="nav-links">
+      <a href="./"><span class="nav-back-full">← 主页 / Home</span><span class="nav-back-short">←</span></a>
+      <button id="chat-settings-toggle" class="lang-btn" type="button" aria-label="Toggle settings">设置</button>
+    </nav>
+  </header>
+
+  <main id="main" class="chat-page">
+    <aside class="chat-settings" id="chat-settings">
+      <h2 class="chat-settings-title">API 配置</h2>
+      <label class="chat-field">
+        <span>Base URL</span>
+        <input type="text" id="cfg-baseurl" value="https://ark.cn-beijing.volces.com/api/plan/v3" spellcheck="false" />
+      </label>
+      <label class="chat-field">
+        <span>API Key</span>
+        <input type="password" id="cfg-apikey" placeholder="sk-..." spellcheck="false" />
+      </label>
+      <label class="chat-field">
+        <span>Model ID</span>
+        <input type="text" id="cfg-model" value="ark-code-latest" spellcheck="false" />
+      </label>
+      <label class="chat-field">
+        <span>System Prompt</span>
+        <textarea id="cfg-system" rows="3" placeholder="You are a helpful assistant." spellcheck="false"></textarea>
+      </label>
+      <label class="chat-field">
+        <span>Temperature <b id="temp-val">0.7</b></span>
+        <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="0.7" />
+      </label>
+      <label class="chat-field">
+        <span>Max Tokens</span>
+        <input type="number" id="cfg-maxtokens" value="4096" min="1" max="32768" />
+      </label>
+      <div class="chat-settings-actions">
+        <button id="cfg-save" class="reader-render-btn" type="button">保存</button>
+        <button id="cfg-clear" class="lang-btn" type="button">清空对话</button>
+      </div>
+      <p class="chat-settings-hint">配置仅保存在浏览器 localStorage，不发送到服务器。</p>
+    </aside>
+
+    <div class="chat-main">
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-empty">
+          <p>配置好 API 后开始对话吧。</p>
+          <p class="chat-empty-sub">支持 Markdown 渲染、代码高亮、流式输出。</p>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <textarea id="chat-input" class="chat-input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" rows="1" spellcheck="false"></textarea>
+        <button id="chat-send" class="chat-send-btn" type="button">发送</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>&copy; <span id="year"></span> Fizgrad · Built with GLM-5.2</p>
+    <a href="./" class="back-top">← 返回主页 / Back to home</a>
+  </footer>
+
+  <script>
+    (function () {
+      document.getElementById("year").textContent = new Date().getFullYear();
+
+      var cfg = {
+        baseurl: "https://ark.cn-beijing.volces.com/api/plan/v3",
+        apikey: "",
+        model: "ark-code-latest",
+        system: "",
+        temp: 0.7,
+        maxtokens: 4096
+      };
+
+      try {
+        var saved = JSON.parse(localStorage.getItem("chat-cfg") || "{}");
+        for (var k in saved) { if (saved[k] !== undefined) cfg[k] = saved[k]; }
+      } catch (e) {}
+
+      function saveCfg() {
+        cfg.baseurl = document.getElementById("cfg-baseurl").value.replace(/\/+$/, "");
+        cfg.apikey = document.getElementById("cfg-apikey").value.trim();
+        cfg.model = document.getElementById("cfg-model").value.trim();
+        cfg.system = document.getElementById("cfg-system").value.trim();
+        cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
+        cfg.maxtokens = parseInt(document.getElementById("cfg-maxtokens").value, 10) || 4096;
+        localStorage.setItem("chat-cfg", JSON.stringify(cfg));
+        fillCfgForm();
+      }
+
+      function fillCfgForm() {
+        document.getElementById("cfg-baseurl").value = cfg.baseurl;
+        document.getElementById("cfg-apikey").value = cfg.apikey;
+        document.getElementById("cfg-model").value = cfg.model;
+        document.getElementById("cfg-system").value = cfg.system;
+        document.getElementById("cfg-temp").value = cfg.temp;
+        document.getElementById("temp-val").textContent = cfg.temp;
+        document.getElementById("cfg-maxtokens").value = cfg.maxtokens;
+      }
+
+      fillCfgForm();
+      document.getElementById("cfg-temp").addEventListener("input", function () {
+        document.getElementById("temp-val").textContent = this.value;
+      });
+
+      document.getElementById("cfg-save").addEventListener("click", saveCfg);
+
+      var settingsPanel = document.getElementById("chat-settings");
+      document.getElementById("chat-settings-toggle").addEventListener("click", function () {
+        settingsPanel.classList.toggle("open");
+      });
+
+      var messages = [];
+      var messagesEl = document.getElementById("chat-messages");
+      var inputEl = document.getElementById("chat-input");
+      var sendBtn = document.getElementById("chat-send");
+      var isStreaming = false;
+
+      function renderMarkdown(text) {
+        if (typeof marked !== "undefined" && marked.parse) {
+          var html = marked.parse(text);
+          var div = document.createElement("div");
+          div.innerHTML = html;
+          if (typeof hljs !== "undefined") {
+            div.querySelectorAll("pre code").forEach(function (block) {
+              hljs.highlightElement(block);
+            });
+          }
+          return div.innerHTML;
+        }
+        return text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+      }
+
+      function addMessage(role, content) {
+        messages.push({ role: role, content: content });
+        var wrap = document.createElement("div");
+        wrap.className = "chat-msg chat-msg-" + role;
+
+        var avatar = document.createElement("div");
+        avatar.className = "chat-avatar";
+        avatar.textContent = role === "user" ? "你" : "AI";
+
+        var bubble = document.createElement("div");
+        bubble.className = "chat-bubble";
+        if (role === "user") {
+          bubble.textContent = content;
+        } else {
+          bubble.className = "chat-bubble markdown-body";
+          bubble.innerHTML = renderMarkdown(content);
+        }
+
+        wrap.appendChild(avatar);
+        wrap.appendChild(bubble);
+        messagesEl.appendChild(wrap);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return bubble;
+      }
+
+      function clearChat() {
+        messages = [];
+        messagesEl.innerHTML = '<div class="chat-empty"><p>对话已清空。</p></div>';
+      }
+
+      document.getElementById("cfg-clear").addEventListener("click", clearChat);
+
+      inputEl.addEventListener("input", function () {
+        this.style.height = "auto";
+        this.style.height = Math.min(this.scrollHeight, 150) + "px";
+      });
+
+      inputEl.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          doSend();
+        }
+      });
+
+      sendBtn.addEventListener("click", doSend);
+
+      function doSend() {
+        if (isStreaming) return;
+        var text = inputEl.value.trim();
+        if (!text) return;
+        if (!cfg.apikey) {
+          settingsPanel.classList.add("open");
+          alert("请先填写 API Key 并保存。");
+          return;
+        }
+
+        var empty = messagesEl.querySelector(".chat-empty");
+        if (empty) empty.remove();
+
+        addMessage("user", text);
+        inputEl.value = "";
+        inputEl.style.height = "auto";
+
+        var apiMessages = [];
+        if (cfg.system) apiMessages.push({ role: "system", content: cfg.system });
+        for (var i = 0; i < messages.length; i++) {
+          apiMessages.push({ role: messages[i].role, content: messages[i].content });
+        }
+
+        var bubble = addMessage("assistant", "");
+        bubble.innerHTML = '<span class="chat-typing">思考中...</span>';
+        isStreaming = true;
+        sendBtn.disabled = true;
+        sendBtn.textContent = "生成中";
+
+        var url = cfg.baseurl + "/chat/completions";
+        var body = JSON.stringify({
+          model: cfg.model,
+          messages: apiMessages,
+          temperature: cfg.temp,
+          max_tokens: cfg.maxtokens,
+          stream: true
+        });
+
+        fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + cfg.apikey
+          },
+          body: body
+        }).then(function (res) {
+          if (!res.ok) {
+            return res.text().then(function (t) {
+              throw new Error("HTTP " + res.status + ": " + t);
+            });
+          }
+          var reader = res.body.getReader();
+          var decoder = new TextDecoder();
+          var fullText = "";
+          var buffer = "";
+
+          function readChunk() {
+            reader.read().then(function (chunk) {
+              if (chunk.done) {
+                isStreaming = false;
+                sendBtn.disabled = false;
+                sendBtn.textContent = "发送";
+                if (fullText) {
+                  messages[messages.length - 1].content = fullText;
+                  bubble.className = "chat-bubble markdown-body";
+                  bubble.innerHTML = renderMarkdown(fullText);
+                } else {
+                  bubble.innerHTML = '<span class="chat-error">空回复</span>';
+                }
+                return;
+              }
+              buffer += decoder.decode(chunk, { stream: true });
+              var lines = buffer.split("\n");
+              buffer = lines.pop();
+
+              for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line || !line.startsWith("data:")) continue;
+                var data = line.slice(5).trim();
+                if (data === "[DONE]") continue;
+                try {
+                  var json = JSON.parse(data);
+                  var delta = json.choices && json.choices[0] && json.choices[0].delta;
+                  if (delta && delta.content) {
+                    fullText += delta.content;
+                    bubble.className = "chat-bubble markdown-body";
+                    bubble.innerHTML = renderMarkdown(fullText);
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                  }
+                } catch (e) {}
+              }
+              readChunk();
+            }).catch(function (err) {
+              isStreaming = false;
+              sendBtn.disabled = false;
+              sendBtn.textContent = "发送";
+              bubble.className = "chat-bubble";
+              bubble.innerHTML = '<span class="chat-error">请求失败: ' + (err.message || err) + "</span>";
+            });
+          }
+          readChunk();
+        }).catch(function (err) {
+          isStreaming = false;
+          sendBtn.disabled = false;
+          sendBtn.textContent = "发送";
+          bubble.className = "chat-bubble";
+          bubble.innerHTML = '<span class="chat-error">请求失败: ' + (err.message || err) + "</span>";
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
