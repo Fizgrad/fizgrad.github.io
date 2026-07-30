@@ -25,6 +25,8 @@
       blogTitle: "博客",
       blogSub: "所思所写",
       blogReadMore: "阅读全文",
+      toolsTitle: "工具",
+      toolsSub: "站内小工具",
       backTop: "回到顶部 ↑",
       skip: "跳到主内容",
       contrib: "贡献",
@@ -54,6 +56,8 @@
       blogTitle: "Blog",
       blogSub: "Thoughts and writings",
       blogReadMore: "Read more",
+      toolsTitle: "Tools",
+      toolsSub: "Built-in utilities",
       backTop: "Back to top \u2191",
       skip: "Skip to main content",
       contrib: "Contrib",
@@ -381,14 +385,20 @@
     var grid = document.getElementById("blog-grid");
     if (!grid || !blogPosts) return;
     grid.innerHTML = "";
-    grid.appendChild(buildReaderCard());
     blogPosts.forEach(function (post) {
       grid.appendChild(buildBlogCard(post));
     });
   }
 
+  function renderToolsCards() {
+    var grid = document.getElementById("tools-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    grid.appendChild(buildReaderCard());
+  }
+
   function buildReaderCard() {
-    var card = el("article", { class: "card blog-card reader-card" });
+    var card = el("article", { class: "card reader-card" });
     card.style.setProperty("--card-glow", "#22d3ee");
 
     var top = el("div", { class: "card-top" }, [
@@ -402,7 +412,7 @@
       : "上传 Markdown 文件，用博客引擎渲染阅读。");
 
     var tags = el("div", { class: "card-tags" }, [
-      el("span", { class: "tag blog-tag" }, lang === "en" ? "Open" : "打开")
+      el("span", { class: "tag" }, lang === "en" ? "Open" : "打开")
     ]);
 
     var link = el("a", {
@@ -421,12 +431,17 @@
   function renderCards(forceReveal) {
     var pagesGrid = document.getElementById("pages-grid");
     var reposGrid = document.getElementById("repos-grid");
+    var toolsGrid = document.getElementById("tools-grid");
     var recGrid = document.getElementById("rec-grid");
     pagesGrid.innerHTML = "";
     reposGrid.innerHTML = "";
+    if (toolsGrid) toolsGrid.innerHTML = "";
     if (recGrid) recGrid.innerHTML = "";
     pagesProjects.forEach(function (p) { pagesGrid.appendChild(buildCard(p)); });
     otherRepos.forEach(function (r) { reposGrid.appendChild(buildCard(r)); });
+    if (toolsGrid) {
+      renderToolsCards();
+    }
     if (recGrid) {
       recommend.forEach(function (r) { recGrid.appendChild(buildCard(r)); });
       recGrid.appendChild(buildCtaCard());
