@@ -37,7 +37,8 @@
     <a href="./" class="nav-logo">&lt;fizgrad/&gt;</a>
     <nav class="nav-links">
       <a href="./"><span class="nav-back-full">← 主页 / Home</span><span class="nav-back-short">←</span></a>
-      <button id="reader-new" class="lang-btn" type="button" aria-label="Upload new file">新文件</button>
+      <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
+      <button id="reader-new" class="lang-btn" type="button" aria-label="Upload new file" data-i18n="newFile">新文件</button>
     </nav>
   </header>
 
@@ -46,11 +47,11 @@
       <input type="file" id="reader-file-input" accept=".md,.markdown,.txt" hidden />
       <div class="reader-dropzone-inner">
         <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M14 3v4a1 1 0 0 0 1 1h4M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2zM12 11v6M9 14l3-3 3 3"/></svg>
-        <p class="reader-dropzone-title">拖拽 Markdown 文件到此处</p>
-        <p class="reader-dropzone-sub">或点击选择文件</p>
-        <div class="reader-divider"><span>或粘贴 / 输入文本</span></div>
-        <textarea id="reader-textarea" class="reader-textarea" placeholder="# 在这里粘贴 Markdown 文本&#10;&#10;支持公式 $E=mc^2$、代码块、Mermaid 图表等" spellcheck="false"></textarea>
-        <button id="reader-render-btn" class="reader-render-btn" type="button">渲染 Render</button>
+        <p class="reader-dropzone-title" data-i18n="dropTitle">拖拽 Markdown 文件到此处</p>
+        <p class="reader-dropzone-sub" data-i18n="dropSub">或点击选择文件</p>
+        <div class="reader-divider"><span data-i18n="pasteLabel">或粘贴 / 输入文本</span></div>
+        <textarea id="reader-textarea" class="reader-textarea" data-i18n-ph="pastePlaceholder" placeholder="# 在这里粘贴 Markdown 文本&#10;&#10;支持公式 $E=mc^2$、代码块、Mermaid 图表等" spellcheck="false"></textarea>
+        <button id="reader-render-btn" class="reader-render-btn" type="button" data-i18n="render">渲染 Render</button>
       </div>
     </div>
 
@@ -149,6 +150,39 @@
       }
 
       document.getElementById("year").textContent = new Date().getFullYear();
+
+      var I18N = {
+        zh: { newFile: "新文件", dropTitle: "拖拽 Markdown 文件到此处", dropSub: "或点击选择文件", pasteLabel: "或粘贴 / 输入文本", pastePlaceholder: "# 在这里粘贴 Markdown 文本\n\n支持公式 $E=mc^2$、代码块、Mermaid 图表等", render: "渲染 Render" },
+        en: { newFile: "New File", dropTitle: "Drop a Markdown file here", dropSub: "or click to select", pasteLabel: "or paste / type text", pastePlaceholder: "# Paste Markdown here\n\nSupports math $E=mc^2$, code blocks, Mermaid diagrams", render: "Render" }
+      };
+      var lang = (function () {
+        var stored = localStorage.getItem("lang");
+        if (stored === "en" || stored === "zh") return stored;
+        return (navigator.language || "zh").toLowerCase().indexOf("en") === 0 ? "en" : "zh";
+      })();
+
+      function applyI18n() {
+        var dict = I18N[lang];
+        document.querySelectorAll("[data-i18n]").forEach(function (el) {
+          var key = el.getAttribute("data-i18n");
+          if (dict[key]) el.textContent = dict[key];
+        });
+        document.querySelectorAll("[data-i18n-ph]").forEach(function (el) {
+          var key = el.getAttribute("data-i18n-ph");
+          if (I18N[lang][key]) el.placeholder = I18N[lang][key];
+        });
+        var btn = document.getElementById("lang-toggle");
+        if (btn) {
+          btn.textContent = lang === "zh" ? "EN" : "中";
+          btn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
+        }
+      }
+      applyI18n();
+      document.getElementById("lang-toggle").addEventListener("click", function () {
+        lang = lang === "zh" ? "en" : "zh";
+        localStorage.setItem("lang", lang);
+        applyI18n();
+      });
 
       var dropzone = document.getElementById("reader-dropzone");
       var fileInput = document.getElementById("reader-file-input");
