@@ -46,11 +46,11 @@
     <aside class="chat-settings" id="chat-settings">
       <h2 class="chat-settings-title" data-i18n="apiConfig">API 配置</h2>
       <label class="chat-field">
-        <span>Base URL</span>
+        <span data-i18n="labelBaseurl">Base URL</span>
         <input type="text" id="cfg-baseurl" value="https://api.deepseek.com" spellcheck="false" />
       </label>
       <label class="chat-field">
-        <span>API Key</span>
+        <span data-i18n="labelApikey">API Key</span>
         <input type="password" id="cfg-apikey" placeholder="sk-..." spellcheck="false" />
       </label>
       <label class="chat-field">
@@ -58,45 +58,13 @@
         <select id="cfg-model-select" class="chat-select">
           <option value="deepseek-v4-pro">deepseek-v4-pro</option>
           <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-          <option value="kimi-k2.7-code">kimi-k2.7-code</option>
-          <option value="ark-code-latest">ark-code-latest</option>
-          <option value="doubao-seed-2.0-lite">doubao-seed-2.0-lite</option>
-          <option value="doubao-seed-2.0-mini">doubao-seed-2.0-mini</option>
-          <option value="glm-5.2">glm-5.2</option>
-          <option value="minimax-m3">minimax-m3</option>
-          <option value="minimax-m2.7">minimax-m2.7</option>
-          <option value="kimi-k2.6">kimi-k2.6</option>
-          <option value="doubao-seed-evolving">doubao-seed-evolving</option>
-          <option value="kimi-k3">kimi-k3</option>
-          <option value="doubao-seed-2.1-turbo">doubao-seed-2.1-turbo</option>
           <option value="__custom__" data-i18n="modelCustom">自定义...</option>
         </select>
         <input type="text" id="cfg-model-custom" class="chat-field-input-hidden" placeholder="输入自定义 Model ID" spellcheck="false" />
       </label>
       <label class="chat-field">
-        <span data-i18n="corsProxy">CORS 代理 (可选)</span>
-        <input type="text" id="cfg-proxy" placeholder="" spellcheck="false" />
-      </label>
-      <p class="chat-settings-hint" data-i18n="corsHint">若遇到 CORS 报错，可填入 CORS 代理前缀。</p>
-      <label class="chat-field">
         <span data-i18n="systemPrompt">System Prompt</span>
         <textarea id="cfg-system" rows="3" placeholder="You are a helpful assistant." spellcheck="false"></textarea>
-      </label>
-      <label class="chat-field">
-        <span>Temperature <b id="temp-val">1.0</b></span>
-        <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="1.0" />
-      </label>
-      <label class="chat-field">
-        <span>Top P <b id="topp-val">1.0</b></span>
-        <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
-      </label>
-      <label class="chat-field">
-        <span data-i18n="maxTokens">Max Tokens</span>
-        <input type="number" id="cfg-maxtokens" value="4096" min="1" max="32768" />
-      </label>
-      <label class="chat-field">
-        <span>Stop</span>
-        <input type="text" id="cfg-stop" placeholder="逗号分隔, 可选" spellcheck="false" />
       </label>
       <label class="chat-field">
         <span data-i18n="thinking">思考模式</span>
@@ -104,6 +72,24 @@
           <option value="enabled" data-i18n="thinkingOn">开启 (默认)</option>
           <option value="disabled" data-i18n="thinkingOff">关闭</option>
         </select>
+      </label>
+      <div id="sampling-params">
+      <label class="chat-field">
+        <span data-i18n="labelTemp">Temperature <b id="temp-val">1.0</b></span>
+        <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="1.0" />
+      </label>
+      <label class="chat-field">
+        <span data-i18n="labelTopp">Top P <b id="topp-val">1.0</b></span>
+        <input type="range" id="cfg-topp" min="0" max="1" step="0.05" value="1.0" />
+      </label>
+      </div>
+      <label class="chat-field">
+        <span data-i18n="maxTokens">Max Tokens</span>
+        <input type="number" id="cfg-maxtokens" value="4096" min="1" max="32768" />
+      </label>
+      <label class="chat-field">
+        <span data-i18n="labelStop">Stop</span>
+        <input type="text" id="cfg-stop" data-i18n-ph="stopPh" placeholder="逗号分隔, 可选" spellcheck="false" />
       </label>
       <label class="chat-field">
         <span data-i18n="reasoningEffort">推理强度</span>
@@ -236,8 +222,8 @@
       }
 
       var I18N = {
-        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", modelId: "Model ID", corsProxy: "CORS 代理 (可选)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", corsHint: "若遇到 CORS 报错，请使用 CORS 代理。", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。" },
-        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", modelId: "Model ID", corsProxy: "CORS Proxy (optional)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamUsage: "Show Token Usage", userId: "User ID (optional)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", corsHint: "If you get CORS errors, use a CORS proxy.", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank." },
+        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。" },
+        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamUsage: "Show Token Usage", userId: "User ID (optional)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank." },
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -274,7 +260,6 @@
         baseurl: "https://api.deepseek.com",
         apikey: "",
         model: "deepseek-v4-pro",
-        proxy: "",
         system: "",
         temp: 1.0,
         topp: 1.0,
@@ -296,7 +281,6 @@
       function autoSave() {
         cfg.baseurl = document.getElementById("cfg-baseurl").value.replace(/\/+$/, "");
         cfg.apikey = document.getElementById("cfg-apikey").value.trim();
-        cfg.proxy = document.getElementById("cfg-proxy").value.trim();
         cfg.system = document.getElementById("cfg-system").value.trim();
         cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
         cfg.topp = parseFloat(document.getElementById("cfg-topp").value);
@@ -320,7 +304,6 @@
       function fillCfgForm() {
         document.getElementById("cfg-baseurl").value = cfg.baseurl;
         document.getElementById("cfg-apikey").value = cfg.apikey;
-        document.getElementById("cfg-proxy").value = cfg.proxy;
         document.getElementById("cfg-system").value = cfg.system;
         document.getElementById("cfg-temp").value = cfg.temp;
         document.getElementById("temp-val").textContent = cfg.temp;
@@ -354,7 +337,7 @@
         var display = document.getElementById(id.replace("cfg-", "") + "-val");
         if (display) slider.addEventListener("input", function () { display.textContent = this.value; });
       });
-      ["cfg-baseurl", "cfg-apikey", "cfg-proxy", "cfg-system", "cfg-maxtokens", "cfg-stop", "cfg-userid"].forEach(function (id) {
+      ["cfg-baseurl", "cfg-apikey", "cfg-system", "cfg-maxtokens", "cfg-stop", "cfg-userid"].forEach(function (id) {
         document.getElementById(id).addEventListener("change", autoSave);
       });
       ["cfg-temp", "cfg-topp", "cfg-thinking", "cfg-reasoning", "cfg-respformat"].forEach(function (id) {
@@ -362,6 +345,18 @@
       });
       document.getElementById("cfg-stream").addEventListener("change", autoSave);
       document.getElementById("cfg-stream-usage").addEventListener("change", autoSave);
+
+      /* Toggle sampling params based on thinking mode */
+      var samplingDiv = document.getElementById("sampling-params");
+      var thinkingSel = document.getElementById("cfg-thinking");
+      var reasoningField = document.getElementById("cfg-reasoning").parentElement;
+      function updateThinkingUI() {
+        var show = thinkingSel.value === "disabled";
+        samplingDiv.style.display = show ? "" : "none";
+        reasoningField.style.display = show ? "none" : "";
+      }
+      thinkingSel.addEventListener("change", updateThinkingUI);
+      updateThinkingUI();
       document.getElementById("cfg-model-select").addEventListener("change", function () {
         autoSave();
         var custom = document.getElementById("cfg-model-custom");
@@ -627,7 +622,7 @@
         sendBtn.textContent = t("genBtn");
 
         var targetUrl = cfg.baseurl + "/chat/completions";
-        var url = cfg.proxy ? cfg.proxy + encodeURIComponent(targetUrl) : targetUrl;
+        var url = targetUrl;
         var bodyObj = {
           model: cfg.model,
           messages: apiMessages,
