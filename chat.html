@@ -656,19 +656,19 @@
           if (!cfg.stream) {
             return res.json().then(function (json) {
               var msg = json.choices && json.choices[0] && json.choices[0].message;
-              var content = "";
-              if (msg) {
-                if (msg.reasoning_content) {
-                  content += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + msg.reasoning_content.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
-                }
-                content += msg.content || t("emptyReply");
+              var plainText = "";
+              if (msg) plainText = msg.content || "";
+              messages[messages.length - 1].content = plainText || t("emptyReply");
+              var displayText = "";
+              if (msg && msg.reasoning_content) {
+                displayText += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + msg.reasoning_content.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
               }
+              displayText += plainText || t("emptyReply");
               isStreaming = false;
               sendBtn.disabled = false;
               sendBtn.textContent = t("sendBtn");
-              messages[messages.length - 1].content = content;
               bubble.className = "chat-bubble markdown-body";
-              renderMarkdown(content, bubble, true);
+              renderMarkdown(displayText, bubble, true);
             });
           }
           var reader = res.body.getReader();
@@ -683,12 +683,12 @@
                 isStreaming = false;
                 sendBtn.disabled = false;
                 sendBtn.textContent = t("sendBtn");
+                messages[messages.length - 1].content = fullText || t("emptyReply");
                 var finalContent = "";
                 if (reasoningText) {
                   finalContent += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + reasoningText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
                 }
                 finalContent += fullText || t("emptyReply");
-                messages[messages.length - 1].content = finalContent;
                 bubble.className = "chat-bubble markdown-body";
                 renderMarkdown(finalContent, bubble, true);
                 return;
@@ -730,7 +730,8 @@
               sendBtn.disabled = false;
               sendBtn.textContent = t("sendBtn");
               bubble.className = "chat-bubble";
-              bubble.innerHTML = '<span class="chat-error">请求失败: ' + (err.message || err) + "</span>";
+              bubble.innerHTML = '<span class="chat-error">' + t("reqFailed") + (err.message || err) + "</span>";
+              messages.pop();
             });
           }
           readChunk();
@@ -739,13 +740,8 @@
           sendBtn.disabled = false;
           sendBtn.textContent = t("sendBtn");
           bubble.className = "chat-bubble";
-          var errMsg = err.message || String(err);
-          if (errMsg.indexOf("Failed to fetch") !== -1) {
-            errMsg = lang === "zh"
-              ? "网络请求失败（可能是 CORS 跨域限制）。请在设置中填入 CORS 代理前缀。"
-              : "Network request failed (likely CORS restriction). Please set a CORS proxy prefix in settings.";
-          }
-          bubble.innerHTML = '<span class="chat-error">' + t("reqFailed") + errMsg + "</span>";
+          bubble.innerHTML = '<span class="chat-error">' + t("reqFailed") + (err.message || String(err)) + "</span>";
+          messages.pop();
         });
       }
     })();
