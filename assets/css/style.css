@@ -851,6 +851,7 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 1.5rem clamp(1rem, 4vw, 3rem);
   scroll-behavior: smooth;
   scrollbar-width: thin;
@@ -895,6 +896,8 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   line-height: 1.6;
   color: var(--text);
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .chat-msg-user .chat-bubble {
   background: rgba(124, 140, 255, 0.1);
@@ -907,6 +910,15 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-msg-assistant .chat-bubble pre {
   border-radius: 8px;
   overflow-x: auto;
+}
+.chat-msg-assistant .chat-bubble table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.chat-msg-assistant .chat-bubble img {
+  max-width: 100%;
+  height: auto;
 }
 .chat-msg-assistant .chat-bubble code {
   font-family: var(--font-mono);
