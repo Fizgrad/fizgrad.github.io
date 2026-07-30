@@ -60,7 +60,7 @@
           <option value="deepseek-v4-flash">deepseek-v4-flash</option>
           <option value="__custom__" data-i18n="modelCustom">自定义...</option>
         </select>
-        <input type="text" id="cfg-model-custom" class="chat-field-input-hidden" placeholder="输入自定义 Model ID" spellcheck="false" />
+        <input type="text" id="cfg-model-custom" class="chat-field-input-hidden" data-i18n-ph="customModelPh" placeholder="输入自定义 Model ID" spellcheck="false" />
       </label>
       <label class="chat-field">
         <span data-i18n="systemPrompt">System Prompt</span>
@@ -94,7 +94,7 @@
       <label class="chat-field">
         <span data-i18n="reasoningEffort">推理强度</span>
         <select id="cfg-reasoning" class="chat-select">
-          <option value="high">high (默认)</option>
+          <option value="high" data-i18n="reasoningHigh">high (默认)</option>
           <option value="max">max</option>
         </select>
       </label>
@@ -106,7 +106,7 @@
         </select>
       </label>
       <label class="chat-field chat-field-check">
-        <span data-i18n="stream">Stream 流式输出</span>
+        <span data-i18n="streamLabel">Stream 流式输出</span>
         <input type="checkbox" id="cfg-stream" checked />
       </label>
       <label class="chat-field chat-field-check">
@@ -222,8 +222,8 @@
       }
 
       var I18N = {
-        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。", reasoning: "思考过程" },
-        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamUsage: "Show Token Usage", userId: "User ID (optional)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank.", reasoning: "Reasoning" },
+        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。", reasoning: "思考过程" },
+        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", userId: "User ID (optional)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank.", reasoning: "Reasoning" },
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -649,8 +649,8 @@
           body: body
         }).then(function (res) {
           if (!res.ok) {
-            return res.text().then(function (t) {
-              throw new Error("HTTP " + res.status + ": " + t);
+            return res.text().then(function (errText) {
+              throw new Error("HTTP " + res.status + ": " + errText);
             });
           }
           if (!cfg.stream) {
@@ -658,7 +658,7 @@
               var msg = json.choices && json.choices[0] && json.choices[0].message;
               var plainText = "";
               if (msg) plainText = msg.content || "";
-              messages[messages.length - 1].content = plainText || t("emptyReply");
+              messages[messages.length - 1].content = plainText;
               var displayText = "";
               if (msg && msg.reasoning_content) {
                 displayText += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + msg.reasoning_content.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
@@ -683,7 +683,7 @@
                 isStreaming = false;
                 sendBtn.disabled = false;
                 sendBtn.textContent = t("sendBtn");
-                messages[messages.length - 1].content = fullText || t("emptyReply");
+                messages[messages.length - 1].content = fullText;
                 var finalContent = "";
                 if (reasoningText) {
                   finalContent += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + reasoningText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
@@ -720,7 +720,7 @@
                     displayText += fullText;
                     bubble.className = "chat-bubble markdown-body";
                     bubble.innerHTML = displayText;
-                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                    if (isPinned) scrollToBottom();
                   }
                 } catch (e) {}
               }
