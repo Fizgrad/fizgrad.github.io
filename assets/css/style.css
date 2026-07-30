@@ -930,6 +930,33 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-typing { color: var(--text-faint); font-style: italic; }
 .chat-error { color: #fb7185; }
 
+.chat-reasoning {
+  margin-bottom: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.chat-reasoning summary {
+  padding: 0.5rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent-2);
+  background: rgba(34, 211, 238, 0.06);
+  cursor: pointer;
+  user-select: none;
+}
+.chat-reasoning summary:hover { background: rgba(34, 211, 238, 0.1); }
+.chat-reasoning-content {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .chat-input-area {
   display: flex;
   gap: 0.6rem;
