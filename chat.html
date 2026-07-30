@@ -42,6 +42,11 @@
         <input type="text" id="cfg-model" value="ark-code-latest" spellcheck="false" />
       </label>
       <label class="chat-field">
+        <span data-i18n="corsProxy">CORS 代理 (可选)</span>
+        <input type="text" id="cfg-proxy" placeholder="https://corsproxy.io/?url=" spellcheck="false" />
+      </label>
+      <p class="chat-settings-hint" data-i18n="corsHint">若遇到 CORS 报错，可填入 CORS 代理前缀。</p>
+      <label class="chat-field">
         <span data-i18n="systemPrompt">System Prompt</span>
         <textarea id="cfg-system" rows="3" placeholder="You are a helpful assistant." spellcheck="false"></textarea>
       </label>
@@ -113,8 +118,8 @@
       document.getElementById("year").textContent = new Date().getFullYear();
 
       var I18N = {
-        zh: { settings: "设置", apiConfig: "API 配置", modelId: "Model ID", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "保存", clearChat: "清空对话", cfgHint: "配置仅保存在浏览器 localStorage，不发送到服务器。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinking: "思考中...", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", statsTitle: "会话统计", statModel: "模型", statMessages: "消息数", statUserMsgs: "用户消息", statAiMsgs: "AI 回复", statRequests: "请求次数", statStatus: "状态", statIdle: "空闲", statBusy: "生成中" },
-        en: { settings: "Settings", apiConfig: "API Config", modelId: "Model ID", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "Save", clearChat: "Clear Chat", cfgHint: "Config is stored in browser localStorage only, not sent to any server.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinking: "Thinking...", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", statsTitle: "Session Stats", statModel: "Model", statMessages: "Messages", statUserMsgs: "User msgs", statAiMsgs: "AI replies", statRequests: "Requests", statStatus: "Status", statIdle: "Idle", statBusy: "Generating" }
+        zh: { settings: "设置", apiConfig: "API 配置", modelId: "Model ID", corsProxy: "CORS 代理 (可选)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "保存", clearChat: "清空对话", cfgHint: "配置仅保存在浏览器 localStorage，不发送到服务器。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinking: "思考中...", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", statsTitle: "会话统计", statModel: "模型", statMessages: "消息数", statUserMsgs: "用户消息", statAiMsgs: "AI 回复", statRequests: "请求次数", statStatus: "状态", statIdle: "空闲", statBusy: "生成中", corsHint: "若遇到 CORS 报错，可填入 CORS 代理前缀。" },
+        en: { settings: "Settings", apiConfig: "API Config", modelId: "Model ID", corsProxy: "CORS Proxy (optional)", systemPrompt: "System Prompt", maxTokens: "Max Tokens", save: "Save", clearChat: "Clear Chat", cfgHint: "Config is stored in browser localStorage only, not sent to any server.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinking: "Thinking...", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", statsTitle: "Session Stats", statModel: "Model", statMessages: "Messages", statUserMsgs: "User msgs", statAiMsgs: "AI replies", statRequests: "Requests", statStatus: "Status", statIdle: "Idle", statBusy: "Generating", corsHint: "If you get CORS errors, enter a CORS proxy prefix." }
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -148,6 +153,7 @@
         baseurl: "https://ark.cn-beijing.volces.com/api/plan/v3",
         apikey: "",
         model: "ark-code-latest",
+        proxy: "",
         system: "",
         temp: 0.7,
         maxtokens: 4096
@@ -162,6 +168,7 @@
         cfg.baseurl = document.getElementById("cfg-baseurl").value.replace(/\/+$/, "");
         cfg.apikey = document.getElementById("cfg-apikey").value.trim();
         cfg.model = document.getElementById("cfg-model").value.trim();
+        cfg.proxy = document.getElementById("cfg-proxy").value.trim();
         cfg.system = document.getElementById("cfg-system").value.trim();
         cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
         cfg.maxtokens = parseInt(document.getElementById("cfg-maxtokens").value, 10) || 4096;
@@ -173,6 +180,7 @@
         document.getElementById("cfg-baseurl").value = cfg.baseurl;
         document.getElementById("cfg-apikey").value = cfg.apikey;
         document.getElementById("cfg-model").value = cfg.model;
+        document.getElementById("cfg-proxy").value = cfg.proxy;
         document.getElementById("cfg-system").value = cfg.system;
         document.getElementById("cfg-temp").value = cfg.temp;
         document.getElementById("temp-val").textContent = cfg.temp;
@@ -316,7 +324,8 @@
         setStatus(true);
         requestCount++;
 
-        var url = cfg.baseurl + "/chat/completions";
+        var targetUrl = cfg.baseurl + "/chat/completions";
+        var url = cfg.proxy ? cfg.proxy + encodeURIComponent(targetUrl) : targetUrl;
         var body = JSON.stringify({
           model: cfg.model,
           messages: apiMessages,
@@ -393,7 +402,13 @@
           sendBtn.disabled = false;
           sendBtn.textContent = t("sendBtn");
           bubble.className = "chat-bubble";
-          bubble.innerHTML = '<span class="chat-error">请求失败: ' + (err.message || err) + "</span>";
+          var errMsg = err.message || String(err);
+          if (errMsg.indexOf("Failed to fetch") !== -1) {
+            errMsg = lang === "zh"
+              ? "网络请求失败（可能是 CORS 跨域限制）。请在设置中填入 CORS 代理前缀。"
+              : "Network request failed (likely CORS restriction). Please set a CORS proxy prefix in settings.";
+          }
+          bubble.innerHTML = '<span class="chat-error">' + t("reqFailed") + errMsg + "</span>";
         });
       }
     })();

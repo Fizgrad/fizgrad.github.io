@@ -747,6 +747,7 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-field input[type="range"] { padding: 0; }
 .chat-settings-actions { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; }
 .chat-settings-actions .reader-render-btn { flex: 1; }
+.chat-settings-actions .lang-btn { flex: 1; padding: 0.5rem 1.5rem; font-size: 0.85rem; }
 .chat-settings-hint {
   font-size: 0.72rem;
   color: var(--text-faint);
