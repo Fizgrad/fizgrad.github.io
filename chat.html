@@ -114,8 +114,27 @@
       </label>
       <label class="chat-field chat-field-check">
         <span data-i18n="streamUsage">返回 Token 用量统计</span>
-        <input type="checkbox" id="cfg-stream-usage" />
+        <input type="checkbox" id="cfg-stream-usage" checked />
       </label>
+      <section class="chat-stats chat-usage-stats" aria-live="polite">
+        <h3 class="chat-stats-title" data-i18n="latestUsage">Token 用量</h3>
+        <div class="chat-stat-row">
+          <span data-i18n="usageInput">本次 Input</span>
+          <b id="usage-input">—</b>
+        </div>
+        <div class="chat-stat-row">
+          <span data-i18n="usageOutput">本次 Output</span>
+          <b id="usage-output">—</b>
+        </div>
+        <div class="chat-stat-row">
+          <span data-i18n="usageTotal">本次 Total</span>
+          <b id="usage-total">—</b>
+        </div>
+        <div class="chat-stat-row chat-stat-cumulative">
+          <span data-i18n="usageCumulative">会话累计</span>
+          <b id="usage-cumulative">0</b>
+        </div>
+      </section>
       <label class="chat-field">
         <span data-i18n="userId">用户标识 (可选)</span>
         <input type="text" id="cfg-userid" data-i18n-ph="userIdPh" placeholder="user_10001 (仅允许字母数字-_)" spellcheck="false" />
@@ -225,8 +244,8 @@
       }
 
       var I18N = {
-        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "返回 Token 用量统计", userId: "用户标识 (可选)", userIdPh: "user_10001 (仅允许字母数字-_)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤", thinkingIgnoresHint: "⚠ 思考模式下此参数不生效", nonThinkingIgnoresHint: "⚠ 非思考模式下此参数不生效" },
-        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", userId: "User ID (optional)", userIdPh: "user_10001 (alphanumeric, -, _ only)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank.", reasoning: "Reasoning", finishLength: "Response truncated due to max token limit", finishFilter: "Response filtered due to content safety", thinkingIgnoresHint: "⚠ Ignored in thinking mode", nonThinkingIgnoresHint: "⚠ Ignored without thinking mode" },
+        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "返回 Token 用量统计", latestUsage: "Token 用量", usageInput: "本次 Input", usageOutput: "本次 Output", usageTotal: "本次 Total", usageCumulative: "会话累计", userId: "用户标识 (可选)", userIdPh: "user_10001 (仅允许字母数字-_)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤", thinkingIgnoresHint: "⚠ 思考模式下此参数不生效", nonThinkingIgnoresHint: "⚠ 非思考模式下此参数不生效" },
+        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", latestUsage: "Token Usage", usageInput: "Latest Input", usageOutput: "Latest Output", usageTotal: "Latest Total", usageCumulative: "Session Total", userId: "User ID (optional)", userIdPh: "user_10001 (alphanumeric, -, _ only)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank.", reasoning: "Reasoning", finishLength: "Response truncated due to max token limit", finishFilter: "Response filtered due to content safety", thinkingIgnoresHint: "⚠ Ignored in thinking mode", nonThinkingIgnoresHint: "⚠ Ignored without thinking mode" },
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -259,7 +278,9 @@
         applyI18n();
       });
 
+      var CHAT_CFG_VERSION = 2;
       var cfg = {
+        version: CHAT_CFG_VERSION,
         baseurl: "https://api.deepseek.com",
         apikey: "",
         model: "deepseek-v4-pro",
@@ -272,13 +293,18 @@
         reasoning: "high",
         respformat: "text",
         stream: true,
-        streamUsage: false,
+        streamUsage: true,
         userid: ""
       };
 
       try {
         var saved = JSON.parse(localStorage.getItem("chat-cfg") || "{}");
         for (var k in saved) { if (saved[k] !== undefined) cfg[k] = saved[k]; }
+        if ((parseInt(saved.version, 10) || 0) < CHAT_CFG_VERSION) {
+          cfg.streamUsage = true;
+          cfg.version = CHAT_CFG_VERSION;
+          localStorage.setItem("chat-cfg", JSON.stringify(cfg));
+        }
       } catch (e) {}
 
       function autoSave() {
@@ -390,8 +416,29 @@
       var messagesEl = document.getElementById("chat-messages");
       var inputEl = document.getElementById("chat-input");
       var sendBtn = document.getElementById("chat-send");
+      var usageInputEl = document.getElementById("usage-input");
+      var usageOutputEl = document.getElementById("usage-output");
+      var usageTotalEl = document.getElementById("usage-total");
+      var usageCumulativeEl = document.getElementById("usage-cumulative");
+      var cumulativeUsageTotal = 0;
       var isStreaming = false;
       var isPinned = true;
+
+      function formatTokenCount(value) {
+        var count = Number(value);
+        return Number.isFinite(count) ? count.toLocaleString() : "—";
+      }
+
+      function updateUsageDisplay(usage, accumulate) {
+        usageInputEl.textContent = usage ? formatTokenCount(usage.prompt_tokens) : "—";
+        usageOutputEl.textContent = usage ? formatTokenCount(usage.completion_tokens) : "—";
+        usageTotalEl.textContent = usage ? formatTokenCount(usage.total_tokens) : "—";
+        if (usage && accumulate) {
+          var responseTotal = Number(usage.total_tokens);
+          if (Number.isFinite(responseTotal)) cumulativeUsageTotal += responseTotal;
+        }
+        usageCumulativeEl.textContent = formatTokenCount(cumulativeUsageTotal);
+      }
 
       function scrollToBottom() {
         messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -405,17 +452,18 @@
       function renderMarkdown(text, targetEl, final) {
         if (!markedReady) {
           targetEl.innerHTML = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+          if (!final && isPinned) scrollToBottom();
           return;
         }
         mathItems.clear();
         mathSeq = 0;
         var html = marked.parse(text);
         targetEl.innerHTML = html;
+        hydrateMathSlots(targetEl);
         if (!final) {
           if (isPinned) scrollToBottom();
           return;
         }
-        hydrateMathSlots(targetEl);
 
         /* Mermaid */
         var mermaidBlocks = targetEl.querySelectorAll("pre code.language-mermaid");
@@ -587,6 +635,8 @@
       function clearChat() {
         messages = [];
         messagesEl.innerHTML = '<div class="chat-empty"><p>' + t("cleared") + '</p></div>';
+        cumulativeUsageTotal = 0;
+        updateUsageDisplay(null, false);
       }
 
       document.getElementById("cfg-clear").addEventListener("click", clearChat);
@@ -615,6 +665,7 @@
           alert(t("needApiKey"));
           return;
         }
+        updateUsageDisplay(null, false);
 
         var empty = messagesEl.querySelector(".chat-empty");
         if (empty) empty.remove();
@@ -685,6 +736,7 @@
                 displayText += '\n\n<em style="color:#fb7185">⚠ ' + t("finishFilter") + '</em>';
               }
               if (json.usage) {
+                updateUsageDisplay(json.usage, true);
                 displayText += '\n\n<div class="chat-usage">📊 ' + json.usage.prompt_tokens + ' in / ' + json.usage.completion_tokens + ' out / ' + json.usage.total_tokens + ' total</div>';
               }
               isStreaming = false;
@@ -701,44 +753,106 @@
           var finishReason = "";
           var usageData = null;
           var buffer = "";
+          var streamRenderFrame = 0;
+          var streamFinalized = false;
+          var reasoningDetails = null;
+          var reasoningContentEl = null;
+          var streamBodyEl = null;
+
+          function ensureStreamingLayout() {
+            if (streamBodyEl) return;
+            bubble.className = "chat-bubble markdown-body";
+            bubble.innerHTML = "";
+            streamBodyEl = document.createElement("div");
+            streamBodyEl.className = "chat-stream-body";
+            bubble.appendChild(streamBodyEl);
+          }
+
+          function renderStreamingContent() {
+            if (streamFinalized) return;
+            ensureStreamingLayout();
+            if (reasoningText) {
+              if (!reasoningDetails) {
+                reasoningDetails = document.createElement("details");
+                reasoningDetails.className = "chat-reasoning";
+                reasoningDetails.open = true;
+                var reasoningSummary = document.createElement("summary");
+                reasoningSummary.textContent = t("reasoning");
+                reasoningContentEl = document.createElement("div");
+                reasoningContentEl.className = "chat-reasoning-content";
+                reasoningDetails.appendChild(reasoningSummary);
+                reasoningDetails.appendChild(reasoningContentEl);
+                bubble.insertBefore(reasoningDetails, streamBodyEl);
+              }
+              reasoningContentEl.textContent = reasoningText;
+            }
+            renderMarkdown(fullText, streamBodyEl, false);
+          }
+
+          function scheduleStreamingRender() {
+            if (streamFinalized || streamRenderFrame) return;
+            streamRenderFrame = requestAnimationFrame(function () {
+              streamRenderFrame = 0;
+              renderStreamingContent();
+            });
+          }
+
+          function finalizeStream() {
+            if (streamFinalized) return;
+            streamFinalized = true;
+            if (streamRenderFrame) {
+              cancelAnimationFrame(streamRenderFrame);
+              streamRenderFrame = 0;
+            }
+            isStreaming = false;
+            sendBtn.disabled = false;
+            sendBtn.textContent = t("sendBtn");
+            if (messages.length > 0) {
+              messages[messages.length - 1].content = fullText;
+            }
+            var finalContent = "";
+            if (reasoningText) {
+              finalContent += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + reasoningText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
+            }
+            finalContent += fullText || t("emptyReply");
+            if (finishReason === "length") {
+              finalContent += '\n\n<em style="color:var(--text-faint)">⚠ ' + t("finishLength") + '</em>';
+            } else if (finishReason === "content_filter") {
+              finalContent += '\n\n<em style="color:#fb7185">⚠ ' + t("finishFilter") + '</em>';
+            }
+            if (usageData) {
+              updateUsageDisplay(usageData, true);
+              finalContent += '\n\n<div class="chat-usage">📊 ' + usageData.prompt_tokens + ' in / ' + usageData.completion_tokens + ' out / ' + usageData.total_tokens + ' total</div>';
+            }
+            bubble.className = "chat-bubble markdown-body";
+            renderMarkdown(finalContent, bubble, true);
+          }
 
           function readChunk() {
             reader.read().then(function (chunk) {
               if (chunk.done) {
-                isStreaming = false;
-                sendBtn.disabled = false;
-                sendBtn.textContent = t("sendBtn");
-                messages[messages.length - 1].content = fullText;
-                var finalContent = "";
-                if (reasoningText) {
-                  finalContent += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + reasoningText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
-                }
-                finalContent += fullText || t("emptyReply");
-                if (finishReason === "length") {
-                  finalContent += '\n\n<em style="color:var(--text-faint)">⚠ ' + t("finishLength") + '</em>';
-                } else if (finishReason === "content_filter") {
-                  finalContent += '\n\n<em style="color:#fb7185">⚠ ' + t("finishFilter") + '</em>';
-                }
-                if (usageData) {
-                  finalContent += '\n\n<div class="chat-usage">📊 ' + usageData.prompt_tokens + ' in / ' + usageData.completion_tokens + ' out / ' + usageData.total_tokens + ' total</div>';
-                }
-                bubble.className = "chat-bubble markdown-body";
-                renderMarkdown(finalContent, bubble, true);
+                finalizeStream();
                 return;
               }
               buffer += decoder.decode(chunk.value, { stream: true });
               var lines = buffer.split("\n");
               buffer = lines.pop();
+              var receivedDone = false;
 
               for (var i = 0; i < lines.length; i++) {
                 var line = lines[i].trim();
                 if (!line || !line.startsWith("data:")) continue;
                 var data = line.slice(5).trim();
-                if (data === "[DONE]") continue;
+                if (data === "[DONE]") {
+                  receivedDone = true;
+                  break;
+                }
                 try {
                   var json = JSON.parse(data);
                   if (json.choices && json.choices.length === 0) {
-                    if (json.usage) usageData = json.usage;
+                    if (json.usage) {
+                      usageData = json.usage;
+                    }
                     continue;
                   }
                   var choice = json.choices && json.choices[0];
@@ -755,17 +869,21 @@
                     }
                   }
                   if (delta && (delta.reasoning_content || delta.content)) {
-                    var displayText = "";
-                    if (reasoningText) displayText += '<details class="chat-reasoning" open><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + reasoningText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
-                    displayText += fullText;
-                    bubble.className = "chat-bubble markdown-body";
-                    bubble.innerHTML = displayText;
-                    if (isPinned) scrollToBottom();
+                    scheduleStreamingRender();
                   }
                 } catch (e) {}
               }
+              if (receivedDone) {
+                finalizeStream();
+                return;
+              }
               readChunk();
             }).catch(function (err) {
+              streamFinalized = true;
+              if (streamRenderFrame) {
+                cancelAnimationFrame(streamRenderFrame);
+                streamRenderFrame = 0;
+              }
               isStreaming = false;
               sendBtn.disabled = false;
               sendBtn.textContent = t("sendBtn");

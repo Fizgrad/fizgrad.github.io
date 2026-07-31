@@ -853,6 +853,23 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 }
 .chat-stat-idle { color: var(--text-faint); }
 .chat-stat-busy { color: var(--accent-2); }
+.chat-usage-stats {
+  margin: 0 0 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.chat-usage-stats .chat-stats-title {
+  margin-bottom: 0.45rem;
+  color: var(--accent-2);
+}
+.chat-stat-cumulative {
+  margin-top: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+.chat-stat-cumulative b { color: var(--accent-2); }
 
 .chat-main {
   flex: 1;

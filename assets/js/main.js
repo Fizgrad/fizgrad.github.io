@@ -409,10 +409,11 @@
 
     var title = el("h3", { class: "card-title" }, lang === "en" ? "AI Chat" : "AI 对话");
     var desc = el("p", { class: "card-desc" }, lang === "en"
-      ? "Configure your API key and chat with any OpenAI-compatible LLM."
-      : "配置 API Key，与 OpenAI 兼容的大模型对话。");
+      ? "Chat with DeepSeek V4 Pro or Flash using your own API key, with thinking mode and streaming Markdown."
+      : "使用自己的 API Key 与 DeepSeek V4 Pro / Flash 对话，支持思考模式与流式 Markdown。");
 
     var tags = el("div", { class: "card-tags" }, [
+      el("span", { class: "tag" }, "DeepSeek V4"),
       el("span", { class: "tag" }, lang === "en" ? "Open" : "打开")
     ]);
 
