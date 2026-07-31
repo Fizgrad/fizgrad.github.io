@@ -6113,6 +6113,619 @@ Linux 的模块化包含两个层次：
 * 外部模块应针对目标内核构建，并注意签名和安全来源。
 
 
+## 11. Linux 启动流程
+
+Linux 启动不是由单一程序完成，而是由固件、引导程序、内核、早期用户空间和正式用户空间依次接管。
+
+不同 CPU 架构、发行版和启动方式的细节可能不同，但通用流程可以概括为：
+
+```mermaid
+flowchart TD
+    A["上电或复位"] --> B["固件<br/>BIOS / UEFI"]
+    B --> C["引导程序<br/>GRUB / systemd-boot / U-Boot 等"]
+    C --> D["加载 Linux 内核镜像<br/>可选加载 initramfs"]
+    D --> E["体系结构相关入口<br/>解压内核并建立早期运行环境"]
+    E --> F["start_kernel()<br/>初始化内核核心子系统"]
+    F --> G["执行内建组件的 initcall"]
+    G --> H{"initramfs 中是否有 /init？"}
+    H -->|是| I["启动早期用户空间 /init"]
+    I --> J["加载启动所需 .ko 模块<br/>发现存储设备并挂载真实根文件系统"]
+    J --> K["switch_root / pivot_root"]
+    H -->|否| L["内核直接尝试挂载真实根文件系统"]
+    L --> K
+    K --> M["执行正式 PID 1<br/>通常为 systemd"]
+    M --> N["挂载文件系统、启动服务和登录环境"]
+```
+
+### 11.1 固件阶段
+
+计算机上电后，CPU 从体系结构规定的复位入口开始执行固件代码。
+
+常见固件包括：
+
+* PC 平台上的 BIOS 或 UEFI；
+* ARM、RISC-V 等平台上的 Boot ROM、固件和 U-Boot；
+* 虚拟机提供的虚拟固件。
+
+固件通常负责：
+
+* 初始化必要的 CPU 和内存环境；
+* 枚举部分硬件；
+* 选择启动设备；
+* 查找并启动引导程序或可执行的内核映像；
+* 向下一阶段传递硬件和启动信息。
+
+固件还没有进入 Linux 内核，因此此时不能使用 Linux 的驱动模型、系统调用或内核模块机制。
+
+### 11.2 引导程序阶段
+
+引导程序负责把启动所需内容放入内存，通常包括：
+
+```text
+Linux 内核镜像
+initramfs/initrd
+内核命令行
+设备树或其他平台信息
+```
+
+常见内核命令行参数包括：
+
+```text
+root=/dev/...
+root=UUID=...
+ro
+quiet
+console=...
+init=...
+rdinit=...
+```
+
+例如：
+
+```text
+linux /boot/vmlinuz root=UUID=... ro
+initrd /boot/initramfs.img
+```
+
+引导程序完成加载后，将控制权交给 Linux 内核入口。
+
+这时 `.ko` 模块仍然不能通过 `modprobe` 加载，因为 Linux 用户空间尚未建立，`modprobe` 也还没有开始运行。
+
+### 11.3 内核早期入口和解压
+
+许多 Linux 内核启动映像是压缩的。体系结构相关启动代码会完成：
+
+* 建立临时栈；
+* 准备基本 CPU 状态；
+* 解压内核；
+* 建立早期页表；
+* 解析固件传入的信息；
+* 跳转到通用内核初始化入口。
+
+这一阶段高度依赖具体体系结构。例如 x86-64、AArch64 和 RISC-V 的入口、页表建立和固件接口并不相同。
+
+此时能执行的主要是：
+
+* 体系结构启动代码；
+* 编译进内核映像的代码；
+* 不依赖完整内核环境的早期初始化逻辑。
+
+此时还不能从普通根文件系统读取 `.ko` 模块。
+
+### 11.4 `start_kernel()`：初始化核心内核
+
+完成体系结构相关准备后，内核进入通用初始化流程，核心入口通常可以概括为：
+
+```text
+start_kernel()
+```
+
+`start_kernel()` 会逐步初始化：
+
+* 启动 CPU；
+* 内存管理；
+* 调度器；
+* 中断和时钟；
+* RCU；
+* slab 等内核分配器；
+* VFS 基础设施；
+* 进程、信号和 namespace；
+* cgroup；
+* 安全子系统；
+* 其他核心设施。
+
+这不是严格线性且完全固定的清单，具体顺序会随内核版本、体系结构和配置变化。
+
+此时内核主要依靠编译进内核的功能。普通用户空间进程尚未开始执行，因而还不能由用户运行：
+
+```bash
+modprobe
+insmod
+```
+
+### 11.5 内建组件的 initcall
+
+内核初始化到一定阶段后，会执行编译进内核的初始化函数。
+
+常见 initcall 级别概念上包括：
+
+```text
+early
+core
+postcore
+arch
+subsys
+fs
+device
+late
+```
+
+源码中常见注册方式包括：
+
+```c
+core_initcall(function);
+subsys_initcall(function);
+fs_initcall(function);
+device_initcall(function);
+late_initcall(function);
+```
+
+普通内建驱动使用的 `module_init()`，在编译进内核时也会转换为相应的 initcall：
+
+```c
+static int __init demo_init(void)
+{
+    return 0;
+}
+
+module_init(demo_init);
+```
+
+如果该代码配置为：
+
+```text
+CONFIG_DEMO=y
+```
+
+那么 `demo_init()` 在内核 initcall 阶段执行，不存在“读取并加载 demo.ko”的过程。
+
+因此：
+
+> **内建驱动并不是在模块加载阶段加载的，而是在内核启动过程中直接执行初始化函数。**
+
+### 11.6 initramfs 是什么？
+
+initramfs 是引导程序交给内核、或者直接嵌入内核映像的一份早期根文件系统。
+
+它通常包含：
+
+```text
+/init
+/bin 或 /usr/bin 中的基本工具
+存储控制器驱动模块
+文件系统模块
+LVM、RAID、加密磁盘工具
+设备管理工具
+模块依赖信息
+```
+
+内核会把 initramfs 解包到临时 rootfs 中。如果其中存在可执行的：
+
+```text
+/init
+```
+
+内核会把它作为第一个用户空间程序运行。
+
+initramfs 的主要任务通常是：
+
+1. 加载访问真实根文件系统所需的驱动；
+2. 等待和发现根存储设备；
+3. 激活 LVM、软件 RAID 或加密卷；
+4. 挂载真实根文件系统；
+5. 切换到真实根文件系统；
+6. 启动真实系统中的 PID 1。
+
+initramfs 是早期用户空间，不是内核的一部分。它里面的 `/init`、Shell、`modprobe` 都属于用户空间程序。
+
+### 11.7 `.ko` 模块最早什么时候可以加载？
+
+从普通启动流程看，`.ko` 模块最早通常在下面这个阶段加载：
+
+```text
+内核完成核心初始化
+        ↓
+initramfs 已解包
+        ↓
+内核执行 initramfs 中的 /init
+        ↓
+/init 调用 modprobe 或其他加载工具
+        ↓
+finit_module()/init_module()
+        ↓
+内核装入并初始化 .ko
+```
+
+例如 initramfs 中可能执行：
+
+```bash
+modprobe nvme
+modprobe ext4
+modprobe dm_crypt
+```
+
+加载模块需要同时满足：
+
+* 内核配置启用了模块功能，例如 `CONFIG_MODULES`；
+* 内核模块加载系统调用已经可用；
+* 当前用户空间具有足够权限；
+* `.ko` 文件可以被访问；
+* 模块与当前内核兼容；
+* 依赖模块可以找到；
+* 签名和安全策略允许加载；
+* initramfs 中包含 `modprobe` 或等效工具。
+
+`modprobe` 一般还需要模块目录及依赖数据，例如：
+
+```text
+/lib/modules/<kernel-version>/
+├── kernel/...
+├── modules.dep
+├── modules.alias
+└── modules.builtin
+```
+
+如果这些内容没有被打包进 initramfs，对应模块就不能在早期用户空间中加载。
+
+### 11.8 为什么根磁盘驱动经常放进 initramfs？
+
+假设系统根文件系统位于 NVMe 设备上，而 NVMe 驱动被编译成模块：
+
+```text
+CONFIG_BLK_DEV_NVME=m
+```
+
+内核想挂载真实根文件系统，必须先识别 NVMe 设备：
+
+```text
+加载 nvme.ko
+    ↓
+识别 NVMe 磁盘
+    ↓
+读取根分区
+    ↓
+挂载根文件系统
+```
+
+但如果 `nvme.ko` 只保存在尚未挂载的根文件系统中，就形成循环依赖：
+
+```text
+挂载根文件系统需要 nvme.ko
+读取 nvme.ko 又需要先挂载根文件系统
+```
+
+initramfs 用于打破这个循环：
+
+```text
+引导程序提前把 initramfs 放进内存
+        ↓
+initramfs 中包含 nvme.ko
+        ↓
+早期 /init 加载 nvme.ko
+        ↓
+识别磁盘并挂载真实根文件系统
+```
+
+因此，启动所必需的驱动必须满足以下任一条件：
+
+```text
+方案一：直接编译进内核，CONFIG_xxx=y
+方案二：编译为模块，并放入 initramfs
+```
+
+不能只把启动所需模块放在尚未挂载的真实根文件系统中。
+
+### 11.9 没有 initramfs 时怎么办？
+
+Linux 并非绝对要求使用 initramfs。
+
+如果不使用 initramfs，内核必须能够独立完成：
+
+* 识别根存储控制器；
+* 识别磁盘和分区；
+* 识别根文件系统；
+* 挂载真实根文件系统；
+* 执行 `/sbin/init` 等 PID 1。
+
+因此，所有启动所必需的驱动通常必须编译进内核：
+
+```text
+存储控制器驱动 = y
+块设备驱动 = y
+根文件系统驱动 = y
+```
+
+例如根分区为 ext4，则 ext4 驱动不能只存在于根分区中的 `ext4.ko`，否则内核无法先挂载根分区去读取这个模块。
+
+真实根文件系统挂载完成并执行 PID 1 后，用户空间才可以从：
+
+```text
+/lib/modules/$(uname -r)/
+```
+
+继续加载其他非启动必需模块。
+
+### 11.10 切换到真实根文件系统
+
+initramfs 完成准备后，会把真实根文件系统挂载到某个目录，例如：
+
+```text
+/sysroot
+/newroot
+```
+
+随后使用类似机制：
+
+```text
+switch_root
+pivot_root
+```
+
+把真实根文件系统切换为新的根目录，并执行其中的正式 init 程序。
+
+概念流程：
+
+```text
+临时 initramfs rootfs
+├── /init
+├── /bin
+└── /lib/modules
+        ↓
+挂载真实根文件系统到 /sysroot
+        ↓
+switch_root /sysroot /sbin/init
+        ↓
+真实根文件系统成为 /
+```
+
+initramfs 中的 `/init` 和真实系统中的 `/sbin/init` 不是必须为同一个程序。
+
+在使用 systemd 的系统中：
+
+* initramfs 中可以运行精简的 systemd；
+* 切换根文件系统后，继续执行正式系统启动事务；
+* 也可以使用 Shell 脚本、BusyBox 或 dracut 提供的早期 `/init`。
+
+### 11.11 PID 1 和正式用户空间
+
+进入真实根文件系统后，内核通常执行：
+
+```text
+/sbin/init
+/etc/init
+/bin/init
+/bin/sh
+```
+
+具体选择受内核配置和 `init=` 参数影响。现代通用发行版通常使用 systemd 作为 PID 1。
+
+PID 1 继续负责：
+
+* 挂载其他文件系统；
+* 应用系统配置；
+* 启动设备管理；
+* 加载非关键模块；
+* 配置网络；
+* 启动系统服务；
+* 启动登录终端或图形环境；
+* 回收孤儿和僵尸进程。
+
+systemd 系统还可以通过：
+
+```text
+systemd-modules-load.service
+```
+
+读取静态模块配置并在启动期间加载指定模块。
+
+不过多数硬件模块更常通过设备发现和模块 alias 按需加载，而不是全部写入静态列表。
+
+### 11.12 模块自动加载发生在什么时候？
+
+内核某些子系统发现缺少某项功能时，可以调用类似：
+
+```c
+request_module("module-name");
+```
+
+请求用户空间模块加载器加载模块。
+
+概念流程：
+
+```text
+内核发现需要某模块
+        ↓
+request_module()
+        ↓
+启动用户空间模块加载程序
+        ↓
+modprobe 查找模块和依赖
+        ↓
+finit_module()
+        ↓
+模块进入内核
+```
+
+这条路径需要：
+
+* 内核已经启用模块自动加载支持；
+* 用户空间辅助程序已经可运行；
+* `modprobe` 可访问；
+* 当前根文件系统或 initramfs 中存在模块文件和依赖信息。
+
+因此，不能笼统地说：
+
+```text
+内核一进入 start_kernel() 就能自动从磁盘加载任意 .ko
+```
+
+更准确的是：
+
+> **内核的模块装载代码属于内核本身，但自动查找和装入模块通常依赖已经建立的用户空间及可访问的模块文件。**
+
+早期启动是否能自动加载某个模块，取决于该模块及加载工具是否被包含在 initramfs 中。
+
+### 11.13 启动阶段与模块能力对照
+
+| 启动阶段              | 内建代码 `=y`   | `.ko` 模块 `=m`            |
+| ----------------- | ----------- | ------------------------ |
+| 固件阶段              | 不可用         | 不可用                      |
+| 引导程序阶段            | 只负责加载内核映像   | 通常不直接执行 Linux 模块加载       |
+| 内核早期入口            | 可执行内核内建启动代码 | 不能依赖用户空间 `modprobe`      |
+| `start_kernel()`  | 初始化内建核心子系统  | 通常尚未由用户空间加载              |
+| 内核 initcall       | 初始化内建驱动和子系统 | 不等于读取 `.ko`              |
+| initramfs `/init` | 已经可用        | 可以加载 initramfs 中的模块      |
+| 真实根文件系统挂载后        | 已经可用        | 可以加载 `/lib/modules` 中的模块 |
+| 正式系统运行            | 已经可用        | 可手动、静态或按需加载              |
+
+### 11.14 一个典型启动例子
+
+假设系统使用：
+
+```text
+NVMe 磁盘
+LUKS 加密
+LVM
+ext4 根文件系统
+```
+
+可能的启动过程是：
+
+```mermaid
+sequenceDiagram
+    participant F as UEFI
+    participant B as 引导程序
+    participant K as Linux 内核
+    participant I as initramfs /init
+    participant P as 正式 PID 1
+
+    F->>B: 启动引导程序
+    B->>K: 加载内核、initramfs 和命令行
+    K->>K: 初始化内存、调度、中断和 VFS
+    K->>K: 执行内建 initcall
+    K->>I: 执行 initramfs 中的 /init
+    I->>K: 加载 NVMe、dm-crypt 等模块
+    I->>I: 发现磁盘并解锁 LUKS
+    I->>I: 激活 LVM
+    I->>I: 挂载 ext4 根文件系统
+    I->>P: switch_root 并执行正式 init
+    P->>P: 启动服务和登录环境
+```
+
+其中，若 NVMe 或 dm-crypt 驱动是模块，就必须包含在 initramfs 中；如果它们直接编译进内核，则不需要在 initramfs 阶段加载对应 `.ko`。
+
+### 11.15 查看当前系统的启动信息
+
+查看内核命令行：
+
+```bash
+cat /proc/cmdline
+```
+
+查看当前内核版本：
+
+```bash
+uname -r
+```
+
+查看 initramfs 内容，不同发行版工具可能不同：
+
+```bash
+lsinitramfs /boot/initrd.img-$(uname -r)
+```
+
+或者：
+
+```bash
+lsinitrd
+```
+
+查看已加载模块：
+
+```bash
+lsmod
+cat /proc/modules
+```
+
+查看某功能是内建还是模块：
+
+```bash
+grep CONFIG_EXT4_FS /boot/config-$(uname -r)
+```
+
+可能得到：
+
+```text
+CONFIG_EXT4_FS=y
+```
+
+表示内建，或者：
+
+```text
+CONFIG_EXT4_FS=m
+```
+
+表示构建为模块。
+
+查看模块文件：
+
+```bash
+modinfo ext4
+find /lib/modules/$(uname -r) -name 'ext4.ko*'
+```
+
+查看内核启动日志：
+
+```bash
+dmesg
+journalctl -k -b
+```
+
+查看当前启动耗时：
+
+```bash
+systemd-analyze
+systemd-analyze critical-chain
+```
+
+需要注意，`systemd-analyze` 主要观察用户空间和 systemd 管理的启动阶段，不能完整代表固件、引导器和所有内核初始化成本。
+
+### 11.16 总结
+
+Linux 的启动流程可以概括为：
+
+```text
+固件
+  → 引导程序
+  → 内核早期初始化
+  → 内建组件 initcall
+  → initramfs 早期用户空间
+  → 加载启动必需模块
+  → 挂载真实根文件系统
+  → 正式 PID 1
+  → 系统服务
+```
+
+其中模块加载最重要的边界是：
+
+* `CONFIG_xxx=y`：直接编译进内核，在内核 initcall 阶段初始化；
+* `CONFIG_xxx=m`：形成 `.ko`，通常由 initramfs 或正式根文件系统中的用户空间工具加载；
+* 启动必需模块必须放进 initramfs，或者直接编译进内核；
+* initramfs 中的 `/init` 启动后，通常已经可以使用 `modprobe`；
+* 没有 initramfs 时，挂载真实根文件系统所必需的驱动必须内建；
+* 模块自动加载仍依赖用户空间加载器和可访问的模块文件。
+
+
 # 十六、常见排查
 
 性能排查应先确认现象和边界，再选择工具。不要一看到 CPU、内存或 `%util` 某个指标升高就直接下结论。
