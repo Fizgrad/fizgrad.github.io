@@ -747,6 +747,9 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-field textarea:focus { border-color: var(--accent); }
 .chat-field input[type="range"] { padding: 0; }
 .chat-field input[type="range"]:disabled,
+.chat-field input[type="text"]:disabled,
+.chat-field input[type="password"]:disabled,
+.chat-field textarea:disabled,
 .chat-field select:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -782,6 +785,7 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-field select:focus { border-color: var(--accent); }
 .chat-field-input-hidden { display: none; }
 .chat-field-input-hidden.show { display: block; margin-top: 0.4rem; }
+.chat-mode-field[hidden] { display: none; }
 #cfg-clear {
   display: block;
   width: 100%;
@@ -959,6 +963,25 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-msg-assistant .chat-bubble p:last-child { margin-bottom: 0; }
 .chat-typing { color: var(--text-faint); font-style: italic; }
 .chat-error { color: #fb7185; }
+
+.chat-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.8rem;
+  padding: 0.45rem 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--accent-2);
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid var(--accent-2);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.chat-retry-btn:hover {
+  color: #08080c;
+  background: var(--accent-2);
+}
 
 .chat-usage {
   margin-top: 0.8rem;

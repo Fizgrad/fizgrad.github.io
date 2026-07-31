@@ -54,6 +54,15 @@
         <input type="password" id="cfg-apikey" placeholder="sk-..." spellcheck="false" />
       </label>
       <label class="chat-field">
+        <span data-i18n="completionMode">对话模式</span>
+        <select id="cfg-mode" class="chat-select">
+          <option value="chat" data-i18n="modeChat">普通聊天</option>
+          <option value="prefix" data-i18n="modePrefix">Prefix Completion (Beta)</option>
+          <option value="fim" data-i18n="modeFim">FIM Completion (Beta)</option>
+        </select>
+      </label>
+      <p class="chat-settings-hint" id="mode-hint" data-i18n="modeChatHint">使用标准 /chat/completions 接口。</p>
+      <label class="chat-field" id="model-field">
         <span data-i18n="modelId">Model ID</span>
         <select id="cfg-model-select" class="chat-select">
           <option value="deepseek-v4-pro">deepseek-v4-pro</option>
@@ -62,11 +71,21 @@
         </select>
         <input type="text" id="cfg-model-custom" class="chat-field-input-hidden" data-i18n-ph="customModelPh" placeholder="输入自定义 Model ID" spellcheck="false" />
       </label>
-      <label class="chat-field">
+      <label class="chat-field" id="system-field">
         <span data-i18n="systemPrompt">System Prompt</span>
         <textarea id="cfg-system" rows="3" placeholder="You are a helpful assistant." spellcheck="false"></textarea>
       </label>
-      <label class="chat-field">
+      <label class="chat-field chat-mode-field" id="prefix-field" hidden>
+        <span data-i18n="assistantPrefix">Assistant Prefix</span>
+        <textarea id="cfg-prefix" rows="3" data-i18n-ph="assistantPrefixPh" placeholder="```python&#10;" spellcheck="false"></textarea>
+      </label>
+      <p class="chat-settings-hint chat-mode-field" id="prefix-hint" data-i18n="prefixHint" hidden>模型将从此前缀后继续生成；请求自动使用 Beta 接口。</p>
+      <label class="chat-field chat-mode-field" id="fim-suffix-field" hidden>
+        <span data-i18n="fimSuffix">FIM Suffix（可选）</span>
+        <textarea id="cfg-fim-suffix" rows="3" data-i18n-ph="fimSuffixPh" placeholder="补全内容之后的代码或文本" spellcheck="false"></textarea>
+      </label>
+      <p class="chat-settings-hint chat-mode-field" id="fim-hint" data-i18n="fimHint" hidden>聊天输入框作为 Prompt；FIM 固定使用 deepseek-v4-pro 和 Beta 接口。</p>
+      <label class="chat-field" id="thinking-field">
         <span data-i18n="thinking">思考模式</span>
         <select id="cfg-thinking" class="chat-select">
           <option value="enabled" data-i18n="thinkingOn">开启 (默认)</option>
@@ -87,13 +106,14 @@
       </div>
       <label class="chat-field">
         <span data-i18n="maxTokens">Max Tokens</span>
-        <input type="number" id="cfg-maxtokens" value="4096" min="1" max="32768" />
+        <input type="number" id="cfg-maxtokens" value="4096" min="1" max="384000" />
       </label>
+      <p class="chat-settings-hint" id="max-tokens-hint" data-i18n="maxTokensHint">DeepSeek V4 最大输出为 384K Token；长输出会自动降低实时排版刷新频率。</p>
       <label class="chat-field">
         <span data-i18n="labelStop">Stop</span>
         <input type="text" id="cfg-stop" data-i18n-ph="stopPh" placeholder="逗号分隔, 可选" spellcheck="false" />
       </label>
-      <label class="chat-field">
+      <label class="chat-field" id="reasoning-field">
         <span data-i18n="reasoningEffort">推理强度</span>
         <select id="cfg-reasoning" class="chat-select">
           <option value="high" data-i18n="reasoningHigh">high (默认)</option>
@@ -101,7 +121,7 @@
         </select>
       </label>
       <p class="chat-disabled-hint" id="reasoning-disabled-hint" data-i18n="nonThinkingIgnoresHint" hidden>⚠ 非思考模式下此参数不生效</p>
-      <label class="chat-field">
+      <label class="chat-field" id="response-format-field">
         <span data-i18n="responseFormat">输出格式</span>
         <select id="cfg-respformat" class="chat-select">
           <option value="text" data-i18n="respText">普通文本</option>
@@ -113,7 +133,7 @@
         <input type="checkbox" id="cfg-stream" checked />
       </label>
       <label class="chat-field chat-field-check">
-        <span data-i18n="streamUsage">返回 Token 用量统计</span>
+        <span data-i18n="streamUsage">显示 Token 用量统计</span>
         <input type="checkbox" id="cfg-stream-usage" checked />
       </label>
       <section class="chat-stats chat-usage-stats" aria-live="polite">
@@ -130,16 +150,28 @@
           <span data-i18n="usageTotal">本次 Total</span>
           <b id="usage-total">—</b>
         </div>
+        <div class="chat-stat-row">
+          <span data-i18n="usageCacheHit">缓存命中</span>
+          <b id="usage-cache-hit">—</b>
+        </div>
+        <div class="chat-stat-row">
+          <span data-i18n="usageCacheMiss">缓存未命中</span>
+          <b id="usage-cache-miss">—</b>
+        </div>
+        <div class="chat-stat-row">
+          <span data-i18n="usageReasoning">思考 Token</span>
+          <b id="usage-reasoning">—</b>
+        </div>
         <div class="chat-stat-row chat-stat-cumulative">
           <span data-i18n="usageCumulative">会话累计</span>
           <b id="usage-cumulative">0</b>
         </div>
       </section>
-      <label class="chat-field">
+      <label class="chat-field" id="user-id-field">
         <span data-i18n="userId">用户标识 (可选)</span>
         <input type="text" id="cfg-userid" data-i18n-ph="userIdPh" placeholder="user_10001 (仅允许字母数字-_)" spellcheck="false" />
       </label>
-      <p class="chat-settings-hint" data-i18n="jsonHint">JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。</p>
+      <p class="chat-settings-hint" id="json-hint" data-i18n="jsonHint">JSON 模式要求提示词包含“json”，并建议给出目标 JSON 示例；空结果可直接重试。</p>
 
       <button id="cfg-clear" type="button" data-i18n="clearChat">清空对话</button>
       <p class="chat-settings-hint" data-i18n="cfgHint">修改自动保存到 localStorage。</p>
@@ -160,7 +192,7 @@
   </main>
 
   <footer class="footer">
-    <p>&copy; <span id="year"></span> Fizgrad · Built with GLM-5.2</p>
+    <p>&copy; <span id="year"></span> Fizgrad</p>
     <a href="./" class="back-top">← 返回主页 / Back to home</a>
   </footer>
 
@@ -244,8 +276,8 @@
       }
 
       var I18N = {
-        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "返回 Token 用量统计", latestUsage: "Token 用量", usageInput: "本次 Input", usageOutput: "本次 Output", usageTotal: "本次 Total", usageCumulative: "会话累计", userId: "用户标识 (可选)", userIdPh: "user_10001 (仅允许字母数字-_)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式需在 System Prompt 或消息中明确要求 JSON 格式，否则可能输出空白。", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤", thinkingIgnoresHint: "⚠ 思考模式下此参数不生效", nonThinkingIgnoresHint: "⚠ 非思考模式下此参数不生效" },
-        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", modelId: "Model ID", systemPrompt: "System Prompt", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", latestUsage: "Token Usage", usageInput: "Latest Input", usageOutput: "Latest Output", usageTotal: "Latest Total", usageCumulative: "Session Total", userId: "User ID (optional)", userIdPh: "user_10001 (alphanumeric, -, _ only)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires explicit JSON instructions in System Prompt or messages, otherwise may output blank.", reasoning: "Reasoning", finishLength: "Response truncated due to max token limit", finishFilter: "Response filtered due to content safety", thinkingIgnoresHint: "⚠ Ignored in thinking mode", nonThinkingIgnoresHint: "⚠ Ignored without thinking mode" },
+        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", completionMode: "对话模式", modeChat: "普通聊天", modePrefix: "Prefix Completion (Beta)", modeFim: "FIM Completion (Beta)", modeChatHint: "使用标准 /chat/completions 接口。", modePrefixHint: "使用 Beta /chat/completions；最后一条消息会作为 Assistant Prefix。", modeFimHint: "使用 Beta /completions；不携带聊天历史、System Prompt 或思考参数。", modelId: "Model ID", systemPrompt: "System Prompt", assistantPrefix: "Assistant Prefix", assistantPrefixPh: "例如：```python", prefixHint: "模型将从此前缀后继续生成；请求自动使用 Beta 接口。", fimSuffix: "FIM Suffix（可选）", fimSuffixPh: "补全内容之后的代码或文本", fimHint: "聊天输入框作为 Prompt；FIM 固定使用 deepseek-v4-pro 和 Beta 接口。", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", maxTokensHint: "DeepSeek V4 最大输出为 384K Token；长输出会自动降低实时排版刷新频率。", fimMaxTokensHint: "FIM 官方最大输出为 4096 Token。", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "修改自动保存到 localStorage。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", prefixInputPlaceholder: "输入请求，模型将从 Assistant Prefix 继续... (Enter 发送)", fimInputPlaceholder: "输入待补全文本的前半部分 Prompt... (Enter 发送)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "显示 Token 用量统计", latestUsage: "Token 用量", usageInput: "本次 Input", usageOutput: "本次 Output", usageTotal: "本次 Total", usageCacheHit: "缓存命中", usageCacheMiss: "缓存未命中", usageReasoning: "思考 Token", usageCumulative: "会话累计", userId: "用户标识 (可选)", userIdPh: "user_10001 (仅允许字母数字-_)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key 并保存。", prefixRequired: "Prefix Completion 需要填写 Assistant Prefix。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式要求提示词包含“json”，并建议给出目标 JSON 示例；空结果可直接重试。", jsonPromptRequired: "JSON 模式要求 System Prompt 或当前消息中包含“json”。", jsonEmpty: "DeepSeek 返回了空的 JSON 内容。", retry: "重试", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤", finishResource: "推理资源不足，响应可能不完整，请重试", finishToolCalls: "模型请求调用工具，但当前页面未配置工具执行，响应未完成", streamInterrupted: "流式连接未收到 [DONE]，响应可能不完整", thinkingIgnoresHint: "⚠ 思考模式下此参数不生效", nonThinkingIgnoresHint: "⚠ 非思考模式下此参数不生效" },
+        en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", completionMode: "Completion Mode", modeChat: "Chat", modePrefix: "Prefix Completion (Beta)", modeFim: "FIM Completion (Beta)", modeChatHint: "Uses the standard /chat/completions endpoint.", modePrefixHint: "Uses Beta /chat/completions; the final message is sent as the Assistant Prefix.", modeFimHint: "Uses Beta /completions without chat history, System Prompt, or thinking parameters.", modelId: "Model ID", systemPrompt: "System Prompt", assistantPrefix: "Assistant Prefix", assistantPrefixPh: "Example: ```python", prefixHint: "The model continues after this prefix; the Beta endpoint is selected automatically.", fimSuffix: "FIM Suffix (optional)", fimSuffixPh: "Code or text that follows the missing content", fimHint: "The chat input is the Prompt; FIM always uses deepseek-v4-pro and the Beta endpoint.", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", maxTokensHint: "DeepSeek V4 supports up to 384K output tokens; live formatting refreshes less often for long output.", fimMaxTokensHint: "The official FIM output maximum is 4096 tokens.", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes auto-saved to localStorage.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", prefixInputPlaceholder: "Enter a request; the model continues from Assistant Prefix... (Enter to send)", fimInputPlaceholder: "Enter the beginning Prompt to fill... (Enter to send)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", latestUsage: "Token Usage", usageInput: "Latest Input", usageOutput: "Latest Output", usageTotal: "Latest Total", usageCacheHit: "Cache Hit", usageCacheMiss: "Cache Miss", usageReasoning: "Reasoning Tokens", usageCumulative: "Session Total", userId: "User ID (optional)", userIdPh: "user_10001 (alphanumeric, -, _ only)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key and save first.", prefixRequired: "Prefix Completion requires an Assistant Prefix.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires the word “json” in the prompt; a target JSON example is recommended. Empty results can be retried.", jsonPromptRequired: "JSON mode requires the word “json” in the System Prompt or current message.", jsonEmpty: "DeepSeek returned empty JSON content.", retry: "Retry", reasoning: "Reasoning", finishLength: "Response truncated due to max token limit", finishFilter: "Response filtered due to content safety", finishResource: "Insufficient inference resources; the response may be incomplete. Please retry", finishToolCalls: "The model requested a tool call, but this page has no tool executor configured", streamInterrupted: "The stream ended without [DONE]; the response may be incomplete", thinkingIgnoresHint: "⚠ Ignored in thinking mode", nonThinkingIgnoresHint: "⚠ Ignored without thinking mode" },
       };
       var lang = (function () {
         var stored = localStorage.getItem("lang");
@@ -278,16 +310,35 @@
         applyI18n();
       });
 
-      var CHAT_CFG_VERSION = 2;
+      var CHAT_CFG_VERSION = 3;
+      var MAX_OUTPUT_TOKENS = 384000;
+      var MAX_FIM_OUTPUT_TOKENS = 4096;
+
+      function normalizeMaxTokens(value) {
+        var parsed = parseInt(value, 10);
+        if (!Number.isFinite(parsed)) return 4096;
+        return Math.min(MAX_OUTPUT_TOKENS, Math.max(1, parsed));
+      }
+
+      function normalizeFimMaxTokens(value) {
+        var parsed = parseInt(value, 10);
+        if (!Number.isFinite(parsed)) return MAX_FIM_OUTPUT_TOKENS;
+        return Math.min(MAX_FIM_OUTPUT_TOKENS, Math.max(1, parsed));
+      }
+
       var cfg = {
         version: CHAT_CFG_VERSION,
         baseurl: "https://api.deepseek.com",
         apikey: "",
+        mode: "chat",
         model: "deepseek-v4-pro",
         system: "",
+        assistantPrefix: "",
+        fimSuffix: "",
         temp: 1.0,
         topp: 1.0,
         maxtokens: 4096,
+        fimMaxTokens: 4096,
         stop: "",
         thinking: "enabled",
         reasoning: "high",
@@ -299,46 +350,94 @@
 
       try {
         var saved = JSON.parse(localStorage.getItem("chat-cfg") || "{}");
+        var savedVersion = parseInt(saved.version, 10) || 0;
         for (var k in saved) { if (saved[k] !== undefined) cfg[k] = saved[k]; }
-        if ((parseInt(saved.version, 10) || 0) < CHAT_CFG_VERSION) {
+        if (savedVersion < 2) {
           cfg.streamUsage = true;
+        }
+        if (["chat", "prefix", "fim"].indexOf(cfg.mode) === -1) {
+          cfg.mode = "chat";
+        }
+        cfg.version = CHAT_CFG_VERSION;
+        if (savedVersion < CHAT_CFG_VERSION) {
           cfg.version = CHAT_CFG_VERSION;
           localStorage.setItem("chat-cfg", JSON.stringify(cfg));
         }
       } catch (e) {}
+      cfg.maxtokens = normalizeMaxTokens(cfg.maxtokens);
+      cfg.fimMaxTokens = normalizeFimMaxTokens(cfg.fimMaxTokens);
 
-      function autoSave() {
+      function autoSave(modeBeingEdited) {
+        var modeSelect = document.getElementById("cfg-mode");
+        var selectedMode = modeSelect.value;
+        var uiMode = typeof modeBeingEdited === "string" ? modeBeingEdited : selectedMode;
         cfg.baseurl = document.getElementById("cfg-baseurl").value.replace(/\/+$/, "");
         cfg.apikey = document.getElementById("cfg-apikey").value.trim();
         cfg.system = document.getElementById("cfg-system").value.trim();
+        cfg.assistantPrefix = document.getElementById("cfg-prefix").value;
+        cfg.fimSuffix = document.getElementById("cfg-fim-suffix").value;
         cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
         cfg.topp = parseFloat(document.getElementById("cfg-topp").value);
-        cfg.maxtokens = parseInt(document.getElementById("cfg-maxtokens").value, 10) || 4096;
+        var maxTokensInput = document.getElementById("cfg-maxtokens");
+        if (uiMode === "fim") {
+          cfg.fimMaxTokens = normalizeFimMaxTokens(maxTokensInput.value);
+          maxTokensInput.value = cfg.fimMaxTokens;
+        } else {
+          cfg.maxtokens = normalizeMaxTokens(maxTokensInput.value);
+          maxTokensInput.value = cfg.maxtokens;
+        }
         cfg.stop = document.getElementById("cfg-stop").value.trim();
-        cfg.thinking = document.getElementById("cfg-thinking").value;
-        cfg.reasoning = document.getElementById("cfg-reasoning").value;
-        cfg.respformat = document.getElementById("cfg-respformat").value;
         cfg.stream = document.getElementById("cfg-stream").checked;
         cfg.streamUsage = document.getElementById("cfg-stream-usage").checked;
         cfg.userid = document.getElementById("cfg-userid").value.trim();
-        var sel = document.getElementById("cfg-model-select");
-        if (sel.value === "__custom__") {
-          cfg.model = document.getElementById("cfg-model-custom").value.trim() || "deepseek-v4-pro";
-        } else {
-          cfg.model = sel.value;
+        if (uiMode !== "fim") {
+          cfg.thinking = document.getElementById("cfg-thinking").value;
+          cfg.reasoning = document.getElementById("cfg-reasoning").value;
+          cfg.respformat = document.getElementById("cfg-respformat").value;
+          var sel = document.getElementById("cfg-model-select");
+          if (sel.value === "__custom__") {
+            cfg.model = document.getElementById("cfg-model-custom").value.trim() || "deepseek-v4-pro";
+          } else {
+            cfg.model = sel.value;
+          }
         }
+        cfg.mode = selectedMode;
+        cfg.version = CHAT_CFG_VERSION;
         localStorage.setItem("chat-cfg", JSON.stringify(cfg));
+      }
+
+      function setModelFormValue(model) {
+        var sel = document.getElementById("cfg-model-select");
+        var custom = document.getElementById("cfg-model-custom");
+        var found = false;
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === model) {
+            sel.value = model;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          sel.value = "__custom__";
+          custom.value = model;
+          custom.classList.add("show");
+        } else {
+          custom.classList.remove("show");
+        }
       }
 
       function fillCfgForm() {
         document.getElementById("cfg-baseurl").value = cfg.baseurl;
         document.getElementById("cfg-apikey").value = cfg.apikey;
+        document.getElementById("cfg-mode").value = cfg.mode;
         document.getElementById("cfg-system").value = cfg.system;
+        document.getElementById("cfg-prefix").value = cfg.assistantPrefix;
+        document.getElementById("cfg-fim-suffix").value = cfg.fimSuffix;
         document.getElementById("cfg-temp").value = cfg.temp;
         document.getElementById("temp-val").textContent = cfg.temp;
         document.getElementById("cfg-topp").value = cfg.topp;
         document.getElementById("topp-val").textContent = cfg.topp;
-        document.getElementById("cfg-maxtokens").value = cfg.maxtokens;
+        document.getElementById("cfg-maxtokens").value = cfg.mode === "fim" ? cfg.fimMaxTokens : cfg.maxtokens;
         document.getElementById("cfg-stop").value = cfg.stop;
         document.getElementById("cfg-thinking").value = cfg.thinking;
         document.getElementById("cfg-reasoning").value = cfg.reasoning;
@@ -346,18 +445,7 @@
         document.getElementById("cfg-stream").checked = cfg.stream;
         document.getElementById("cfg-stream-usage").checked = cfg.streamUsage;
         document.getElementById("cfg-userid").value = cfg.userid;
-        var sel = document.getElementById("cfg-model-select");
-        var found = false;
-        for (var i = 0; i < sel.options.length; i++) {
-          if (sel.options[i].value === cfg.model) { sel.value = cfg.model; found = true; break; }
-        }
-        if (!found) {
-          sel.value = "__custom__";
-          document.getElementById("cfg-model-custom").value = cfg.model;
-          document.getElementById("cfg-model-custom").classList.add("show");
-        } else {
-          document.getElementById("cfg-model-custom").classList.remove("show");
-        }
+        setModelFormValue(cfg.model);
       }
 
       fillCfgForm();
@@ -366,7 +454,7 @@
         var display = document.getElementById(id.replace("cfg-", "") + "-val");
         if (display) slider.addEventListener("input", function () { display.textContent = this.value; });
       });
-      ["cfg-baseurl", "cfg-apikey", "cfg-model-custom", "cfg-system", "cfg-maxtokens", "cfg-stop", "cfg-userid"].forEach(function (id) {
+      ["cfg-baseurl", "cfg-apikey", "cfg-model-custom", "cfg-system", "cfg-prefix", "cfg-fim-suffix", "cfg-maxtokens", "cfg-stop", "cfg-userid"].forEach(function (id) {
         document.getElementById(id).addEventListener("change", autoSave);
       });
       ["cfg-temp", "cfg-topp", "cfg-thinking", "cfg-reasoning", "cfg-respformat"].forEach(function (id) {
@@ -376,34 +464,111 @@
       document.getElementById("cfg-stream-usage").addEventListener("change", autoSave);
 
       /* Toggle sampling params based on thinking mode */
+      var modeSel = document.getElementById("cfg-mode");
+      var modeHint = document.getElementById("mode-hint");
+      var modelField = document.getElementById("model-field");
+      var modelSel = document.getElementById("cfg-model-select");
+      var modelCustomInput = document.getElementById("cfg-model-custom");
+      var systemField = document.getElementById("system-field");
+      var systemInput = document.getElementById("cfg-system");
+      var prefixField = document.getElementById("prefix-field");
+      var prefixHint = document.getElementById("prefix-hint");
+      var fimSuffixField = document.getElementById("fim-suffix-field");
+      var fimHint = document.getElementById("fim-hint");
+      var thinkingField = document.getElementById("thinking-field");
       var thinkingSel = document.getElementById("cfg-thinking");
-      var reasoningField = document.getElementById("cfg-reasoning").parentElement;
+      var reasoningField = document.getElementById("reasoning-field");
       var tempInput = document.getElementById("cfg-temp");
       var toppInput = document.getElementById("cfg-topp");
       var reasoningSel = document.getElementById("cfg-reasoning");
       var tempHint = document.getElementById("temp-disabled-hint");
       var toppHint = document.getElementById("topp-disabled-hint");
       var reasoningHint = document.getElementById("reasoning-disabled-hint");
+      var maxTokensInput = document.getElementById("cfg-maxtokens");
+      var maxTokensHint = document.getElementById("max-tokens-hint");
+      var responseFormatField = document.getElementById("response-format-field");
+      var responseFormatSel = document.getElementById("cfg-respformat");
+      var jsonHint = document.getElementById("json-hint");
+      var userIdField = document.getElementById("user-id-field");
+      var userIdInput = document.getElementById("cfg-userid");
+
+      function setTranslatedText(element, key) {
+        element.setAttribute("data-i18n", key);
+        element.textContent = t(key);
+      }
+
       function updateThinkingUI() {
-        var thinking = thinkingSel.value !== "disabled";
+        var isFim = modeSel.value === "fim";
+        var thinking = !isFim && thinkingSel.value !== "disabled";
         tempInput.disabled = thinking;
         toppInput.disabled = thinking;
+        thinkingSel.disabled = isFim;
         reasoningSel.disabled = !thinking;
         tempHint.hidden = !thinking;
         toppHint.hidden = !thinking;
-        reasoningHint.hidden = thinking;
+        reasoningHint.hidden = thinking || isFim;
+        thinkingField.classList.toggle("chat-field-disabled", isFim);
         reasoningField.classList.toggle("chat-field-disabled", !thinking);
       }
-      thinkingSel.addEventListener("change", updateThinkingUI);
-      updateThinkingUI();
-      document.getElementById("cfg-model-select").addEventListener("change", function () {
-        autoSave();
-        var custom = document.getElementById("cfg-model-custom");
-        if (this.value === "__custom__") {
-          custom.classList.add("show");
-          custom.focus();
+
+      function updateModeUI() {
+        var isPrefix = modeSel.value === "prefix";
+        var isFim = modeSel.value === "fim";
+        prefixField.hidden = !isPrefix;
+        prefixHint.hidden = !isPrefix;
+        fimSuffixField.hidden = !isFim;
+        fimHint.hidden = !isFim;
+
+        var modeHintKey = isFim ? "modeFimHint" : (isPrefix ? "modePrefixHint" : "modeChatHint");
+        var inputPlaceholderKey = isFim ? "fimInputPlaceholder" : (isPrefix ? "prefixInputPlaceholder" : "inputPlaceholder");
+        setTranslatedText(modeHint, modeHintKey);
+        document.getElementById("chat-input").setAttribute("data-i18n-ph", inputPlaceholderKey);
+        document.getElementById("chat-input").placeholder = t(inputPlaceholderKey);
+
+        if (isFim) {
+          maxTokensInput.max = String(MAX_FIM_OUTPUT_TOKENS);
+          maxTokensInput.value = cfg.fimMaxTokens;
+          setTranslatedText(maxTokensHint, "fimMaxTokensHint");
+          modelSel.value = "deepseek-v4-pro";
+          modelCustomInput.classList.remove("show");
+          thinkingSel.value = "disabled";
+          responseFormatSel.value = "text";
         } else {
-          custom.classList.remove("show");
+          maxTokensInput.max = String(MAX_OUTPUT_TOKENS);
+          maxTokensInput.value = cfg.maxtokens;
+          setTranslatedText(maxTokensHint, "maxTokensHint");
+          setModelFormValue(cfg.model);
+          thinkingSel.value = cfg.thinking;
+          responseFormatSel.value = cfg.respformat;
+        }
+
+        modelSel.disabled = isFim;
+        modelCustomInput.disabled = isFim;
+        systemInput.disabled = isFim;
+        responseFormatSel.disabled = isFim;
+        userIdInput.disabled = isFim;
+        modelField.classList.toggle("chat-field-disabled", isFim);
+        systemField.classList.toggle("chat-field-disabled", isFim);
+        responseFormatField.classList.toggle("chat-field-disabled", isFim);
+        userIdField.classList.toggle("chat-field-disabled", isFim);
+        jsonHint.hidden = isFim;
+        updateThinkingUI();
+      }
+
+      thinkingSel.addEventListener("change", updateThinkingUI);
+      modeSel.addEventListener("change", function () {
+        var previousMode = cfg.mode;
+        autoSave(previousMode);
+        updateModeUI();
+      });
+      updateModeUI();
+      modelSel.addEventListener("change", function () {
+        autoSave();
+        if (this.value === "__custom__") {
+          modelCustomInput.classList.add("show");
+          modelCustomInput.focus();
+        } else {
+          modelCustomInput.classList.remove("show");
         }
       });
 
@@ -419,12 +584,16 @@
       var usageInputEl = document.getElementById("usage-input");
       var usageOutputEl = document.getElementById("usage-output");
       var usageTotalEl = document.getElementById("usage-total");
+      var usageCacheHitEl = document.getElementById("usage-cache-hit");
+      var usageCacheMissEl = document.getElementById("usage-cache-miss");
+      var usageReasoningEl = document.getElementById("usage-reasoning");
       var usageCumulativeEl = document.getElementById("usage-cumulative");
       var cumulativeUsageTotal = 0;
       var isStreaming = false;
       var isPinned = true;
 
       function formatTokenCount(value) {
+        if (value === null || value === undefined || value === "") return "—";
         var count = Number(value);
         return Number.isFinite(count) ? count.toLocaleString() : "—";
       }
@@ -433,11 +602,54 @@
         usageInputEl.textContent = usage ? formatTokenCount(usage.prompt_tokens) : "—";
         usageOutputEl.textContent = usage ? formatTokenCount(usage.completion_tokens) : "—";
         usageTotalEl.textContent = usage ? formatTokenCount(usage.total_tokens) : "—";
+        usageCacheHitEl.textContent = usage ? formatTokenCount(usage.prompt_cache_hit_tokens) : "—";
+        usageCacheMissEl.textContent = usage ? formatTokenCount(usage.prompt_cache_miss_tokens) : "—";
+        usageReasoningEl.textContent = usage && usage.completion_tokens_details
+          ? formatTokenCount(usage.completion_tokens_details.reasoning_tokens)
+          : "—";
         if (usage && accumulate) {
           var responseTotal = Number(usage.total_tokens);
           if (Number.isFinite(responseTotal)) cumulativeUsageTotal += responseTotal;
         }
         usageCumulativeEl.textContent = formatTokenCount(cumulativeUsageTotal);
+      }
+
+      function hasTokenCount(value) {
+        return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+      }
+
+      function buildUsageMarkup(usage) {
+        var parts = [
+          formatTokenCount(usage.prompt_tokens) + " in",
+          formatTokenCount(usage.completion_tokens) + " out",
+          formatTokenCount(usage.total_tokens) + " total"
+        ];
+        if (hasTokenCount(usage.prompt_cache_hit_tokens)) {
+          parts.push(t("usageCacheHit") + " " + formatTokenCount(usage.prompt_cache_hit_tokens));
+        }
+        if (hasTokenCount(usage.prompt_cache_miss_tokens)) {
+          parts.push(t("usageCacheMiss") + " " + formatTokenCount(usage.prompt_cache_miss_tokens));
+        }
+        if (usage.completion_tokens_details && hasTokenCount(usage.completion_tokens_details.reasoning_tokens)) {
+          parts.push(t("usageReasoning") + " " + formatTokenCount(usage.completion_tokens_details.reasoning_tokens));
+        }
+        return '<div class="chat-usage">📊 ' + parts.join(" · ") + "</div>";
+      }
+
+      function buildFinishWarning(finishReason) {
+        if (finishReason === "length") {
+          return '\n\n<em style="color:var(--text-faint)">⚠ ' + t("finishLength") + "</em>";
+        }
+        if (finishReason === "content_filter") {
+          return '\n\n<em style="color:#fb7185">⚠ ' + t("finishFilter") + "</em>";
+        }
+        if (finishReason === "insufficient_system_resource") {
+          return '\n\n<em style="color:#fb7185">⚠ ' + t("finishResource") + "</em>";
+        }
+        if (finishReason === "tool_calls") {
+          return '\n\n<em style="color:#fbbf24">⚠ ' + t("finishToolCalls") + "</em>";
+        }
+        return "";
       }
 
       function scrollToBottom() {
@@ -607,8 +819,8 @@
         });
       }
 
-      function addMessage(role, content) {
-        messages.push({ role: role, content: content });
+      function addMessage(role, content, mode) {
+        messages.push({ role: role, content: content, mode: mode || cfg.mode || "chat" });
         var wrap = document.createElement("div");
         wrap.className = "chat-msg chat-msg-" + role;
 
@@ -630,6 +842,62 @@
         messagesEl.appendChild(wrap);
         scrollToBottom();
         return bubble;
+      }
+
+      function removeRetryButtons() {
+        messagesEl.querySelectorAll(".chat-retry-btn").forEach(function (button) {
+          button.remove();
+        });
+      }
+
+      function appendRetryButton(bubble, originalText, originalMode) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "chat-retry-btn";
+        button.textContent = t("retry");
+        button.addEventListener("click", function () {
+          if (isStreaming) return;
+          var assistantWrap = bubble.closest(".chat-msg-assistant");
+          if (!assistantWrap || assistantWrap !== messagesEl.lastElementChild) return;
+          var userWrap = assistantWrap.previousElementSibling;
+          if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+            messages.pop();
+          }
+          if (messages.length > 0 && messages[messages.length - 1].role === "user") {
+            messages.pop();
+          }
+          if (userWrap && userWrap.classList.contains("chat-msg-user")) {
+            userWrap.remove();
+          }
+          assistantWrap.remove();
+          if (modeSel.value !== originalMode) {
+            modeSel.value = originalMode;
+            modeSel.dispatchEvent(new Event("change"));
+          }
+          inputEl.value = originalText;
+          doSend();
+        });
+        bubble.appendChild(button);
+        scrollToBottom();
+      }
+
+      function getBetaBaseUrl(baseUrl) {
+        var base = String(baseUrl || "").replace(/\/+$/, "");
+        if (/\/beta$/i.test(base)) return base;
+        if (/\/v1$/i.test(base)) base = base.slice(0, -3);
+        return base + "/beta";
+      }
+
+      function getRequestUrl(mode) {
+        var base = String(cfg.baseurl || "").replace(/\/+$/, "");
+        if (mode !== "chat") base = getBetaBaseUrl(base);
+        return base + (mode === "fim" ? "/completions" : "/chat/completions");
+      }
+
+      function mergeAssistantPrefix(prefix, completion) {
+        var generated = completion || "";
+        if (!prefix || generated.indexOf(prefix) === 0) return generated;
+        return prefix + generated;
       }
 
       function clearChat() {
@@ -658,51 +926,94 @@
       function doSend() {
         if (isStreaming) return;
         autoSave();
-        var text = inputEl.value.trim();
-        if (!text) return;
+        var requestMode = cfg.mode;
+        var isPrefix = requestMode === "prefix";
+        var isFim = requestMode === "fim";
+        var requestStream = cfg.stream;
+        var requestUsage = cfg.streamUsage;
+        var requestRespformat = cfg.respformat;
+        var assistantPrefix = isPrefix ? cfg.assistantPrefix : "";
+        var rawText = inputEl.value;
+        var text = isFim ? rawText : rawText.trim();
+        if (!text.trim()) return;
         if (!cfg.apikey) {
           settingsPanel.classList.add("open");
           alert(t("needApiKey"));
           return;
         }
+        if (isPrefix && !assistantPrefix.length) {
+          settingsPanel.classList.add("open");
+          alert(t("prefixRequired"));
+          return;
+        }
+        if (!isFim && requestRespformat === "json_object" && !/\bjson\b/i.test(cfg.system + "\n" + text + "\n" + assistantPrefix)) {
+          settingsPanel.classList.add("open");
+          alert(t("jsonPromptRequired"));
+          return;
+        }
+        removeRetryButtons();
         updateUsageDisplay(null, false);
 
         var empty = messagesEl.querySelector(".chat-empty");
         if (empty) empty.remove();
 
-        addMessage("user", text);
+        addMessage("user", text, requestMode);
         inputEl.value = "";
         inputEl.style.height = "auto";
 
         var apiMessages = [];
-        if (cfg.system) apiMessages.push({ role: "system", content: cfg.system });
-        for (var i = 0; i < messages.length; i++) {
-          apiMessages.push({ role: messages[i].role, content: messages[i].content });
+        if (!isFim) {
+          if (cfg.system) apiMessages.push({ role: "system", content: cfg.system });
+          for (var i = 0; i < messages.length; i++) {
+            if (messages[i].mode === "fim") continue;
+            apiMessages.push({ role: messages[i].role, content: messages[i].content });
+          }
+          if (isPrefix) {
+            apiMessages.push({ role: "assistant", content: assistantPrefix, prefix: true });
+          }
         }
 
-        var bubble = addMessage("assistant", "");
+        var bubble = addMessage("assistant", "", requestMode);
         bubble.innerHTML = '<span class="chat-typing">' + t("thinkingText") + '</span>';
         isStreaming = true;
         sendBtn.disabled = true;
         sendBtn.textContent = t("genBtn");
 
-        var targetUrl = cfg.baseurl + "/chat/completions";
-        var url = targetUrl;
-        var bodyObj = {
-          model: cfg.model,
-          messages: apiMessages,
-          max_tokens: cfg.maxtokens,
-          temperature: cfg.temp,
-          top_p: cfg.topp,
-          stream: cfg.stream
-        };
-        if (cfg.stop) bodyObj.stop = cfg.stop.split(",").map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 16);
-        if (cfg.thinking === "disabled") bodyObj.thinking = { type: "disabled" };
-        else bodyObj.thinking = { type: "enabled" };
-        if (cfg.thinking === "enabled") bodyObj.reasoning_effort = cfg.reasoning;
-        if (cfg.respformat === "json_object") bodyObj.response_format = { type: "json_object" };
-        if (cfg.stream && cfg.streamUsage) bodyObj.stream_options = { include_usage: true };
-        if (cfg.userid) bodyObj.user_id = cfg.userid.replace(/[^a-zA-Z0-9\-_]/g, "").slice(0, 512);
+        var url = getRequestUrl(requestMode);
+        var bodyObj;
+        if (isFim) {
+          bodyObj = {
+            model: "deepseek-v4-pro",
+            prompt: text,
+            max_tokens: cfg.fimMaxTokens,
+            stream: requestStream,
+            temperature: cfg.temp,
+            top_p: cfg.topp
+          };
+          if (cfg.fimSuffix) bodyObj.suffix = cfg.fimSuffix;
+        } else {
+          bodyObj = {
+            model: cfg.model,
+            messages: apiMessages,
+            max_tokens: cfg.maxtokens,
+            stream: requestStream
+          };
+        }
+        if (cfg.stop) {
+          bodyObj.stop = cfg.stop.split(",").map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 16);
+        }
+        if (!isFim && cfg.thinking === "disabled") {
+          bodyObj.thinking = { type: "disabled" };
+          bodyObj.temperature = cfg.temp;
+          bodyObj.top_p = cfg.topp;
+        } else if (!isFim) {
+          bodyObj.thinking = { type: "enabled" };
+          bodyObj.reasoning_effort = cfg.reasoning;
+        }
+        if (!isFim && requestRespformat === "json_object") bodyObj.response_format = { type: "json_object" };
+        if (requestStream && requestUsage) bodyObj.stream_options = { include_usage: true };
+        var sanitizedUserId = cfg.userid.replace(/[^a-zA-Z0-9\-_]/g, "").slice(0, 512);
+        if (!isFim && sanitizedUserId) bodyObj.user_id = sanitizedUserId;
         var body = JSON.stringify(bodyObj);
 
         fetch(url, {
@@ -718,46 +1029,56 @@
               throw new Error("HTTP " + res.status + ": " + errText);
             });
           }
-          if (!cfg.stream) {
+          if (!requestStream) {
             return res.json().then(function (json) {
               var choice = json.choices && json.choices[0];
-              var msg = choice && choice.message;
-              var plainText = "";
-              if (msg) plainText = msg.content || "";
+              var msg = !isFim && choice && choice.message;
+              var generatedText = isFim ? ((choice && choice.text) || "") : ((msg && msg.content) || "");
+              var plainText = isPrefix ? mergeAssistantPrefix(assistantPrefix, generatedText) : generatedText;
+              var emptyJsonResult = !isFim && requestRespformat === "json_object" && !plainText.trim();
+              if (emptyJsonResult) plainText = "";
               messages[messages.length - 1].content = plainText;
               var displayText = "";
               if (msg && msg.reasoning_content) {
                 displayText += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + msg.reasoning_content.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
               }
-              displayText += plainText || t("emptyReply");
-              if (choice && choice.finish_reason === "length") {
-                displayText += '\n\n<em style="color:var(--text-faint)">⚠ ' + t("finishLength") + '</em>';
-              } else if (choice && choice.finish_reason === "content_filter") {
-                displayText += '\n\n<em style="color:#fb7185">⚠ ' + t("finishFilter") + '</em>';
-              }
-              if (json.usage) {
+              displayText += emptyJsonResult ? t("jsonEmpty") : (plainText || t("emptyReply"));
+              displayText += buildFinishWarning(choice && choice.finish_reason);
+              if (json.usage && requestUsage) {
                 updateUsageDisplay(json.usage, true);
-                displayText += '\n\n<div class="chat-usage">📊 ' + json.usage.prompt_tokens + ' in / ' + json.usage.completion_tokens + ' out / ' + json.usage.total_tokens + ' total</div>';
+                displayText += "\n\n" + buildUsageMarkup(json.usage);
               }
               isStreaming = false;
               sendBtn.disabled = false;
               sendBtn.textContent = t("sendBtn");
               bubble.className = "chat-bubble markdown-body";
               renderMarkdown(displayText, bubble, true);
+              if (emptyJsonResult || (choice && choice.finish_reason === "insufficient_system_resource")) {
+                appendRetryButton(bubble, text, requestMode);
+              }
             });
+          }
+          if (!res.body || typeof res.body.getReader !== "function") {
+            throw new Error("Streaming response body is unavailable");
           }
           var reader = res.body.getReader();
           var decoder = new TextDecoder();
-          var fullText = "";
+          var generatedText = "";
           var reasoningText = "";
           var finishReason = "";
           var usageData = null;
           var buffer = "";
-          var streamRenderFrame = 0;
+          var streamRenderTimer = 0;
           var streamFinalized = false;
+          var sawDone = false;
+          var streamParseFailed = false;
           var reasoningDetails = null;
           var reasoningContentEl = null;
           var streamBodyEl = null;
+
+          function getOutputText() {
+            return isPrefix ? mergeAssistantPrefix(assistantPrefix, generatedText) : generatedText;
+          }
 
           function ensureStreamingLayout() {
             if (streamBodyEl) return;
@@ -786,27 +1107,35 @@
               }
               reasoningContentEl.textContent = reasoningText;
             }
-            renderMarkdown(fullText, streamBodyEl, false);
+            renderMarkdown(getOutputText(), streamBodyEl, false);
           }
 
           function scheduleStreamingRender() {
-            if (streamFinalized || streamRenderFrame) return;
-            streamRenderFrame = requestAnimationFrame(function () {
-              streamRenderFrame = 0;
+            if (streamFinalized || streamRenderTimer) return;
+            var renderedSize = getOutputText().length + reasoningText.length;
+            var delay = renderedSize > 262144 ? 750
+              : renderedSize > 65536 ? 300
+              : renderedSize > 16384 ? 160
+              : 80;
+            streamRenderTimer = setTimeout(function () {
+              streamRenderTimer = 0;
               renderStreamingContent();
-            });
+            }, delay);
           }
 
-          function finalizeStream() {
+          function finalizeStream(interrupted) {
             if (streamFinalized) return;
             streamFinalized = true;
-            if (streamRenderFrame) {
-              cancelAnimationFrame(streamRenderFrame);
-              streamRenderFrame = 0;
+            if (streamRenderTimer) {
+              clearTimeout(streamRenderTimer);
+              streamRenderTimer = 0;
             }
             isStreaming = false;
             sendBtn.disabled = false;
             sendBtn.textContent = t("sendBtn");
+            var fullText = getOutputText();
+            var emptyJsonResult = !isFim && requestRespformat === "json_object" && !fullText.trim();
+            if (emptyJsonResult) fullText = "";
             if (messages.length > 0) {
               messages[messages.length - 1].content = fullText;
             }
@@ -814,82 +1143,103 @@
             if (reasoningText) {
               finalContent += '<details class="chat-reasoning"><summary>' + t("reasoning") + '</summary><div class="chat-reasoning-content">' + reasoningText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + '</div></details>\n\n';
             }
-            finalContent += fullText || t("emptyReply");
-            if (finishReason === "length") {
-              finalContent += '\n\n<em style="color:var(--text-faint)">⚠ ' + t("finishLength") + '</em>';
-            } else if (finishReason === "content_filter") {
-              finalContent += '\n\n<em style="color:#fb7185">⚠ ' + t("finishFilter") + '</em>';
+            finalContent += emptyJsonResult ? t("jsonEmpty") : (fullText || t("emptyReply"));
+            finalContent += buildFinishWarning(finishReason);
+            if (interrupted) {
+              finalContent += '\n\n<em style="color:#fb7185">⚠ ' + t("streamInterrupted") + "</em>";
             }
-            if (usageData) {
+            if (usageData && requestUsage) {
               updateUsageDisplay(usageData, true);
-              finalContent += '\n\n<div class="chat-usage">📊 ' + usageData.prompt_tokens + ' in / ' + usageData.completion_tokens + ' out / ' + usageData.total_tokens + ' total</div>';
+              finalContent += "\n\n" + buildUsageMarkup(usageData);
             }
             bubble.className = "chat-bubble markdown-body";
             renderMarkdown(finalContent, bubble, true);
+            if (emptyJsonResult || interrupted || finishReason === "insufficient_system_resource") {
+              appendRetryButton(bubble, text, requestMode);
+            }
+          }
+
+          function processSseLine(rawLine) {
+            var line = rawLine.trim();
+            if (!line || !line.startsWith("data:")) return false;
+            var data = line.slice(5).trim();
+            if (data === "[DONE]") {
+              sawDone = true;
+              return true;
+            }
+            try {
+              var json = JSON.parse(data);
+              if (json.error) {
+                streamParseFailed = true;
+                return false;
+              }
+              if (json.usage) {
+                usageData = json.usage;
+              }
+              if (json.choices && json.choices.length === 0) {
+                return false;
+              }
+              var choice = json.choices && json.choices[0];
+              if (choice && choice.finish_reason) {
+                finishReason = choice.finish_reason;
+              }
+              var receivedContent = false;
+              if (isFim) {
+                if (choice && choice.text) {
+                  generatedText += choice.text;
+                  receivedContent = true;
+                }
+              } else {
+                var delta = choice && choice.delta;
+                if (delta) {
+                  if (delta.reasoning_content) {
+                    reasoningText += delta.reasoning_content;
+                    receivedContent = true;
+                  }
+                  if (delta.content) {
+                    generatedText += delta.content;
+                    receivedContent = true;
+                  }
+                }
+              }
+              if (receivedContent) {
+                scheduleStreamingRender();
+              }
+            } catch (e) {
+              streamParseFailed = true;
+            }
+            return false;
+          }
+
+          function processBufferedLines(flushRemainder) {
+            var lines = buffer.split("\n");
+            if (flushRemainder) {
+              buffer = "";
+            } else {
+              buffer = lines.pop();
+            }
+            for (var i = 0; i < lines.length; i++) {
+              if (processSseLine(lines[i])) return true;
+            }
+            return false;
           }
 
           function readChunk() {
             reader.read().then(function (chunk) {
               if (chunk.done) {
-                finalizeStream();
+                buffer += decoder.decode();
+                processBufferedLines(true);
+                finalizeStream(!sawDone || streamParseFailed);
                 return;
               }
               buffer += decoder.decode(chunk.value, { stream: true });
-              var lines = buffer.split("\n");
-              buffer = lines.pop();
-              var receivedDone = false;
-
-              for (var i = 0; i < lines.length; i++) {
-                var line = lines[i].trim();
-                if (!line || !line.startsWith("data:")) continue;
-                var data = line.slice(5).trim();
-                if (data === "[DONE]") {
-                  receivedDone = true;
-                  break;
-                }
-                try {
-                  var json = JSON.parse(data);
-                  if (json.choices && json.choices.length === 0) {
-                    if (json.usage) {
-                      usageData = json.usage;
-                    }
-                    continue;
-                  }
-                  var choice = json.choices && json.choices[0];
-                  if (choice && choice.finish_reason) {
-                    finishReason = choice.finish_reason;
-                  }
-                  var delta = choice && choice.delta;
-                  if (delta) {
-                    if (delta.reasoning_content) {
-                      reasoningText += delta.reasoning_content;
-                    }
-                    if (delta.content) {
-                      fullText += delta.content;
-                    }
-                  }
-                  if (delta && (delta.reasoning_content || delta.content)) {
-                    scheduleStreamingRender();
-                  }
-                } catch (e) {}
-              }
-              if (receivedDone) {
-                finalizeStream();
+              if (processBufferedLines(false)) {
+                finalizeStream(streamParseFailed);
                 return;
               }
               readChunk();
-            }).catch(function (err) {
-              streamFinalized = true;
-              if (streamRenderFrame) {
-                cancelAnimationFrame(streamRenderFrame);
-                streamRenderFrame = 0;
-              }
-              isStreaming = false;
-              sendBtn.disabled = false;
-              sendBtn.textContent = t("sendBtn");
-              bubble.className = "chat-bubble";
-              bubble.innerHTML = '<span class="chat-error">' + t("reqFailed") + (err.message || err) + "</span>";
-              messages.pop();
+            }).catch(function () {
+              finalizeStream(true);
             });
           }
           readChunk();
