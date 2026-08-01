@@ -3600,7 +3600,7 @@ T make3() {
 
 ---
 
-# 33. vector<bool>
+# 33. `vector<bool>`
 
 `std::vector<bool>` 是标准库对 bool 的特殊化。
 

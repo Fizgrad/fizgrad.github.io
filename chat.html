@@ -37,9 +37,9 @@
   <header class="nav scrolled">
     <a href="./" class="nav-logo">&lt;fizgrad/&gt;</a>
     <nav class="nav-links">
-      <a href="./"><span class="nav-back-full">← 主页 / Home</span><span class="nav-back-short">←</span></a>
+      <a href="./" data-i18n-aria="homeAria" aria-label="返回主页"><span class="nav-back-full" data-i18n="home">← 主页</span><span class="nav-back-short" aria-hidden="true">←</span></a>
       <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
-      <button id="chat-settings-toggle" class="lang-btn" type="button" aria-label="Toggle settings" data-i18n="settings">设置</button>
+      <button id="chat-settings-toggle" class="lang-btn" type="button" data-i18n="settings" data-i18n-aria="settingsToggleAria" aria-label="打开或关闭设置">设置</button>
     </nav>
   </header>
 
@@ -58,13 +58,13 @@
         <span data-i18n="completionMode">对话模式</span>
         <select id="cfg-mode" class="chat-select">
           <option value="chat" data-i18n="modeChat">普通聊天</option>
-          <option value="prefix" data-i18n="modePrefix">Prefix Completion (Beta)</option>
-          <option value="fim" data-i18n="modeFim">FIM Completion (Beta)</option>
+          <option value="prefix" data-i18n="modePrefix">前缀续写（Beta）</option>
+          <option value="fim" data-i18n="modeFim">中间填充（Beta）</option>
         </select>
       </label>
       <p class="chat-settings-hint" id="mode-hint" data-i18n="modeChatHint">使用标准 /chat/completions 接口。</p>
       <label class="chat-field" id="model-field">
-        <span data-i18n="modelId">Model ID</span>
+        <span data-i18n="modelId">模型 ID</span>
         <select id="cfg-model-select" class="chat-select">
           <option value="deepseek-v4-pro">deepseek-v4-pro</option>
           <option value="deepseek-v4-flash">deepseek-v4-flash</option>
@@ -73,19 +73,19 @@
         <input type="text" id="cfg-model-custom" class="chat-field-input-hidden" data-i18n-ph="customModelPh" placeholder="输入自定义 Model ID" spellcheck="false" />
       </label>
       <label class="chat-field" id="system-field">
-        <span data-i18n="systemPrompt">System Prompt</span>
+        <span data-i18n="systemPrompt">系统提示词</span>
         <textarea id="cfg-system" rows="3" placeholder="You are a helpful assistant." spellcheck="false"></textarea>
       </label>
       <label class="chat-field chat-mode-field" id="prefix-field" hidden>
-        <span data-i18n="assistantPrefix">Assistant Prefix</span>
+        <span data-i18n="assistantPrefix">助手前缀</span>
         <textarea id="cfg-prefix" rows="3" data-i18n-ph="assistantPrefixPh" placeholder="```python&#10;" spellcheck="false"></textarea>
       </label>
       <p class="chat-settings-hint chat-mode-field" id="prefix-hint" data-i18n="prefixHint" hidden>模型将从此前缀后继续生成；请求自动使用 Beta 接口。</p>
       <label class="chat-field chat-mode-field" id="fim-suffix-field" hidden>
-        <span data-i18n="fimSuffix">FIM Suffix（可选）</span>
+        <span data-i18n="fimSuffix">FIM 后缀（可选）</span>
         <textarea id="cfg-fim-suffix" rows="3" data-i18n-ph="fimSuffixPh" placeholder="补全内容之后的代码或文本" spellcheck="false"></textarea>
       </label>
-      <p class="chat-settings-hint chat-mode-field" id="fim-hint" data-i18n="fimHint" hidden>聊天输入框作为 Prompt；FIM 固定使用 deepseek-v4-pro 和 Beta 接口。</p>
+      <p class="chat-settings-hint chat-mode-field" id="fim-hint" data-i18n="fimHint" hidden>聊天输入框作为前缀；FIM 固定使用 deepseek-v4-pro 和 Beta 接口。</p>
       <label class="chat-field" id="thinking-field">
         <span data-i18n="thinking">思考模式</span>
         <select id="cfg-thinking" class="chat-select">
@@ -95,7 +95,7 @@
       </label>
       <div id="sampling-params">
         <label class="chat-field">
-          <span><span data-i18n="labelTemp">Temperature</span> <b id="temp-val">1.0</b></span>
+          <span><span data-i18n="labelTemp">温度</span> <b id="temp-val">1.0</b></span>
           <input type="range" id="cfg-temp" min="0" max="2" step="0.1" value="1.0" />
         </label>
         <p class="chat-disabled-hint" id="temp-disabled-hint" data-i18n="thinkingIgnoresHint" hidden>⚠ 思考模式下此参数不生效</p>
@@ -106,19 +106,19 @@
         <p class="chat-disabled-hint" id="topp-disabled-hint" data-i18n="thinkingIgnoresHint" hidden>⚠ 思考模式下此参数不生效</p>
       </div>
       <label class="chat-field">
-        <span data-i18n="maxTokens">Max Tokens</span>
+        <span data-i18n="maxTokens">最大输出 Token</span>
         <input type="number" id="cfg-maxtokens" value="4096" min="1" max="384000" />
       </label>
       <p class="chat-settings-hint" id="max-tokens-hint" data-i18n="maxTokensHint">DeepSeek V4 最大输出为 384K Token；长输出会自动降低实时排版刷新频率。</p>
       <label class="chat-field">
-        <span data-i18n="labelStop">Stop</span>
+        <span data-i18n="labelStop">停止词</span>
         <input type="text" id="cfg-stop" data-i18n-ph="stopPh" placeholder="逗号分隔, 可选" spellcheck="false" />
       </label>
       <label class="chat-field" id="reasoning-field">
         <span data-i18n="reasoningEffort">推理强度</span>
         <select id="cfg-reasoning" class="chat-select">
           <option value="low">low</option>
-          <option value="high" data-i18n="reasoningHigh">high (默认)</option>
+          <option value="high" data-i18n="reasoningHigh">high（默认）</option>
           <option value="max">max</option>
         </select>
       </label>
@@ -131,7 +131,7 @@
         </select>
       </label>
       <label class="chat-field chat-field-check">
-        <span data-i18n="streamLabel">Stream 流式输出</span>
+        <span data-i18n="streamLabel">流式输出</span>
         <input type="checkbox" id="cfg-stream" checked />
       </label>
       <label class="chat-field chat-field-check">
@@ -141,15 +141,15 @@
       <section class="chat-stats chat-usage-stats" aria-live="polite">
         <h3 class="chat-stats-title" data-i18n="latestUsage">Token 用量</h3>
         <div class="chat-stat-row">
-          <span data-i18n="usageInput">本次 Input</span>
+          <span data-i18n="usageInput">本次输入</span>
           <b id="usage-input">—</b>
         </div>
         <div class="chat-stat-row">
-          <span data-i18n="usageOutput">本次 Output</span>
+          <span data-i18n="usageOutput">本次输出</span>
           <b id="usage-output">—</b>
         </div>
         <div class="chat-stat-row">
-          <span data-i18n="usageTotal">本次 Total</span>
+          <span data-i18n="usageTotal">本次合计</span>
           <b id="usage-total">—</b>
         </div>
         <div class="chat-stat-row">
@@ -170,7 +170,7 @@
         </div>
       </section>
       <label class="chat-field" id="user-id-field">
-        <span data-i18n="userId">用户标识 (可选)</span>
+        <span data-i18n="userId">用户标识（可选）</span>
         <input type="text" id="cfg-userid" data-i18n-ph="userIdPh" placeholder="user_10001 (仅允许字母数字-_)" spellcheck="false" />
       </label>
       <p class="chat-settings-hint" id="json-hint" data-i18n="jsonHint">JSON 模式要求提示词包含“json”，并建议给出目标 JSON 示例；空结果可直接重试。</p>
@@ -195,7 +195,7 @@
 
   <footer class="footer">
     <p>&copy; <span id="year"></span> Fizgrad</p>
-    <a href="./" class="back-top">← 返回主页 / Back to home</a>
+    <a href="./" class="back-top" data-i18n="backHome">← 返回主页</a>
   </footer>
 
   <script>
@@ -218,7 +218,7 @@
           var slot = slots[i];
           var id = slot.getAttribute("data-math-id");
           var item = mathItems.get(id);
-          if (!item) { slot.textContent = "[公式数据缺失]"; continue; }
+          if (!item) { slot.textContent = t("mathMissing"); continue; }
           slot.textContent = item.display ? "\\[" + item.tex + "\\]" : "\\(" + item.tex + "\\)";
         }
       }
@@ -278,17 +278,53 @@
       }
 
       var I18N = {
-        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", completionMode: "对话模式", modeChat: "普通聊天", modePrefix: "Prefix Completion (Beta)", modeFim: "FIM Completion (Beta)", modeChatHint: "使用标准 /chat/completions 接口。", modePrefixHint: "使用 Beta /chat/completions；最后一条消息会作为 Assistant Prefix。", modeFimHint: "使用 Beta /completions；不携带聊天历史、System Prompt 或思考参数。", modelId: "Model ID", systemPrompt: "System Prompt", assistantPrefix: "Assistant Prefix", assistantPrefixPh: "例如：```python", prefixHint: "模型将从此前缀后继续生成；请求自动使用 Beta 接口。", fimSuffix: "FIM Suffix（可选）", fimSuffixPh: "补全内容之后的代码或文本", fimHint: "聊天输入框作为 Prompt；FIM 固定使用 deepseek-v4-pro 和 Beta 接口。", labelStop: "Stop", stopPh: "逗号分隔, 可选", maxTokens: "Max Tokens", maxTokensHint: "DeepSeek V4 最大输出为 384K Token；长输出会自动降低实时排版刷新频率。", fimMaxTokensHint: "FIM 官方最大输出为 4096 Token。", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "除 API Key 外，修改会自动保存到 localStorage；Key 仅保留在当前页面内存中。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮、流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", prefixInputPlaceholder: "输入请求，模型将从 Assistant Prefix 继续... (Enter 发送)", fimInputPlaceholder: "输入待补全文本的前半部分 Prompt... (Enter 发送)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启 (默认)", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high (默认)", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "Stream 流式输出", streamUsage: "显示 Token 用量统计", latestUsage: "Token 用量", usageInput: "本次 Input", usageOutput: "本次 Output", usageTotal: "本次 Total", usageCacheHit: "缓存命中", usageCacheMiss: "缓存未命中", usageReasoning: "思考 Token", usageCumulative: "会话累计", userId: "用户标识 (可选)", userIdPh: "user_10001 (仅允许字母数字-_)", emptyReply: "空回复", reqFailed: "请求失败: ", needApiKey: "请先填写 API Key。", prefixRequired: "Prefix Completion 需要填写 Assistant Prefix。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义 Model ID", jsonHint: "JSON 模式要求提示词包含“json”，并建议给出目标 JSON 示例；空结果可直接重试。", jsonPromptRequired: "JSON 模式要求 System Prompt 或当前消息中包含“json”。", jsonEmpty: "DeepSeek 返回了空的 JSON 内容。", retry: "重试", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤", finishResource: "推理资源不足，响应可能不完整，请重试", finishToolCalls: "模型请求调用工具，但当前页面未配置工具执行，响应未完成", streamInterrupted: "流式连接未收到 [DONE]，响应可能不完整", thinkingIgnoresHint: "⚠ 思考模式下此参数不生效", nonThinkingIgnoresHint: "⚠ 非思考模式下此参数不生效" },
+        zh: { title: "AI 对话 - Fizgrad", settings: "设置", apiConfig: "API 配置", labelBaseurl: "Base URL", labelApikey: "API Key", completionMode: "对话模式", modeChat: "普通聊天", modePrefix: "前缀续写（Beta）", modeFim: "中间填充（Beta）", modeChatHint: "使用标准 /chat/completions 接口。", modePrefixHint: "使用 Beta /chat/completions；最后一条消息会作为助手前缀。", modeFimHint: "使用 Beta /completions；不携带聊天历史、系统提示词或思考参数。", modelId: "模型 ID", systemPrompt: "系统提示词", assistantPrefix: "助手前缀", assistantPrefixPh: "例如：```python", prefixHint: "模型将从此前缀后继续生成；请求自动使用 Beta 接口。", fimSuffix: "FIM 后缀（可选）", fimSuffixPh: "补全内容之后的代码或文本", fimHint: "聊天输入框作为前缀；FIM 固定使用 deepseek-v4-pro 和 Beta 接口。", labelStop: "停止词", stopPh: "逗号分隔，可选", maxTokens: "最大输出 Token", maxTokensHint: "DeepSeek V4 最大输出为 384K Token；长输出会自动降低实时排版刷新频率。", fimMaxTokensHint: "FIM 官方最大输出为 4096 Token。", labelTemp: "温度", labelTopp: "Top P", clearChat: "清空对话", cfgHint: "除 API Key 外，修改会自动保存到 localStorage；Key 仅保留在当前页面内存中。", emptyMsg: "配置好 API 后开始对话吧。", emptySub: "支持 Markdown 渲染、代码高亮和流式输出。", inputPlaceholder: "输入消息... (Enter 发送, Shift+Enter 换行)", prefixInputPlaceholder: "输入请求，模型将从助手前缀继续... (Enter 发送)", fimInputPlaceholder: "输入待补全文本的前半部分... (Enter 发送)", send: "发送", cleared: "对话已清空。", thinkingText: "思考中...", thinking: "思考模式", thinkingOn: "开启（默认）", thinkingOff: "关闭", reasoningEffort: "推理强度", reasoningHigh: "high（默认）", responseFormat: "输出格式", respText: "普通文本", respJson: "JSON", streamLabel: "流式输出", streamUsage: "显示 Token 用量统计", latestUsage: "Token 用量", usageInput: "本次输入", usageOutput: "本次输出", usageTotal: "本次合计", usageCacheHit: "缓存命中", usageCacheMiss: "缓存未命中", usageReasoning: "思考 Token", usageCumulative: "会话累计", userId: "用户标识（可选）", userIdPh: "user_10001（仅允许字母、数字、-、_）", emptyReply: "空回复", reqFailed: "请求失败：", needApiKey: "请先填写 API Key。", prefixRequired: "前缀续写需要填写助手前缀。", sendBtn: "发送", genBtn: "生成中", you: "你", modelCustom: "自定义...", customModelPh: "输入自定义模型 ID", jsonHint: "JSON 模式要求提示词包含“json”，并建议给出目标 JSON 示例；空结果可直接重试。", jsonPromptRequired: "JSON 模式要求系统提示词或当前消息中包含“json”。", jsonEmpty: "DeepSeek 返回了空的 JSON 内容。", retry: "重试", reasoning: "思考过程", finishLength: "回复因达到最大 Token 数被截断", finishFilter: "回复因内容安全被过滤", finishResource: "推理资源不足，响应可能不完整，请重试", finishToolCalls: "模型请求调用工具，但当前页面未配置工具执行，响应未完成", streamInterrupted: "流式连接未收到 [DONE]，响应可能不完整", thinkingIgnoresHint: "⚠ 思考模式下此参数不生效", nonThinkingIgnoresHint: "⚠ 非思考模式下此参数不生效" },
         en: { title: "AI Chat - Fizgrad", settings: "Settings", apiConfig: "API Config", labelBaseurl: "Base URL", labelApikey: "API Key", completionMode: "Completion Mode", modeChat: "Chat", modePrefix: "Prefix Completion (Beta)", modeFim: "FIM Completion (Beta)", modeChatHint: "Uses the standard /chat/completions endpoint.", modePrefixHint: "Uses Beta /chat/completions; the final message is sent as the Assistant Prefix.", modeFimHint: "Uses Beta /completions without chat history, System Prompt, or thinking parameters.", modelId: "Model ID", systemPrompt: "System Prompt", assistantPrefix: "Assistant Prefix", assistantPrefixPh: "Example: ```python", prefixHint: "The model continues after this prefix; the Beta endpoint is selected automatically.", fimSuffix: "FIM Suffix (optional)", fimSuffixPh: "Code or text that follows the missing content", fimHint: "The chat input is the Prompt; FIM always uses deepseek-v4-pro and the Beta endpoint.", labelStop: "Stop", stopPh: "Comma-separated, optional", maxTokens: "Max Tokens", maxTokensHint: "DeepSeek V4 supports up to 384K output tokens; live formatting refreshes less often for long output.", fimMaxTokensHint: "The official FIM output maximum is 4096 tokens.", labelTemp: "Temperature", labelTopp: "Top P", clearChat: "Clear Chat", cfgHint: "Changes except the API Key are saved to localStorage; the Key stays in this page's memory only.", emptyMsg: "Configure your API and start chatting.", emptySub: "Supports Markdown rendering, code highlighting, streaming.", inputPlaceholder: "Type a message... (Enter to send, Shift+Enter for newline)", prefixInputPlaceholder: "Enter a request; the model continues from Assistant Prefix... (Enter to send)", fimInputPlaceholder: "Enter the beginning Prompt to fill... (Enter to send)", send: "Send", cleared: "Chat cleared.", thinkingText: "Thinking...", thinking: "Thinking Mode", thinkingOn: "On (default)", thinkingOff: "Off", reasoningEffort: "Reasoning Effort", reasoningHigh: "high (default)", responseFormat: "Response Format", respText: "Text", respJson: "JSON", streamLabel: "Stream", streamUsage: "Show Token Usage", latestUsage: "Token Usage", usageInput: "Latest Input", usageOutput: "Latest Output", usageTotal: "Latest Total", usageCacheHit: "Cache Hit", usageCacheMiss: "Cache Miss", usageReasoning: "Reasoning Tokens", usageCumulative: "Session Total", userId: "User ID (optional)", userIdPh: "user_10001 (alphanumeric, -, _ only)", emptyReply: "Empty reply", reqFailed: "Request failed: ", needApiKey: "Please enter your API Key.", prefixRequired: "Prefix Completion requires an Assistant Prefix.", sendBtn: "Send", genBtn: "Generating", you: "You", modelCustom: "Custom...", customModelPh: "Enter custom Model ID", jsonHint: "JSON mode requires the word “json” in the prompt; a target JSON example is recommended. Empty results can be retried.", jsonPromptRequired: "JSON mode requires the word “json” in the System Prompt or current message.", jsonEmpty: "DeepSeek returned empty JSON content.", retry: "Retry", reasoning: "Reasoning", finishLength: "Response truncated due to max token limit", finishFilter: "Response filtered due to content safety", finishResource: "Insufficient inference resources; the response may be incomplete. Please retry", finishToolCalls: "The model requested a tool call, but this page has no tool executor configured", streamInterrupted: "The stream ended without [DONE]; the response may be incomplete", thinkingIgnoresHint: "⚠ Ignored in thinking mode", nonThinkingIgnoresHint: "⚠ Ignored without thinking mode" },
       };
+      Object.assign(I18N.zh, {
+        lang: "zh-CN", home: "← 主页", homeAria: "返回主页", backHome: "← 返回主页", settingsToggleAria: "打开或关闭设置",
+        mathMissing: "[公式数据缺失]", copy: "复制", copied: "已复制", copyFailed: "复制失败", zoomIn: "放大图表", zoomOut: "缩小图表", expandCode: "展开（共 {lines} 行）", collapseCode: "收起"
+      });
+      Object.assign(I18N.en, {
+        lang: "en", home: "← Home", homeAria: "Back to home", backHome: "← Back to home", settingsToggleAria: "Toggle settings",
+        mathMissing: "[Missing formula data]", copy: "Copy", copied: "Copied!", copyFailed: "Failed", zoomIn: "Zoom in", zoomOut: "Zoom out",
+        expandCode: "Expand ({lines} lines)", collapseCode: "Collapse"
+      });
       var lang = (function () {
-        var stored = localStorage.getItem("lang");
-        if (stored === "en" || stored === "zh") return stored;
+        try {
+          var stored = localStorage.getItem("lang");
+          if (stored === "en" || stored === "zh") return stored;
+        } catch (e) {}
         return (navigator.language || "zh").toLowerCase().indexOf("en") === 0 ? "en" : "zh";
       })();
       function t(key) { return I18N[lang][key] || key; }
+
+      function updateCodeExpandButton(btn) {
+        var wrapper = btn.closest(".code-block-wrapper");
+        var lines = btn.dataset.lines || "";
+        btn.textContent = wrapper && wrapper.dataset.expanded === "true"
+          ? t("collapseCode")
+          : t("expandCode").replace("{lines}", lines);
+      }
+
+      function updateDynamicLabels() {
+        document.querySelectorAll("#chat-messages .copy-btn").forEach(function (btn) {
+          btn.textContent = t("copy");
+          btn.setAttribute("aria-label", t("copy"));
+        });
+        document.querySelectorAll("#chat-messages .code-expand-btn").forEach(updateCodeExpandButton);
+        document.querySelectorAll("#chat-messages .mermaid-zoom-btn[data-zoom]").forEach(function (btn) {
+          btn.setAttribute("aria-label", t(btn.dataset.zoom === "in" ? "zoomIn" : "zoomOut"));
+        });
+        document.querySelectorAll("#chat-messages .chat-reasoning summary").forEach(function (summary) { summary.textContent = t("reasoning"); });
+        document.querySelectorAll('[data-chat-role="user"]').forEach(function (avatar) { avatar.textContent = t("you"); });
+        var sendControl = document.getElementById("chat-send");
+        if (sendControl && sendControl.disabled) sendControl.textContent = t("genBtn");
+      }
+
       function applyI18n() {
         document.title = (I18N[lang].title || "AI 对话 - Fizgrad");
+        document.documentElement.lang = t("lang");
         document.querySelectorAll("[data-i18n]").forEach(function (el) {
           var key = el.getAttribute("data-i18n");
           if (I18N[lang][key]) el.textContent = I18N[lang][key];
@@ -297,6 +333,10 @@
           var key = el.getAttribute("data-i18n-ph");
           if (I18N[lang][key]) el.placeholder = I18N[lang][key];
         });
+        document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+          var key = el.getAttribute("data-i18n-aria");
+          if (I18N[lang][key]) el.setAttribute("aria-label", I18N[lang][key]);
+        });
         var customOpt = document.querySelector("#cfg-model-select option[data-i18n]");
         if (customOpt) customOpt.textContent = I18N[lang].modelCustom || "Custom...";
         var btn = document.getElementById("lang-toggle");
@@ -304,11 +344,12 @@
           btn.textContent = lang === "zh" ? "EN" : "中";
           btn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
         }
+        updateDynamicLabels();
       }
       applyI18n();
       document.getElementById("lang-toggle").addEventListener("click", function () {
         lang = lang === "zh" ? "en" : "zh";
-        localStorage.setItem("lang", lang);
+        try { localStorage.setItem("lang", lang); } catch (e) {}
         applyI18n();
       });
 
@@ -748,16 +789,18 @@
             }
             var zoomIn = document.createElement("button");
             zoomIn.className = "mermaid-zoom-btn";
+            zoomIn.dataset.zoom = "in";
             zoomIn.textContent = "+";
-            zoomIn.setAttribute("aria-label", "Zoom in");
+            zoomIn.setAttribute("aria-label", t("zoomIn"));
             zoomIn.addEventListener("click", function () {
               scale = Math.min(scale + 0.1, 3);
               applyMermaidZoom();
             });
             var zoomOut = document.createElement("button");
             zoomOut.className = "mermaid-zoom-btn";
+            zoomOut.dataset.zoom = "out";
             zoomOut.textContent = "\u2212";
-            zoomOut.setAttribute("aria-label", "Zoom out");
+            zoomOut.setAttribute("aria-label", t("zoomOut"));
             zoomOut.addEventListener("click", function () {
               scale = Math.max(scale - 0.1, 0.5);
               applyMermaidZoom();
@@ -807,21 +850,22 @@
           if (pre.querySelector(".copy-btn")) return;
           var btn = document.createElement("button");
           btn.className = "copy-btn";
-          btn.textContent = "Copy";
+          btn.textContent = t("copy");
+          btn.setAttribute("aria-label", t("copy"));
           btn.addEventListener("click", function () {
             var code = pre.querySelector("code");
             var text = code ? code.textContent : "";
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(text).then(function () {
-                btn.textContent = "Copied!";
-                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                btn.textContent = t("copied");
+                setTimeout(function () { btn.textContent = t("copy"); }, 1500);
               }).catch(function () {
-                btn.textContent = "Failed";
-                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                btn.textContent = t("copyFailed");
+                setTimeout(function () { btn.textContent = t("copy"); }, 1500);
               });
             } else {
-              btn.textContent = "Failed";
-              setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+              btn.textContent = t("copyFailed");
+              setTimeout(function () { btn.textContent = t("copy"); }, 1500);
             }
           });
           pre.appendChild(btn);
@@ -842,15 +886,11 @@
           if (existingBtn) wrapper.appendChild(existingBtn);
           var expandBtn = document.createElement("button");
           expandBtn.className = "code-expand-btn";
-          expandBtn.textContent = "展开 (共 " + lines + " 行)";
+          expandBtn.dataset.lines = String(lines);
+          updateCodeExpandButton(expandBtn);
           expandBtn.addEventListener("click", function () {
-            if (wrapper.dataset.expanded === "true") {
-              wrapper.dataset.expanded = "false";
-              expandBtn.textContent = "展开 (共 " + lines + " 行)";
-            } else {
-              wrapper.dataset.expanded = "true";
-              expandBtn.textContent = "收起";
-            }
+            wrapper.dataset.expanded = wrapper.dataset.expanded === "true" ? "false" : "true";
+            updateCodeExpandButton(expandBtn);
           });
           wrapper.appendChild(expandBtn);
         });
@@ -863,6 +903,7 @@
 
         var avatar = document.createElement("div");
         avatar.className = "chat-avatar";
+        avatar.dataset.chatRole = role;
         avatar.textContent = role === "user" ? t("you") : "AI";
 
         var bubble = document.createElement("div");
@@ -891,6 +932,7 @@
         var button = document.createElement("button");
         button.type = "button";
         button.className = "chat-retry-btn";
+        button.dataset.i18n = "retry";
         button.textContent = t("retry");
         button.addEventListener("click", function () {
           if (isStreaming) return;
@@ -939,7 +981,13 @@
 
       function clearChat() {
         messages = [];
-        messagesEl.innerHTML = '<div class="chat-empty"><p>' + t("cleared") + '</p></div>';
+        var empty = document.createElement("div");
+        empty.className = "chat-empty";
+        var message = document.createElement("p");
+        message.dataset.i18n = "cleared";
+        message.textContent = t("cleared");
+        empty.appendChild(message);
+        messagesEl.replaceChildren(empty);
         cumulativeUsageTotal = 0;
         updateUsageDisplay(null, false);
       }
@@ -1019,7 +1067,11 @@
         }
 
         var bubble = addMessage("assistant", "", requestMode);
-        bubble.innerHTML = '<span class="chat-typing">' + t("thinkingText") + '</span>';
+        var typing = document.createElement("span");
+        typing.className = "chat-typing";
+        typing.dataset.i18n = "thinkingText";
+        typing.textContent = t("thinkingText");
+        bubble.replaceChildren(typing);
         isStreaming = true;
         sendBtn.disabled = true;
         sendBtn.textContent = t("genBtn");
@@ -1143,6 +1195,7 @@
                 reasoningDetails.className = "chat-reasoning";
                 reasoningDetails.open = true;
                 var reasoningSummary = document.createElement("summary");
+                reasoningSummary.dataset.i18n = "reasoning";
                 reasoningSummary.textContent = t("reasoning");
                 reasoningContentEl = document.createElement("div");
                 reasoningContentEl.className = "chat-reasoning-content";

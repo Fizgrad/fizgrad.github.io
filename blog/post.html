@@ -8,12 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.9.0/github-markdown-dark.css" integrity="sha384-nlth4oyFjBlAziFH2oypWWsE00W7j/6uVR4/Fz1++oPhaqeF8LujWsaX3ChXZw/1" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="../assets/css/style.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" />
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js" integrity="sha384-piCcpDdJ7qVeK4Tv8Z6Hpcr3ZBIgP16TxQTPVfsLFdZ5uDgwc3Y8Ho7oUnqf12qu" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" integrity="sha384-2NndlFAl0twi2nmu3w9mixodZFiN2fbxlakcYJF86bn1JeS1VB87/XqA7cqymzS+" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js" integrity="sha384-T/0lMUdJpd2S1ZHtRiofG3htU3xPCrFVeAQ1UUE2TJwlEJSV5NUwn30kP28n238E" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>
     window.MathJax = {
       startup: { typeset: false },
@@ -28,7 +29,7 @@
       }
     };
   </script>
-  <script id="MathJax-script" defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
+  <script id="MathJax-script" defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js" integrity="sha384-Wuix6BuhrWbjDBs24bXrjf4ZQ5aFeFWBuKkFekO2t8xFU0iNaLQfp2K6/1Nxveei" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
   <div class="grid-overlay" aria-hidden="true"></div>
@@ -36,7 +37,7 @@
   <header class="nav scrolled">
     <a href="../" class="nav-logo">&lt;fizgrad/&gt;</a>
     <nav class="nav-links">
-      <a href="../"><span class="nav-back-full">← 主页 / Home</span><span class="nav-back-short">←</span></a>
+      <a href="../" data-i18n-aria="homeAria" aria-label="返回主页"><span class="nav-back-full" data-i18n="home">← 主页</span><span class="nav-back-short" aria-hidden="true">←</span></a>
       <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
     </nav>
   </header>
@@ -44,11 +45,11 @@
   <main id="main" class="post-page">
     <div class="post-layout">
       <article class="markdown-body post-wrap post-main" id="post-content">
-        <p class="post-loading">加载中 / Loading...</p>
+        <p class="post-loading" data-i18n="loading">加载中...</p>
       </article>
 
       <aside class="toc-sidebar" id="toc-sidebar">
-        <div class="toc-title">目录/TOC</div>
+        <div class="toc-title" data-i18n="tocTitle">目录</div>
         <div class="toc-progress"><div class="toc-progress-bar" id="toc-progress-bar"></div></div>
         <ul class="toc-nav" id="toc-nav"></ul>
       </aside>
@@ -56,8 +57,8 @@
   </main>
 
   <footer class="footer">
-    <p>&copy; <span id="year"></span> Fizgrad · Built with GLM-5.2</p>
-    <a href="../" class="back-top">← 返回主页 / Back to home</a>
+    <p>&copy; <span id="year"></span> Fizgrad · <span data-i18n="footerBuilt">使用 GLM-5.2 构建</span></p>
+    <a href="../" class="back-top" data-i18n="backHome">← 返回主页</a>
   </footer>
 
   <script>
@@ -78,7 +79,7 @@
           var slot = slots[i];
           var id = slot.getAttribute("data-math-id");
           var item = mathItems.get(id);
-          if (!item) { slot.textContent = "[公式数据缺失]"; continue; }
+          if (!item) { slot.textContent = t("mathMissing"); continue; }
           slot.textContent = item.display ? "\\[" + item.tex + "\\]" : "\\(" + item.tex + "\\)";
         }
       }
@@ -138,53 +139,132 @@
           markedReady = false;
         }
       }
+      var sanitizerReady = typeof DOMPurify !== "undefined"
+        && typeof DOMPurify.sanitize === "function"
+        && DOMPurify.isSupported !== false;
+
+      var I18N = {
+        zh: {
+          lang: "zh-CN", blogTitle: "博客", home: "← 主页", homeAria: "返回主页",
+          tocTitle: "目录", footerBuilt: "使用 GLM-5.2 构建", backHome: "← 返回主页",
+          loading: "加载中...", notFound: "未找到文章", loadFailed: "文章加载失败",
+          copy: "复制", copied: "已复制", copyFailed: "复制失败",
+          zoomIn: "放大图表", zoomOut: "缩小图表", expandCode: "展开（共 {lines} 行）", collapseCode: "收起",
+          expandSection: "展开本节", collapseSection: "收起本节", headingAnchor: "链接到本节：",
+          mathMissing: "[公式数据缺失]"
+        },
+        en: {
+          lang: "en", blogTitle: "Blog", home: "← Home", homeAria: "Back to home",
+          tocTitle: "Contents", footerBuilt: "Built with GLM-5.2", backHome: "← Back to home",
+          loading: "Loading...", notFound: "Post not found", loadFailed: "Failed to load post",
+          copy: "Copy", copied: "Copied!", copyFailed: "Failed",
+          zoomIn: "Zoom in", zoomOut: "Zoom out", expandCode: "Expand ({lines} lines)", collapseCode: "Collapse",
+          expandSection: "Expand section", collapseSection: "Collapse section", headingAnchor: "Link to section: ",
+          mathMissing: "[Missing formula data]"
+        }
+      };
 
       var params = new URLSearchParams(window.location.search);
       var slug = params.get("slug");
       var currentPost = null;
       var lang = (function () {
-        var stored = localStorage.getItem("lang");
-        if (stored === "en" || stored === "zh") return stored;
+        try {
+          var stored = localStorage.getItem("lang");
+          if (stored === "en" || stored === "zh") return stored;
+        } catch (e) {}
         return (navigator.language || "zh").toLowerCase().indexOf("en") === 0 ? "en" : "zh";
       })();
 
+      function t(key) { return I18N[lang][key] || key; }
+
       function updateTitle() {
-        var title = currentPost ? (lang === "en" ? (currentPost.titleEn || currentPost.title) : currentPost.title) : "博客";
+        var title = currentPost ? (lang === "en" ? (currentPost.titleEn || currentPost.title) : currentPost.title) : t("blogTitle");
         document.title = title + " - Fizgrad";
       }
 
-      function updateLangBtn() {
+      function updateCodeExpandButton(btn) {
+        var wrapper = btn.closest(".code-block-wrapper");
+        var lines = btn.dataset.lines || "";
+        btn.textContent = wrapper && wrapper.dataset.expanded === "true"
+          ? t("collapseCode")
+          : t("expandCode").replace("{lines}", lines);
+      }
+
+      function updateDynamicLabels() {
+        document.querySelectorAll("#post-content .copy-btn").forEach(function (btn) {
+          btn.textContent = t("copy");
+          btn.setAttribute("aria-label", t("copy"));
+        });
+        document.querySelectorAll("#post-content .code-expand-btn").forEach(updateCodeExpandButton);
+        document.querySelectorAll("#post-content .mermaid-zoom-btn[data-zoom]").forEach(function (btn) {
+          btn.setAttribute("aria-label", t(btn.dataset.zoom === "in" ? "zoomIn" : "zoomOut"));
+        });
+        document.querySelectorAll("#post-content .section-toggle").forEach(function (btn) {
+          var collapsed = btn.parentElement.classList.contains("collapsed");
+          btn.setAttribute("aria-label", t(collapsed ? "expandSection" : "collapseSection"));
+          btn.setAttribute("aria-expanded", String(!collapsed));
+        });
+        document.querySelectorAll("#post-content .heading-anchor").forEach(function (link) {
+          link.setAttribute("aria-label", t("headingAnchor") + (link.dataset.headingText || ""));
+        });
+      }
+
+      function applyI18n() {
+        document.documentElement.lang = t("lang");
+        updateTitle();
+        document.querySelectorAll("[data-i18n]").forEach(function (el) {
+          var value = I18N[lang][el.getAttribute("data-i18n")];
+          if (value) el.textContent = value;
+        });
+        document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+          var value = I18N[lang][el.getAttribute("data-i18n-aria")];
+          if (value) el.setAttribute("aria-label", value);
+        });
         var btn = document.getElementById("lang-toggle");
-        if (btn) {
-          btn.textContent = lang === "zh" ? "EN" : "中";
-          btn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
-        }
+        btn.textContent = lang === "zh" ? "EN" : "中";
+        btn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
+        updateDynamicLabels();
+      }
+
+      function showPostStatus(key) {
+        var container = document.getElementById("post-content");
+        var status = document.createElement("p");
+        status.className = "post-loading";
+        status.setAttribute("data-i18n", key);
+        status.textContent = t(key);
+        container.replaceChildren(status);
       }
 
       document.getElementById("year").textContent = new Date().getFullYear();
-      updateLangBtn();
+      applyI18n();
 
       document.getElementById("lang-toggle").addEventListener("click", function () {
         lang = lang === "zh" ? "en" : "zh";
-        updateTitle();
-        updateLangBtn();
-        localStorage.setItem("lang", lang);
+        try { localStorage.setItem("lang", lang); } catch (e) {}
+        applyI18n();
       });
 
       if (!slug) {
-        document.getElementById("post-content").innerHTML = '<p class="post-loading">没有找到文章 / Post not found</p>';
+        showPostStatus("notFound");
         return;
       }
 
       fetch("posts.json")
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (!r.ok) throw new Error("Failed to load post index");
+          return r.json();
+        })
         .then(function (posts) {
+          if (!Array.isArray(posts)) throw new Error("Invalid post index");
           var post = posts.find(function (p) { return p.slug === slug; });
-          if (post) {
-            currentPost = post;
-            updateTitle();
+          if (!post) {
+            var notFoundError = new Error("Post not found");
+            notFoundError.code = "POST_NOT_FOUND";
+            throw notFoundError;
           }
-          return fetch(slug + ".md");
+          currentPost = post;
+          applyI18n();
+          return fetch(encodeURIComponent(post.slug) + ".md");
         })
         .then(function (r) {
           if (!r.ok) throw new Error("Not found");
@@ -192,14 +272,22 @@
         })
         .then(function (md) {
           var container = document.getElementById("post-content");
-          if (markedReady) {
+          if (markedReady && sanitizerReady) {
             mathItems.clear();
             mathSeq = 0;
             var html = marked.parse(md);
-            container.innerHTML = html;
+            var safeHtml = DOMPurify.sanitize(html, {
+              USE_PROFILES: { html: true },
+              SANITIZE_NAMED_PROPS: true,
+              FORBID_TAGS: ["base", "button", "embed", "form", "iframe", "input", "link", "meta", "object", "option", "select", "style", "textarea"],
+              FORBID_ATTR: ["srcdoc", "style"]
+            });
+            container.innerHTML = safeHtml;
             hydrateMathSlots(container);
           } else {
-            container.innerHTML = "<pre>" + md.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</pre>";
+            var pre = document.createElement("pre");
+            pre.textContent = md;
+            container.replaceChildren(pre);
             return;
           }
           if (typeof hljs !== "undefined") {
@@ -219,28 +307,29 @@
             if (pre.querySelector(".copy-btn")) return;
             var btn = document.createElement("button");
             btn.className = "copy-btn";
-            btn.textContent = "Copy";
+            btn.textContent = t("copy");
+            btn.setAttribute("aria-label", t("copy"));
             btn.addEventListener("click", function () {
               var code = pre.querySelector("code");
               var text = code ? code.textContent : "";
               if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(text).then(function () {
-                  btn.textContent = "Copied!";
-                  setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                  btn.textContent = t("copied");
+                  setTimeout(function () { btn.textContent = t("copy"); }, 1500);
                 }).catch(function () {
-                  btn.textContent = "Failed";
-                  setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                  btn.textContent = t("copyFailed");
+                  setTimeout(function () { btn.textContent = t("copy"); }, 1500);
                 });
               } else {
-                btn.textContent = "Failed";
-                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                btn.textContent = t("copyFailed");
+                setTimeout(function () { btn.textContent = t("copy"); }, 1500);
               }
             });
             pre.appendChild(btn);
           });
           var mermaidBlocks = container.querySelectorAll("pre code.language-mermaid");
           if (mermaidBlocks.length > 0 && typeof mermaid !== "undefined") {
-            mermaid.initialize({ startOnLoad: false, theme: "dark" });
+            mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
             mermaidBlocks.forEach(function (code) {
               var wrapper = document.createElement("div");
               wrapper.className = "mermaid-wrapper";
@@ -271,16 +360,18 @@
               }
               var zoomIn = document.createElement("button");
               zoomIn.className = "mermaid-zoom-btn";
+              zoomIn.dataset.zoom = "in";
               zoomIn.textContent = "+";
-              zoomIn.setAttribute("aria-label", "Zoom in");
+              zoomIn.setAttribute("aria-label", t("zoomIn"));
               zoomIn.addEventListener("click", function () {
                 scale = Math.min(scale + 0.1, 3);
                 applyMermaidZoom();
               });
               var zoomOut = document.createElement("button");
               zoomOut.className = "mermaid-zoom-btn";
+              zoomOut.dataset.zoom = "out";
               zoomOut.textContent = "\u2212";
-              zoomOut.setAttribute("aria-label", "Zoom out");
+              zoomOut.setAttribute("aria-label", t("zoomOut"));
               zoomOut.addEventListener("click", function () {
                 scale = Math.max(scale - 0.1, 0.5);
                 applyMermaidZoom();
@@ -319,7 +410,8 @@
             link.className = "heading-anchor";
             link.href = "#" + slug;
             link.textContent = "#";
-            link.setAttribute("aria-label", "Anchor: " + text);
+            link.dataset.headingText = text;
+            link.setAttribute("aria-label", t("headingAnchor") + text);
             h.appendChild(link);
           });
 
@@ -335,12 +427,18 @@
               headingData.push({ el: h, id: h.id, level: level, text: text });
             });
 
-            var tocHTML = "";
+            tocNav.replaceChildren();
             headingData.forEach(function (item) {
+              var li = document.createElement("li");
+              var tocLink = document.createElement("a");
               var cls = "toc-h" + item.level;
-              tocHTML += '<li><a href="#' + item.id + '" class="' + cls + '" data-toc-target="' + item.id + '">' + item.text + '</a></li>';
+              tocLink.href = "#" + item.id;
+              tocLink.className = cls;
+              tocLink.dataset.tocTarget = item.id;
+              tocLink.textContent = item.text;
+              li.appendChild(tocLink);
+              tocNav.appendChild(li);
             });
-            tocNav.innerHTML = tocHTML;
 
             /* Smooth scroll for TOC links (account for fixed nav) */
             document.querySelectorAll("#toc-sidebar .toc-nav a").forEach(function (a) {
@@ -416,37 +514,50 @@
             if (existingBtn) wrapper.appendChild(existingBtn);
             var expandBtn = document.createElement("button");
             expandBtn.className = "code-expand-btn";
-            expandBtn.textContent = "展开 (共 " + lines + " 行)";
+            expandBtn.dataset.lines = String(lines);
+            updateCodeExpandButton(expandBtn);
             expandBtn.addEventListener("click", function () {
-              if (wrapper.dataset.expanded === "true") {
-                wrapper.dataset.expanded = "false";
-                expandBtn.textContent = "展开 (共 " + lines + " 行)";
-              } else {
-                wrapper.dataset.expanded = "true";
-                expandBtn.textContent = "收起";
-              }
+              wrapper.dataset.expanded = wrapper.dataset.expanded === "true" ? "false" : "true";
+              updateCodeExpandButton(expandBtn);
             });
             wrapper.appendChild(expandBtn);
           });
-          container.querySelectorAll("h2, h3").forEach(function (heading) {
+
+          function updateSectionVisibility() {
+            var collapsedLevels = [];
+            Array.from(container.children).forEach(function (node) {
+              var match = /^H([1-6])$/.exec(node.tagName);
+              if (match) {
+                var level = parseInt(match[1], 10);
+                collapsedLevels = collapsedLevels.filter(function (collapsedLevel) { return collapsedLevel < level; });
+                node.hidden = collapsedLevels.length > 0;
+                if ((level === 2 || level === 3) && node.classList.contains("collapsed")) {
+                  collapsedLevels.push(level);
+                }
+              } else {
+                node.hidden = collapsedLevels.length > 0;
+              }
+            });
+          }
+
+          Array.from(container.children).filter(function (node) {
+            return node.tagName === "H2" || node.tagName === "H3";
+          }).forEach(function (heading) {
             var toggle = document.createElement("button");
             toggle.className = "section-toggle";
             toggle.textContent = "▼";
-            toggle.setAttribute("aria-label", "Toggle section");
+            toggle.setAttribute("aria-label", t("collapseSection"));
+            toggle.setAttribute("aria-expanded", "true");
             toggle.addEventListener("click", function () {
               var collapsed = heading.classList.toggle("collapsed");
               toggle.textContent = collapsed ? "▶" : "▼";
-              var node = heading.nextElementSibling;
-              var level = parseInt(heading.tagName.charAt(1), 10);
-              while (node) {
-                var nodeLevel = parseInt(node.tagName.charAt(1), 10);
-                if (nodeLevel && nodeLevel <= level) break;
-                node.style.display = collapsed ? "none" : "";
-                node = node.nextElementSibling;
-              }
+              toggle.setAttribute("aria-label", t(collapsed ? "expandSection" : "collapseSection"));
+              toggle.setAttribute("aria-expanded", String(!collapsed));
+              updateSectionVisibility();
             });
             heading.insertBefore(toggle, heading.firstChild);
           });
+          updateSectionVisibility();
           if (window.location.hash) {
             var hashId;
             try { hashId = decodeURIComponent(window.location.hash.slice(1)); }
@@ -460,8 +571,8 @@
             }
           }
         })
-        .catch(function () {
-          document.getElementById("post-content").innerHTML = '<p class="post-loading">加载失败 / Failed to load</p>';
+        .catch(function (error) {
+          showPostStatus(error && error.code === "POST_NOT_FOUND" ? "notFound" : "loadFailed");
         });
     })();
   </script>

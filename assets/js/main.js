@@ -27,6 +27,7 @@
       blogReadMore: "阅读全文",
       toolsTitle: "工具",
       toolsSub: "站内小工具",
+      footerBuilt: "使用 GLM-5.2 构建",
       backTop: "回到顶部 ↑",
       skip: "跳到主内容",
       contrib: "贡献",
@@ -58,6 +59,7 @@
       blogReadMore: "Read more",
       toolsTitle: "Tools",
       toolsSub: "Built-in utilities",
+      footerBuilt: "Built with GLM-5.2",
       backTop: "Back to top \u2191",
       skip: "Skip to main content",
       contrib: "Contrib",
@@ -316,7 +318,7 @@
       href: item.url,
       target: "_blank",
       rel: "noopener noreferrer",
-      "aria-label": item.title + " (opens in new tab)"
+      "aria-label": item.title + (lang === "en" ? " (opens in a new tab)" : "（在新标签页打开）")
     });
 
     card.appendChild(top);
@@ -362,7 +364,8 @@
       href: "blog/post.html?slug=" + post.slug,
       target: "_blank",
       rel: "noopener",
-      "aria-label": post.title + " (opens in new tab)"
+      "aria-label": (lang === "en" ? (post.titleEn || post.title) : post.title)
+        + (lang === "en" ? " (opens in a new tab)" : "（在新标签页打开）")
     });
 
     card.appendChild(top);
@@ -554,6 +557,7 @@
     lang = l;
     dict = I18N[lang];
     phrases = dict.phrases;
+    document.documentElement.lang = dict.lang;
     updStaticText();
     renderCards(!isInitial);
     if (!isInitial) {
