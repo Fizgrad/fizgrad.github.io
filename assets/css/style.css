@@ -963,6 +963,11 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .chat-msg-assistant .chat-bubble p:last-child { margin-bottom: 0; }
 .chat-typing { color: var(--text-faint); font-style: italic; }
 .chat-error { color: #fb7185; }
+.chat-plain-text { white-space: pre-wrap; }
+.chat-finish-warning { font-style: italic; }
+.chat-finish-warning-muted { color: var(--text-faint); }
+.chat-finish-warning-error { color: #fb7185; }
+.chat-finish-warning-tool { color: #fbbf24; }
 
 .chat-retry-btn {
   display: inline-flex;
