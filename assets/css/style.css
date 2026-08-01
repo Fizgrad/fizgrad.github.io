@@ -754,6 +754,13 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 }
 .chat-field input:focus,
 .chat-field textarea:focus { border-color: var(--accent); }
+.chat-field input[aria-invalid="true"] {
+  border-color: #fb7185;
+}
+.chat-field input[aria-invalid="true"]:focus {
+  border-color: #fb7185;
+  box-shadow: 0 0 0 2px rgba(251, 113, 133, 0.16);
+}
 .chat-field input[type="range"] { padding: 0; }
 .chat-field input[type="range"]:disabled,
 .chat-field input[type="text"]:disabled,
@@ -769,6 +776,13 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   color: #f59e0b;
   margin: -0.5rem 0 0.6rem;
   padding-left: 0.2rem;
+}
+.chat-field-error {
+  margin: -0.55rem 0 0.8rem;
+  padding-left: 0.2rem;
+  color: #fb7185;
+  font-size: 0.72rem;
+  line-height: 1.5;
 }
 .chat-field input[type="number"] {
   color-scheme: dark;

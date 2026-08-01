@@ -107,9 +107,10 @@
       </div>
       <label class="chat-field">
         <span data-i18n="maxTokens">最大输出 Token</span>
-        <input type="number" id="cfg-maxtokens" value="4096" min="1" max="384000" />
+        <input type="number" id="cfg-maxtokens" value="4096" min="1" max="384000" step="1" inputmode="numeric" aria-describedby="max-tokens-hint max-tokens-error" aria-invalid="false" />
       </label>
       <p class="chat-settings-hint" id="max-tokens-hint" data-i18n="maxTokensHint">DeepSeek V4 最大输出为 384K Token；长输出会自动降低实时排版刷新频率。</p>
+      <p class="chat-field-error" id="max-tokens-error" data-i18n="maxTokensInvalid" role="alert" hidden>请输入 1 到 384000 之间的整数。</p>
       <label class="chat-field">
         <span data-i18n="labelStop">停止词</span>
         <input type="text" id="cfg-stop" data-i18n-ph="stopPh" placeholder="逗号分隔, 可选" spellcheck="false" />
@@ -283,12 +284,14 @@
       };
       Object.assign(I18N.zh, {
         lang: "zh-CN", home: "← 主页", homeAria: "返回主页", backHome: "← 返回主页", settingsToggleAria: "打开或关闭设置",
-        mathMissing: "[公式数据缺失]", copy: "复制", copied: "已复制", copyFailed: "复制失败", zoomIn: "放大图表", zoomOut: "缩小图表", expandCode: "展开（共 {lines} 行）", collapseCode: "收起"
+        mathMissing: "[公式数据缺失]", copy: "复制", copied: "已复制", copyFailed: "复制失败", zoomIn: "放大图表", zoomOut: "缩小图表", expandCode: "展开（共 {lines} 行）", collapseCode: "收起",
+        maxTokensInvalid: "请输入 1 到 384000 之间的整数。", fimMaxTokensInvalid: "FIM 模式请输入 1 到 4096 之间的整数。"
       });
       Object.assign(I18N.en, {
         lang: "en", home: "← Home", homeAria: "Back to home", backHome: "← Back to home", settingsToggleAria: "Toggle settings",
         mathMissing: "[Missing formula data]", copy: "Copy", copied: "Copied!", copyFailed: "Failed", zoomIn: "Zoom in", zoomOut: "Zoom out",
-        expandCode: "Expand ({lines} lines)", collapseCode: "Collapse"
+        expandCode: "Expand ({lines} lines)", collapseCode: "Collapse",
+        maxTokensInvalid: "Enter an integer from 1 to 384000.", fimMaxTokensInvalid: "For FIM mode, enter an integer from 1 to 4096."
       });
       var lang = (function () {
         try {
@@ -369,6 +372,27 @@
         return Math.min(MAX_FIM_OUTPUT_TOKENS, Math.max(1, parsed));
       }
 
+      function parseMaxTokensInput(value, mode) {
+        var text = String(value).trim();
+        var limit = mode === "fim" ? MAX_FIM_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
+        if (!/^\d+$/.test(text)) return null;
+        var parsed = Number(text);
+        return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= limit ? parsed : null;
+      }
+
+      function updateMaxTokensValidation(mode) {
+        var input = document.getElementById("cfg-maxtokens");
+        var error = document.getElementById("max-tokens-error");
+        var errorKey = mode === "fim" ? "fimMaxTokensInvalid" : "maxTokensInvalid";
+        var value = parseMaxTokensInput(input.value, mode);
+        var valid = value !== null;
+        input.setAttribute("aria-invalid", String(!valid));
+        error.setAttribute("data-i18n", errorKey);
+        error.textContent = t(errorKey);
+        error.hidden = valid;
+        return value;
+      }
+
       var cfg = {
         version: CHAT_CFG_VERSION,
         baseurl: "https://api.deepseek.com",
@@ -441,12 +465,17 @@
         cfg.temp = parseFloat(document.getElementById("cfg-temp").value);
         cfg.topp = parseFloat(document.getElementById("cfg-topp").value);
         var maxTokensInput = document.getElementById("cfg-maxtokens");
+        var parsedMaxTokens = updateMaxTokensValidation(uiMode);
         if (uiMode === "fim") {
-          cfg.fimMaxTokens = normalizeFimMaxTokens(maxTokensInput.value);
-          maxTokensInput.value = cfg.fimMaxTokens;
+          if (parsedMaxTokens !== null) {
+            cfg.fimMaxTokens = parsedMaxTokens;
+            maxTokensInput.value = cfg.fimMaxTokens;
+          }
         } else {
-          cfg.maxtokens = normalizeMaxTokens(maxTokensInput.value);
-          maxTokensInput.value = cfg.maxtokens;
+          if (parsedMaxTokens !== null) {
+            cfg.maxtokens = parsedMaxTokens;
+            maxTokensInput.value = cfg.maxtokens;
+          }
         }
         cfg.stop = document.getElementById("cfg-stop").value.trim();
         cfg.stream = document.getElementById("cfg-stream").checked;
@@ -466,6 +495,7 @@
         cfg.mode = selectedMode;
         cfg.version = CHAT_CFG_VERSION;
         persistCfg();
+        return parsedMaxTokens !== null;
       }
 
       function setModelFormValue(model) {
@@ -554,6 +584,10 @@
       var userIdField = document.getElementById("user-id-field");
       var userIdInput = document.getElementById("cfg-userid");
 
+      maxTokensInput.addEventListener("input", function () {
+        updateMaxTokensValidation(modeSel.value);
+      });
+
       function setTranslatedText(element, key) {
         element.setAttribute("data-i18n", key);
         element.textContent = t(key);
@@ -603,6 +637,7 @@
           thinkingSel.value = cfg.thinking;
           responseFormatSel.value = cfg.respformat;
         }
+        updateMaxTokensValidation(modeSel.value);
 
         modelSel.disabled = isFim;
         modelCustomInput.disabled = isFim;
@@ -1018,7 +1053,11 @@
 
       function doSend() {
         if (isStreaming) return;
-        autoSave();
+        if (!autoSave()) {
+          settingsPanel.classList.add("open");
+          maxTokensInput.focus();
+          return;
+        }
         var requestMode = cfg.mode;
         var isPrefix = requestMode === "prefix";
         var isFim = requestMode === "fim";
