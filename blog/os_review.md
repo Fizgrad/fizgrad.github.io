@@ -4167,6 +4167,371 @@ Linux 的 `clone()`/`clone3()` 可通过标志控制资源共享，例如概念�
 - 不需要在子进程 exec 前运行复杂逻辑；
 - 希望降低 fork 地址空间和运行时状态风险的场景。
 
+## 9. 守护进程与服务管理
+
+**守护进程（daemon）是长期在后台运行、通常不直接与终端交互，并为系统或其他程序提供服务的进程。**
+
+常见例子包括：
+
+* `sshd`：提供 SSH 登录服务；
+* `cron` 或 `crond`：执行定时任务；
+* `systemd-journald`：收集系统日志；
+* `nginx`：提供网络服务；
+* `dockerd`：管理 Docker 容器。
+
+守护进程本质上仍然是普通用户态进程，由 Linux 调度器调度，并没有特殊的“守护进程类型”。
+
+### 9.1 守护进程和后台进程的区别
+
+在 Shell 中执行：
+
+```bash
+./program &
+```
+
+只是让程序在后台运行。
+
+它仍可能：
+
+* 属于当前 Shell 的会话；
+* 关联当前控制终端；
+* 在终端关闭后收到 `SIGHUP`；
+* 继续使用终端的标准输入、输出和错误。
+
+守护进程通常还要求：
+
+* 不依赖当前终端和登录会话；
+* 长期运行；
+* 正确处理日志和信号；
+* 管理 PID、权限和资源；
+* 能够被服务管理器启动、停止和重启。
+
+因此：
+
+> **后台进程描述运行位置，守护进程描述长期独立提供服务的进程角色。**
+
+### 9.2 传统 daemonize 流程
+
+在没有 systemd 等服务管理器时，程序可能自行完成守护进程化。
+
+典型步骤包括：
+
+```text
+fork()
+  ↓
+父进程退出
+  ↓
+子进程调用 setsid()
+  ↓
+脱离原会话、进程组和控制终端
+  ↓
+可选地再次 fork()
+  ↓
+设置工作目录和 umask
+  ↓
+关闭或重定向文件描述符
+  ↓
+进入服务主循环
+```
+
+#### 第一次 `fork()`
+
+父进程退出，子进程继续执行。
+
+这样可以保证调用 `setsid()` 的进程不是当前进程组组长，因为进程组组长调用 `setsid()` 会失败。
+
+#### `setsid()`
+
+```c
+pid_t sid = setsid();
+```
+
+成功后，调用进程：
+
+* 创建一个新会话；
+* 成为新会话的会话首领；
+* 成为新进程组的组长；
+* 脱离原控制终端。
+
+`setsid()` 是传统守护进程化的核心接口。
+
+#### 第二次 `fork()`
+
+传统实现有时再次调用 `fork()`，让最终守护进程不再是会话首领。
+
+这样可以降低它以后重新获得控制终端的可能性。
+
+第二次 `fork()` 不是所有后台程序都必须执行的固定规则，而是一种传统防御性做法。
+
+#### 设置工作目录
+
+守护进程通常不应长期占用某个可卸载目录：
+
+```c
+chdir("/");
+```
+
+也可以切换到程序自己的数据目录。
+
+#### 设置 `umask`
+
+```c
+umask(0);
+```
+
+或者设置一个明确的权限掩码，避免继承启动环境中未知的文件创建权限。
+
+实际程序不一定必须设为 0，应根据安全要求选择。
+
+#### 处理标准文件描述符
+
+守护进程通常会关闭或重定向：
+
+```text
+stdin  fd 0
+stdout fd 1
+stderr fd 2
+```
+
+例如重定向到 `/dev/null`：
+
+```c
+int fd = open("/dev/null", O_RDWR);
+
+dup2(fd, STDIN_FILENO);
+dup2(fd, STDOUT_FILENO);
+dup2(fd, STDERR_FILENO);
+```
+
+生产程序通常还需要把日志写入：
+
+* syslog；
+* journald；
+* 专门的日志文件；
+* 标准输出，由服务管理器收集。
+
+### 9.3 传统守护进程化示例
+
+下面只展示基本过程，省略了错误恢复、锁文件和完整资源管理：
+
+```c
+#include <fcntl.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+int daemonize(void)
+{
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        return -1;
+    }
+
+    if (pid > 0) {
+        _exit(EXIT_SUCCESS);
+    }
+
+    if (setsid() == -1) {
+        return -1;
+    }
+
+    pid = fork();
+
+    if (pid < 0) {
+        return -1;
+    }
+
+    if (pid > 0) {
+        _exit(EXIT_SUCCESS);
+    }
+
+    umask(027);
+
+    if (chdir("/") == -1) {
+        return -1;
+    }
+
+    int null_fd = open("/dev/null", O_RDWR);
+
+    if (null_fd == -1) {
+        return -1;
+    }
+
+    if (dup2(null_fd, STDIN_FILENO) == -1 ||
+        dup2(null_fd, STDOUT_FILENO) == -1 ||
+        dup2(null_fd, STDERR_FILENO) == -1) {
+        close(null_fd);
+        return -1;
+    }
+
+    if (null_fd > STDERR_FILENO) {
+        close(null_fd);
+    }
+
+    return 0;
+}
+```
+
+传统守护进程还需要处理：
+
+* `SIGTERM`：有序退出；
+* `SIGHUP`：重新加载配置；
+* `SIGCHLD`：回收子进程；
+* PID 文件；
+* 单实例运行；
+* 权限下降；
+* 日志轮转；
+* 文件描述符泄漏；
+* 崩溃恢复。
+
+### 9.4 现代 Linux 通常不需要自行 daemonize
+
+在使用 systemd 的系统中，服务程序通常应以前台方式运行：
+
+```text
+systemd 启动进程
+    ↓
+进程保持前台运行
+    ↓
+systemd 记录主进程 PID
+    ↓
+收集标准输出和错误
+    ↓
+负责停止、重启和资源限制
+```
+
+服务程序不需要自行：
+
+* 双重 `fork()`；
+* 创建 PID 文件；
+* 脱离终端；
+* 把标准输出重定向到日志文件；
+* 自己实现崩溃后重启。
+
+一个简单的 systemd service 文件可以写成：
+
+```ini
+[Unit]
+Description=Example Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/example-server
+Restart=on-failure
+User=example
+Group=example
+
+[Install]
+WantedBy=multi-user.target
+```
+
+其中：
+
+* `Type=simple`：`ExecStart` 启动的进程就是服务主进程；
+* `Restart=on-failure`：异常退出时重新启动；
+* `User`、`Group`：以指定身份运行；
+* systemd 可以使用 cgroup 跟踪整个服务中的进程。
+
+现代服务更推荐：
+
+> **前台运行服务程序，把生命周期、日志、重启和资源管理交给 systemd。**
+
+### 9.5 常见服务管理命令
+
+查看服务状态：
+
+```bash
+systemctl status <service>
+```
+
+启动、停止和重启：
+
+```bash
+sudo systemctl start <service>
+sudo systemctl stop <service>
+sudo systemctl restart <service>
+```
+
+设置开机启动：
+
+```bash
+sudo systemctl enable <service>
+```
+
+查看日志：
+
+```bash
+journalctl -u <service>
+journalctl -u <service> -f
+```
+
+查看进程关系：
+
+```bash
+ps -ef
+pstree -p
+systemctl show <service>
+```
+
+### 9.6 常见误区
+
+#### “名称以 d 结尾的进程一定是守护进程”
+
+不一定。
+
+`sshd`、`httpd`、`dockerd` 中的 `d` 常表示 daemon，但命名不是判断依据。
+
+#### “守护进程一定由 PID 1 直接创建”
+
+不一定。
+
+它可能由：
+
+* systemd；
+  -其他服务管理器；
+* Shell；
+* 容器运行时；
+* 另一个服务进程
+
+间接创建。
+
+#### “执行 `command &` 就完成了守护进程化”
+
+错误。
+
+`&` 只使 Shell 不同步等待该进程，不保证它已经脱离终端、会话和登录生命周期。
+
+#### “守护进程必须双重 fork”
+
+不一定。
+
+传统自守护化程序经常双重 `fork()`；由 systemd 管理的现代服务通常不应这样做，而应保持前台运行。
+
+### 9.7 总结
+
+守护进程的核心不是某个特殊系统调用，而是其运行方式：
+
+```text
+长期运行
++ 不依赖交互终端
++ 提供系统或网络服务
++ 正确管理信号、日志和资源
+```
+
+传统程序通过：
+
+```text
+fork → setsid → 可选的第二次 fork → 重定向 fd
+```
+
+完成守护进程化。
+
+现代 Linux 服务通常由 systemd 管理，程序本身保持前台运行即可。
+
+
 # 十二、用户态、内核态与系统调用
 
 ## 1. 用户态和内核态

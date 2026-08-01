@@ -1,5 +1,12 @@
 [
   {
+    "title": "安卓🤖",
+    "titleEn": "Android🤖",
+    "slug": "Android",
+    "description": "安卓是一个面向各种不同形态设备的操作系统。",
+    "descriptionEn": "Android is an operating system for a wide array of devices with different form factors."
+  },
+  {
     "title": "我的NebulaIM",
     "titleEn": "My NebulaIM",
     "slug": "nebula",
