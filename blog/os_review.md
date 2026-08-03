@@ -392,6 +392,8 @@ flowchart TD
 下面的示例处理了部分写入、读取长度和子进程回收：
 
 ```c
+#define _POSIX_C_SOURCE 200809L
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -449,12 +451,13 @@ int main(void) {
         } while (n == -1 && errno == EINTR);
 
         if (n > 0) {
-            printf("child received %zd bytes: %.*s\n",
-                   n,
-                   (int)n,
-                   buffer);
+            dprintf(STDOUT_FILENO,
+                    "child received %zd bytes: %.*s\n",
+                    n,
+                    (int)n,
+                    buffer);
         } else if (n == 0) {
-            puts("child: EOF");
+            dprintf(STDOUT_FILENO, "child: EOF\n");
         } else {
             perror("read");
         }
@@ -700,6 +703,8 @@ int main(void) {
 下面使用 System V 共享内存，并在共享区域中放置一个进程共享 POSIX 信号量，避免用 `sleep()` 猜测执行顺序：
 
 ```c
+#define _POSIX_C_SOURCE 200809L
+
 #include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -759,7 +764,7 @@ int main(void) {
             _exit(EXIT_FAILURE);
         }
 
-        printf("child read: %s\n", block->text);
+        dprintf(STDOUT_FILENO, "child read: %s\n", block->text);
         shmdt(block);
         _exit(EXIT_SUCCESS);
     }
@@ -7315,4 +7320,3 @@ page fault 通常发生在 TLB miss 后发现页表条件不满足
 13. [Linux man-pages: eventfd(2)](https://man7.org/linux/man-pages/man2/eventfd.2.html)
 
 > 内核文档和 man-pages 会持续更新。阅读具体机器行为时，应同时检查发行版内核版本、配置选项和对应源码。
-

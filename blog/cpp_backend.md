@@ -96,7 +96,7 @@ C++ 也常出现在：
 
 # 3. 语言与现代 C++ 基础
 
-当前 ISO C++ 标准是 C++23，但生产项目的实际基线通常取决于编译器、三方库、操作系统和历史代码。新项目常见 C++17 或 C++20，部分项目开始使用 C++23 特性。[^cpp-standard]
+当前 ISO C++ 标准是 C++23，但生产项目的实际基线通常取决于编译器、三方库、操作系统和历史代码。新项目常见 C++17 或 C++20，部分项目开始使用 C++23 特性。[ISO 标准页][cpp-standard]
 
 ## 3.1 必须掌握的语言主题
 
@@ -380,7 +380,7 @@ Linux 是 C++ 后端最常见的运行环境。需要掌握的不只是命令，
 
 ## 5.2 CMake
 
-CMake 是当前 C++ 工程中最常见的跨平台构建系统之一，可生成 Ninja、Makefile、Visual Studio 和 Xcode 工程。[^cmake]
+CMake 是当前 C++ 工程中最常见的跨平台构建系统之一，可生成 Ninja、Makefile、Visual Studio 和 Xcode 工程。[CMake 文档][cmake]
 
 推荐使用现代 Target 模式：
 
@@ -437,7 +437,7 @@ Bazel 常用于：
 - 需要远程缓存和远程执行
 - 生成代码较多的项目
 
-Bazel 官方为 C++ 提供专门的规则和教程。[^bazel]
+Bazel 官方为 C++ 提供专门的规则和教程。[Bazel C++ 文档][bazel]
 
 示例：
 
@@ -456,7 +456,7 @@ cc_binary(
 
 ### Conan 2
 
-Conan 是跨平台 C/C++ 包管理器，可与 CMake 等构建系统集成。[^conan]
+Conan 是跨平台 C/C++ 包管理器，可与 CMake 等构建系统集成。[Conan 文档][conan]
 
 适合：
 
@@ -467,7 +467,7 @@ Conan 是跨平台 C/C++ 包管理器，可与 CMake 等构建系统集成。[^c
 
 ### vcpkg
 
-vcpkg 是 Microsoft 与社区维护的跨平台 C/C++ 包管理器。[^vcpkg]
+vcpkg 是 Microsoft 与社区维护的跨平台 C/C++ 包管理器。[vcpkg 文档][vcpkg]
 
 适合：
 
@@ -658,7 +658,7 @@ Reactor 通常处理“操作已就绪”；Proactor 更接近“操作已完成
 
 ## 7.1 Boost.Asio / Standalone Asio
 
-Asio 提供跨平台网络与低层 I/O 抽象，并支持同步、异步和现代 C++ 异步模型。[^asio]
+Asio 提供跨平台网络与低层 I/O 抽象，并支持同步、异步和现代 C++ 异步模型。[Asio 文档][asio]
 
 适合：
 
@@ -705,7 +705,7 @@ C++ 项目通常会再封装一层 RAII、对象生命周期和回调模型。
 
 ## 7.4 Drogon
 
-Drogon 是基于现代 C++ 的异步 HTTP 应用框架，支持 C++17/20、协程和跨平台开发。[^drogon]
+Drogon 是基于现代 C++ 的异步 HTTP 应用框架，支持 C++17/20、协程和跨平台开发。[Drogon 项目][drogon]
 
 适合：
 
@@ -737,7 +737,7 @@ Drogon 是基于现代 C++ 的异步 HTTP 应用框架，支持 C++17/20、协�
 
 ## 7.6 gRPC
 
-gRPC 是高性能跨语言 RPC 框架，通常使用 Protocol Buffers 作为 IDL 和消息格式，并提供同步、异步、流式 RPC 等模型。[^grpc]
+gRPC 是高性能跨语言 RPC 框架，通常使用 Protocol Buffers 作为 IDL 和消息格式，并提供同步、异步、流式 RPC 等模型。[gRPC C++ 文档][grpc]
 
 ```protobuf
 syntax = "proto3";
@@ -780,7 +780,7 @@ message CreateOrderResponse {
 
 ## 7.7 Apache bRPC
 
-bRPC 是面向高性能服务的工业级 C++ RPC 框架，常见于搜索、存储、机器学习、广告和推荐等场景。[^brpc]
+bRPC 是面向高性能服务的工业级 C++ RPC 框架，常见于搜索、存储、机器学习、广告和推荐等场景。[bRPC 项目][brpc]
 
 特点通常包括：
 
@@ -792,7 +792,7 @@ bRPC 是面向高性能服务的工业级 C++ RPC 框架，常见于搜索、存
 
 ## 7.8 tRPC-Cpp
 
-tRPC-Cpp 是 tRPC 的 C++ 实现，强调高性能、模块化和可插拔设计。[^trpc]
+tRPC-Cpp 是 tRPC 的 C++ 实现，强调高性能、模块化和可插拔设计。[tRPC-Cpp 项目][trpc]
 
 适合：
 
@@ -802,7 +802,7 @@ tRPC-Cpp 是 tRPC 的 C++ 实现，强调高性能、模块化和可插拔设计
 
 ## 7.9 Tars
 
-Tars 是完整的微服务/RPC 体系，包含 IDL、通信、注册、配置、监控和管理能力，并支持多种语言。[^tars]
+Tars 是完整的微服务/RPC 体系，包含 IDL、通信、注册、配置、监控和管理能力，并支持多种语言。[TarsCpp 项目][tars]
 
 适合：
 
@@ -1570,7 +1570,7 @@ flowchart TB
     J --> G
 ```
 
-OpenTelemetry C++ 可生成并导出 traces、metrics 和 logs。[^otel] Prometheus 适合记录数值时间序列和监控动态服务架构。[^prometheus]
+OpenTelemetry C++ 可生成并导出 traces、metrics 和 logs。[OpenTelemetry C++ 文档][otel] Prometheus 适合记录数值时间序列和监控动态服务架构。[Prometheus 文档][prometheus]
 
 ## 15.1 日志
 
@@ -1669,7 +1669,7 @@ Trace 可用于定位：
 
 ## 16.1 GoogleTest / GoogleMock
 
-GoogleTest 是常用 C++ 测试框架，GoogleMock 用于替换外部依赖和验证交互。[^gtest]
+GoogleTest 是常用 C++ 测试框架，GoogleMock 用于替换外部依赖和验证交互。[GoogleTest 文档][gtest]
 
 ```cpp
 TEST(OrderServiceTest, RejectsEmptyUserId) {
@@ -1731,7 +1731,7 @@ TEST(OrderServiceTest, RejectsEmptyUserId) {
 | MSan | 未初始化内存读取 |
 | LSan | 泄漏 |
 
-AddressSanitizer 由编译器插桩和运行时组成，可检测堆、栈和全局对象越界及 Use-after-free 等问题。[^asan]
+AddressSanitizer 由编译器插桩和运行时组成，可检测堆、栈和全局对象越界及 Use-after-free 等问题。[Clang ASan 文档][asan]
 
 ## 16.4 静态分析
 
@@ -1822,7 +1822,7 @@ gdb ./server core
 
 ## 17.3 perf
 
-Linux `perf` 可使用硬件性能计数器、tracepoint、kprobe 和 uprobe 进行性能分析。[^perf]
+Linux `perf` 可使用硬件性能计数器、tracepoint、kprobe 和 uprobe 进行性能分析。[perf Wiki][perf]
 
 常用命令：
 
@@ -2007,7 +2007,7 @@ flowchart TB
 
 ## 19.1 Docker
 
-容器镜像包含运行容器所需的文件、二进制、库和配置。[^docker]
+容器镜像包含运行容器所需的文件、二进制、库和配置。[Docker 文档][docker]
 
 典型多阶段构建：
 
@@ -2044,7 +2044,7 @@ ENTRYPOINT ["/usr/local/bin/server"]
 
 ## 19.2 Kubernetes
 
-Kubernetes 用于管理容器化工作负载和服务，支持声明式配置与自动化。[^kubernetes]
+Kubernetes 用于管理容器化工作负载和服务，支持声明式配置与自动化。[Kubernetes 文档][kubernetes]
 
 C++ 服务常涉及：
 
@@ -2495,3 +2495,22 @@ flowchart LR
 - 不考虑协议和数据的向后兼容
 - 只看平均延迟，不看尾延迟
 - 只关注代码，不建设监控和发布体系
+
+[cpp-standard]: https://www.iso.org/standard/83626.html
+[cmake]: https://cmake.org/cmake/help/latest/
+[bazel]: https://bazel.build/tutorials/cpp-use-cases
+[conan]: https://docs.conan.io/2/
+[vcpkg]: https://learn.microsoft.com/vcpkg/
+[asio]: https://www.boost.org/doc/libs/latest/doc/html/boost_asio.html
+[drogon]: https://github.com/drogonframework/drogon
+[grpc]: https://grpc.io/docs/languages/cpp/
+[brpc]: https://github.com/apache/brpc
+[trpc]: https://github.com/trpc-group/trpc-cpp
+[tars]: https://github.com/TarsCloud/TarsCpp
+[otel]: https://opentelemetry.io/docs/languages/cpp/
+[prometheus]: https://prometheus.io/docs/introduction/overview/
+[gtest]: https://google.github.io/googletest/
+[asan]: https://clang.llvm.org/docs/AddressSanitizer.html
+[perf]: https://perfwiki.github.io/main/
+[docker]: https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/
+[kubernetes]: https://kubernetes.io/docs/concepts/overview/

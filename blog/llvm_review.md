@@ -1123,7 +1123,7 @@ always_inline / noinline 属性
 
 概括表达：
 
-> CGSCCPass 运行在调用图强连通分量上，适合 inliner、函数属性推导、IPSCCP 等跨函数优化。inliner 会改变调用图，且递归函数必须作为 SCC 整体处理，因此通常不是简单 FunctionPass。
+> CGSCCPass 运行在调用图强连通分量上，适合 inliner、函数属性推导等依赖调用图的跨函数优化。inliner 会改变调用图，且递归函数必须作为 SCC 整体处理，因此通常不是简单 FunctionPass。IPSCCP 虽然也是跨函数优化，但在 LLVM 新 Pass Manager 中实现为 ModulePass。
 
 # 6. 常见中端优化 Pass
 
@@ -1373,7 +1373,6 @@ DCE 不能简单根据“返回值没人用”删除指令，因为一些指令�
 - 输出日志
 - 修改内存
 - 访问外部资源
-```
 
 类似地, `store`
 
@@ -1487,12 +1486,14 @@ Start --> Mark[标记 Live 指令]
 
 Mark --> Roots[
 程序必须保留的指令:
-ret/store/call副作用/br条件
+ret/store/有副作用的call等
 ]
 
 Roots --> Backward[反向追踪 operand]
 
-Backward --> Live[标记依赖指令]
+Backward --> Control[分析活指令的控制依赖]
+
+Control --> Live[标记必要的分支与依赖指令]
 
 Live --> Delete[删除未标记指令]
 ```
@@ -3501,7 +3502,7 @@ for (Instruction *I : ToErase)
 
 > 因为循环中的 load/store/call 可能访问同一内存。如果要把 load 提到循环外，必须证明循环内部没有可能修改该地址的操作；如果要把 store 移出去，也必须证明移动不会改变其他内存访问观察到的顺序。AA 精度不足时，LICM 只能保守。
 
-### 6.8.1 Hoist、Sink 与 Speculation 的区别
+### 17.6.1 Hoist、Sink 与 Speculation 的区别
 
 - **Hoist**：把指令移到更早的位置，典型目标是 preheader。
 - **Sink**：把指令移到更晚的位置，常用于减少不必要执行。

@@ -3570,7 +3570,7 @@ T make2() {
 }
 ```
 
-安全。C++17 起通常强制拷贝省略。
+安全。对于这里的 `return T{}`，C++17 起保证拷贝省略（guaranteed copy elision）。
 
 ---
 

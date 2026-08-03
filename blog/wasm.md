@@ -734,20 +734,25 @@ Wasm 运行时如果发生非法情况，会触发 **trap**。
 - 栈溢出
 - 非法转换
 
-例如：
+下面的 WAT 模块包含两个会稳定触发 trap 的函数：
 
-```cpp
-int x = 1 / 0;
+```wat
+(module
+  ;; 一页线性内存为 64 KiB，有效字节偏移是 0 到 65535。
+  (memory 1)
+
+  (func (export "divide_by_zero") (result i32)
+    i32.const 1
+    i32.const 0
+    i32.div_s)
+
+  (func (export "out_of_bounds")
+    i32.const 65536
+    i32.const 1
+    i32.store))
 ```
 
-或者：
-
-```cpp
-int* p = (int*)999999999;
-*p = 1;
-```
-
-在 Wasm 中可能触发 trap。
+调用 `divide_by_zero` 会执行整数除零；调用 `out_of_bounds` 会从线性内存末尾之外开始写入 4 字节。两者都会由 Wasm Runtime 触发 trap。不要直接使用 C/C++ 的常量除零或非法指针解引用演示这件事，因为它们在进入 Wasm 运行时之前就属于源语言的未定义行为，编译器不保证生成对应指令。
 
 trap 可以理解成 **Wasm Runtime 发现不可继续执行的错误，终止当前调用**
 
@@ -1010,5 +1015,4 @@ Wasm 经常被类比成 JVM 或 Docker，但它们并不一样。
 | 适合   | 部署完整应用        | 插件、函数、沙箱模块、边缘逻辑 |
 
 Wasm 更像**轻量、安全、可移植的插件/函数执行模型**
-
 
