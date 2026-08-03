@@ -4496,7 +4496,7 @@ systemctl show <service>
 它可能由：
 
 * systemd；
-  -其他服务管理器；
+* 其他服务管理器；
 * Shell；
 * 容器运行时；
 * 另一个服务进程

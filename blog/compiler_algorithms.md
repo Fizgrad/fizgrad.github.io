@@ -1,0 +1,2001 @@
+# 编译器与高性能系统中的算法
+
+# 1. 编译器问题如何映射为算法
+
+| 编译器问题 | 常见抽象 | 典型算法或数据结构 |
+|---|---|---|
+| CFG 可达性、死块删除 | 有向图 | DFS、BFS、RPO |
+| 循环与递归调用关系 | 有向图中的环 | SCC、Dominator、Natural Loop |
+| 活跃变量、到达定值 | 集合方程 | BitSet、Worklist、Fixed Point |
+| SSA 构造 | 支配树上的定义传播 | Dominance Frontier、栈式重命名 |
+| 常量传播 | 值格与可执行边 | Lattice、SCCP、Worklist |
+| 寄存器分配 | 区间或冲突图 | Linear Scan、Graph Coloring |
+| 指令调度 | 带延迟和资源的 DAG | Topological Sort、List Scheduling |
+| 模式匹配 | 树或 DAG | Tree DP、Rewrite、E-graph |
+| 张量布局 | 多维索引映射 | Affine Map、Stride、整数约束 |
+| 算子融合 | 依赖图与成本权衡 | DAG Partition、Cost Model |
+| Buffer 复用 | 生命周期冲突 | Interval Allocation、Coloring |
+| 并行归约 | 结合运算 | Tree Reduction、Scan |
+| 自动调优 | 离散搜索空间 | 枚举、剪枝、贝叶斯或学习模型 |
+
+分析这类问题的第一步，是把“编译器术语”还原成算法问题。例如：
+
+> “求 LiveIn/LiveOut”不是背公式，而是在有限格上求一组单调方程的最小不动点；BitSet 是状态表示，worklist 是求解策略，RPO 或 loop-aware order 是收敛优化。
+
+## 1.1 三层正确性
+
+编译器算法需要同时区分：
+
+1. **算法正确性**：图遍历、集合方程或调度算法本身是否正确；
+2. **变换合法性**：是否保持源程序在语言与 IR 语义下允许观察到的行为；
+3. **变换收益**：合法不代表更快，还要考虑代码大小、寄存器压力、缓存和目标硬件。
+
+例如把循环不变量移出循环：
+
+- 操作数是否在新位置可用；
+- 指令是否可能 trap；
+- 内存访问是否与循环中的 store alias；
+- 移动是否改变 poison、异常、volatile 或 atomic 语义；
+- hoist 后是否增加寄存器压力并造成 spill。
+
+---
+
+# 2. CFG、遍历顺序与可达性
+
+## 2.1 CFG 表示
+
+Control-Flow Graph 中：
+
+- 节点是 Basic Block；
+- 边表示可能的控制转移；
+- 入口块通常唯一；
+- return、unreachable 等块可能没有后继；
+- CFG 可以有环，也可能包含从入口不可达的块。
+
+```cpp
+#include <cstddef>
+#include <optional>
+#include <utility>
+#include <vector>
+
+using BlockId = std::size_t;
+
+struct ControlFlowGraph {
+    std::vector<std::vector<BlockId>> successors;
+    std::vector<std::vector<BlockId>> predecessors;
+};
+
+std::optional<ControlFlowGraph>
+build_cfg(std::vector<std::vector<BlockId>> successors) {
+    ControlFlowGraph cfg;
+    cfg.successors = std::move(successors);
+    cfg.predecessors.resize(cfg.successors.size());
+
+    for (BlockId from = 0; from < cfg.successors.size(); ++from) {
+        for (const BlockId to : cfg.successors[from]) {
+            if (to >= cfg.successors.size()) return std::nullopt;
+            cfg.predecessors[to].push_back(from);
+        }
+    }
+    return cfg;
+}
+```
+
+生产实现可能还要处理：
+
+- 重边是否保留；
+- 异常边、间接跳转和未知调用；
+- CFG 修改后的 analysis invalidation；
+- Block 对象地址稳定性；
+- 并发读取与 Pass 修改的所有权边界。
+
+## 2.2 可达性
+
+从入口做 DFS 或 BFS 即可标记可达块。删除不可达块前还要同步修正：
+
+- predecessor/successor 列表；
+- PHI incoming edge；
+- dominator、loop、frequency 等分析；
+- 调试信息和 block address 引用。
+
+仅仅从容器里擦除节点远远不够。
+
+## 2.3 DFS 的三种顺序
+
+- Preorder：第一次进入节点时记录；
+- Postorder：所有后继处理完成后记录；
+- Reverse Postorder，RPO：把 postorder 反转。
+
+```cpp
+#include <algorithm>
+#include <stdexcept>
+
+void dfs_postorder(const ControlFlowGraph& cfg,
+                   BlockId block,
+                   std::vector<bool>& visited,
+                   std::vector<BlockId>& order) {
+    visited[block] = true;
+    for (const BlockId next : cfg.successors[block]) {
+        if (!visited[next]) dfs_postorder(cfg, next, visited, order);
+    }
+    order.push_back(block);
+}
+
+std::vector<BlockId> reverse_postorder(const ControlFlowGraph& cfg,
+                                       BlockId entry) {
+    if (entry >= cfg.successors.size()) {
+        throw std::out_of_range("invalid CFG entry");
+    }
+    std::vector<bool> visited(cfg.successors.size(), false);
+    std::vector<BlockId> order;
+    dfs_postorder(cfg, entry, visited, order);
+    std::reverse(order.begin(), order.end());
+    return order;
+}
+```
+
+示例使用递归便于表达；恶意或极深 CFG 应改成显式栈。
+
+## 2.4 RPO 为什么有用
+
+在无环图中，RPO 是一种拓扑序。带环 CFG 中它不是严格拓扑序，但通常会让信息沿前向边快速传播，因此前向数据流分析用 RPO 往往比任意顺序更快收敛。
+
+反向数据流分析常考虑 postorder。遍历顺序影响收敛速度，不改变有限单调数据流问题的最终 fixed point。
+
+## 2.5 边分类
+
+相对于 DFS 树可区分：
+
+- Tree edge：第一次发现节点；
+- Back edge：指向当前 DFS 祖先；
+- Forward edge：指向后代但不是树边；
+- Cross edge：其他已访问节点。
+
+DFS back edge 可用于普通有向图环检测，但编译器中的 **natural loop back edge** 通常要求目标 header 支配来源 latch，条件更强。
+
+---
+
+# 3. 强连通分量与循环
+
+## 3.1 SCC 的意义
+
+Strongly Connected Component 中任意两点互相可达。把每个 SCC 收缩为一个节点后得到 condensation DAG。
+
+应用：
+
+- 调用图递归分量；
+- 循环与不可约控制流；
+- 模块依赖循环；
+- 分量级别的自底向上分析；
+- 在环内部迭代、在分量之间拓扑传播。
+
+## 3.2 Tarjan 算法
+
+Tarjan 用一次 DFS 求 SCC：
+
+- `index[v]`：首次访问次序；
+- `lowlink[v]`：从 v 经 DFS 树边和允许的回边能到达的最小 index；
+- 栈保存当前尚未归属 SCC 的节点；
+- 若 `lowlink[v] == index[v]`，v 是一个 SCC 的根。
+
+```cpp
+#include <algorithm>
+#include <stdexcept>
+
+class TarjanScc {
+public:
+    explicit TarjanScc(const std::vector<std::vector<BlockId>>& graph)
+        : graph_(graph),
+          index_(graph.size(), -1),
+          lowlink_(graph.size(), -1),
+          on_stack_(graph.size(), false) {
+        for (const auto& edges : graph_) {
+            for (const BlockId to : edges) {
+                if (to >= graph_.size()) {
+                    throw std::out_of_range("invalid graph edge");
+                }
+            }
+        }
+    }
+
+    std::vector<std::vector<BlockId>> run() {
+        for (BlockId node = 0; node < graph_.size(); ++node) {
+            if (index_[node] == -1) strong_connect(node);
+        }
+        return components_;
+    }
+
+private:
+    void strong_connect(BlockId node) {
+        index_[node] = next_index_;
+        lowlink_[node] = next_index_;
+        ++next_index_;
+        stack_.push_back(node);
+        on_stack_[node] = true;
+
+        for (const BlockId next : graph_[node]) {
+            if (index_[next] == -1) {
+                strong_connect(next);
+                lowlink_[node] = std::min(lowlink_[node], lowlink_[next]);
+            } else if (on_stack_[next]) {
+                lowlink_[node] = std::min(lowlink_[node], index_[next]);
+            }
+        }
+
+        if (lowlink_[node] != index_[node]) return;
+
+        std::vector<BlockId> component;
+        while (true) {
+            const BlockId current = stack_.back();
+            stack_.pop_back();
+            on_stack_[current] = false;
+            component.push_back(current);
+            if (current == node) break;
+        }
+        components_.push_back(std::move(component));
+    }
+
+    const std::vector<std::vector<BlockId>>& graph_;
+    std::vector<int> index_;
+    std::vector<int> lowlink_;
+    std::vector<bool> on_stack_;
+    std::vector<BlockId> stack_;
+    std::vector<std::vector<BlockId>> components_;
+    int next_index_ = 0;
+};
+```
+
+时间复杂度 `O(V + E)`，额外空间 `O(V)`，但递归 DFS 仍有栈深风险。
+
+## 3.3 Natural Loop
+
+若 CFG 边 `latch -> header` 中，`header` 支配 `latch`，这是一条 back edge。该边对应 natural loop：
+
+1. 把 `header` 和 `latch` 放入集合；
+2. 从 `latch` 沿 predecessor 反向遍历；
+3. 直到所有能在不越过 header 的情况下到达 latch 的节点都加入。
+
+Natural loop 有单一 header。若一个强连通区域有多个外部入口，它是不可约控制流，不能简单当作单 header 自然循环处理。
+
+## 3.4 循环树并非天然存在于任意 SCC
+
+结构化程序常形成嵌套循环，但任意 CFG 中循环可能重叠或不可约。编译器 LoopInfo 一般依赖 dominance 定义 natural loop，再组织 loop forest。
+
+讨论时不要把以下概念混为一谈：
+
+- DFS 发现 back edge；
+- SCC 表示互相可达区域；
+- natural loop 依赖“header 支配 latch”；
+- loop nesting forest 依赖特定循环定义。
+
+---
+
+# 4. 支配关系与 Dominance Frontier
+
+## 4.1 定义
+
+在入口可达 CFG 中，如果从入口到 B 的每条路径都经过 A，则 A **dominate** B。
+
+性质：
+
+- 每个可达节点支配自身；
+- 入口支配所有可达节点；
+- 除入口外，每个可达节点有唯一 immediate dominator；
+- immediate dominator 关系构成 dominator tree。
+
+不可达块的 dominance 语义必须由具体 API 约定，分析前通常先限定入口可达子图。
+
+## 4.2 集合方程
+
+教学用迭代算法：
+
+```text
+Dom(entry) = {entry}
+Dom(b) = {b} union intersection(Dom(p) for p in predecessors(b))
+```
+
+初始化除入口外的可达节点为“所有可达节点”，反复应用方程直到不再变化。
+
+```mermaid
+flowchart TD
+    E[Entry] --> A[A]
+    A --> B[B]
+    A --> C[C]
+    B --> D[D]
+    C --> D
+    D --> X[Exit]
+```
+
+在该图中：
+
+```text
+Dom(D) = {Entry, A, D}
+```
+
+B 和 C 都不支配 D，因为存在绕过它们的另一条路径。
+
+## 4.3 真实算法
+
+集合迭代容易理解，但在大型 CFG 上成本高。常见实现路线：
+
+- Cooper-Harvey-Kennedy：按 RPO 迭代 immediate dominator，工程实现简单；
+- Lengauer-Tarjan：接近线性复杂度，适合大型图；
+- CFG 增量更新：局部修改后避免完全重算，但实现与失效管理更复杂。
+
+实际学习不必一开始就手写 Lengauer-Tarjan，但应能清楚解释集合方程、idom 和支配树用途。
+
+## 4.4 Dominance Frontier
+
+节点 A 的 dominance frontier 包含这样的节点 B：
+
+- A 支配 B 的至少一个前驱；
+- A 不严格支配 B。
+
+直觉上，它是“A 的定义沿不同控制流路径传播后可能发生合流”的边界。
+
+用 immediate dominator 计算的一种经典方法：
+
+```text
+for each block b with at least two predecessors:
+    for each predecessor p of b:
+        runner = p
+        while runner != idom[b]:
+            DF[runner].insert(b)
+            runner = idom[runner]
+```
+
+## 4.5 用途
+
+- SSA 中决定 PHI 候选位置；
+- 控制依赖分析使用 post-dominance frontier；
+- 判断代码移动位置；
+- 构建 MemorySSA 等结构。
+
+支配关系回答的是“所有从入口来的路径”；post-dominance 则反向回答“所有到出口的路径”。多出口 CFG 通常可引入虚拟统一出口以便分析。
+
+---
+
+# 5. 数据流分析与 Worklist
+
+## 5.1 数据流问题的组成
+
+一个经典数据流分析包含：
+
+- Domain：每个程序点保存什么状态；
+- Lattice：状态如何排序、合并；
+- Transfer function：指令或基本块如何改变状态；
+- Direction：前向还是后向；
+- Meet：来自多条边的信息如何合并；
+- Boundary condition：入口或出口初值；
+- Fixed point：反复传播直到状态不再变化。
+
+常见问题：
+
+| 分析 | 方向 | 合并 | 直观含义 |
+|---|---|---|---|
+| Reaching Definitions | 前向 | Union | 可能到达此处的定义 |
+| Available Expressions | 前向 | Intersection | 所有路径上都已计算且未失效 |
+| Live Variables | 后向 | Union | 后续某条路径可能使用的值 |
+| Very Busy Expressions | 后向 | Intersection | 所有路径上都会先被求值 |
+
+Union 常对应 may analysis，intersection 常对应 must analysis，但仍应根据具体 domain 和偏序定义判断。
+
+## 5.2 为什么会收敛
+
+经典框架通常要求：
+
+- 格高度有限，或使用 widening 等机制保证终止；
+- transfer function 单调；
+- 每次更新沿偏序单调前进。
+
+在有限 BitSet domain 中，每个位通常只会从 0 变 1，或按对偶方向从 1 变 0，所以最终会到 fixed point。
+
+如果 transfer 非单调、状态无限增长或浮点近似更新无终止条件，就不能仅凭“有 worklist”保证收敛。
+
+## 5.3 通用 Worklist 思路
+
+```text
+初始化每个节点的 IN/OUT
+把可能需要处理的节点放入 worklist
+
+while worklist 非空:
+    b = pop(worklist)
+    old = state[b]
+    merged = meet(state[p] for p in neighbors)
+    state[b] = transfer(b, merged)
+    if state[b] changed:
+        把可能受影响的邻居加入 worklist
+```
+
+关键工程问题：
+
+- 节点是否已在队列中，避免无限重复入队；
+- FIFO、LIFO、RPO 或优先队列会影响收敛速度；
+- 只在状态真正变化时传播；
+- block transfer 是否按指令逐条计算；
+- CFG 改变后分析结果是否全部失效；
+- 稠密 BitSet 和稀疏集合怎样选择。
+
+## 5.4 Must Analysis 的初始化
+
+Intersection 分析不能把所有节点随意初始化为空集，否则可能永远得到过小结果。常见做法是：
+
+- 边界节点按语义初始化；
+- 其他节点初始化为 lattice top；
+- 再通过 intersection 向下收敛。
+
+具体的 top/bottom 含义取决于偏序定义，不能机械记忆“全 1 就是 top”。
+
+## 5.5 MOP 与 MFP
+
+- MOP，Meet Over all Paths：理论上枚举所有路径后合并；有环时路径无限；
+- MFP，Maximum Fixed Point 或相应固定点解：通过数据流方程迭代获得；
+- 对 distributive transfer function，经典框架下 MFP 与 MOP 可以一致；
+- 仅单调但不 distributive 时，固定点结果可能比理想路径解更保守。
+
+理解“保守”方向非常重要：优化不能因为分析过度乐观而改变语义，但可以因为分析保守而错过优化。
+
+---
+
+# 6. BitSet、活跃变量与到达定值
+
+## 6.1 为什么编译器爱用 BitSet
+
+若 universe 中对象可以编号为 `[0, N)`，BitSet 能把集合操作变为 word 级位运算：
+
+```text
+Union        A | B
+Intersection A & B
+Difference   A & ~B
+Membership   word[index / 64] 的某一位
+```
+
+复杂度是 `O(N / word_bits)`，连续内存也利于缓存和 SIMD。
+
+## 6.2 一个最小动态 BitSet
+
+```cpp
+#include <algorithm>
+#include <cstdint>
+#include <stdexcept>
+#include <vector>
+
+class DynamicBitSet {
+public:
+    explicit DynamicBitSet(std::size_t bit_count = 0, bool value = false)
+        : bit_count_(bit_count),
+          words_((bit_count + kWordBits - 1) / kWordBits,
+                 value ? ~Word{0} : Word{0}) {
+        clear_unused_high_bits();
+    }
+
+    std::size_t size() const noexcept { return bit_count_; }
+
+    bool test(std::size_t bit) const {
+        check_index(bit);
+        return (words_[word_index(bit)] & bit_mask(bit)) != 0;
+    }
+
+    void set(std::size_t bit) {
+        check_index(bit);
+        words_[word_index(bit)] |= bit_mask(bit);
+    }
+
+    void reset(std::size_t bit) {
+        check_index(bit);
+        words_[word_index(bit)] &= ~bit_mask(bit);
+    }
+
+    bool union_with(const DynamicBitSet& other) {
+        check_compatible(other);
+        bool changed = false;
+        for (std::size_t i = 0; i < words_.size(); ++i) {
+            const Word merged = words_[i] | other.words_[i];
+            changed |= merged != words_[i];
+            words_[i] = merged;
+        }
+        return changed;
+    }
+
+    bool intersect_with(const DynamicBitSet& other) {
+        check_compatible(other);
+        bool changed = false;
+        for (std::size_t i = 0; i < words_.size(); ++i) {
+            const Word merged = words_[i] & other.words_[i];
+            changed |= merged != words_[i];
+            words_[i] = merged;
+        }
+        return changed;
+    }
+
+    void subtract(const DynamicBitSet& other) {
+        check_compatible(other);
+        for (std::size_t i = 0; i < words_.size(); ++i) {
+            words_[i] &= ~other.words_[i];
+        }
+        clear_unused_high_bits();
+    }
+
+    std::size_t count() const noexcept {
+        std::size_t result = 0;
+        for (Word word : words_) {
+            while (word != 0) {
+                word &= word - 1;
+                ++result;
+            }
+        }
+        return result;
+    }
+
+    friend bool operator==(const DynamicBitSet& a, const DynamicBitSet& b) {
+        return a.bit_count_ == b.bit_count_ && a.words_ == b.words_;
+    }
+
+    friend bool operator!=(const DynamicBitSet& a, const DynamicBitSet& b) {
+        return !(a == b);
+    }
+
+private:
+    using Word = std::uint64_t;
+    static constexpr std::size_t kWordBits = 64;
+
+    static std::size_t word_index(std::size_t bit) noexcept {
+        return bit / kWordBits;
+    }
+
+    static Word bit_mask(std::size_t bit) noexcept {
+        return Word{1} << (bit % kWordBits);
+    }
+
+    void check_index(std::size_t bit) const {
+        if (bit >= bit_count_) throw std::out_of_range("bit index");
+    }
+
+    void check_compatible(const DynamicBitSet& other) const {
+        if (bit_count_ != other.bit_count_) {
+            throw std::invalid_argument("incompatible bitsets");
+        }
+    }
+
+    void clear_unused_high_bits() noexcept {
+        if (words_.empty() || bit_count_ % kWordBits == 0) return;
+        const std::size_t used = bit_count_ % kWordBits;
+        words_.back() &= (Word{1} << used) - 1;
+    }
+
+    std::size_t bit_count_{};
+    std::vector<Word> words_;
+};
+```
+
+生产级实现还会提供 find-first-set、迭代置位元素、SmallBitVector 优化、SIMD word 操作和分配器控制。
+
+## 6.3 Dense 还是 Sparse
+
+| 条件 | 更可能适合 |
+|---|---|
+| universe 小、集合较密、频繁交并 | Dense BitSet |
+| universe 巨大、集合只有少数元素 | Sparse Set / sorted vector |
+| 小集合很多 | SmallVector / inline storage |
+| 集合密度动态变化 | Hybrid / adaptive representation |
+
+不要只比较算法阶数。一个含百万位但只置三位的 BitSet，每次 union 都扫描全部 words，可能远慢于三个整数的有序数组。
+
+## 6.4 活跃变量方程
+
+对每个基本块 B：
+
+```text
+LiveOut[B] = Union(LiveIn[S] for S in successors(B))
+LiveIn[B]  = Use[B] union (LiveOut[B] - Def[B])
+```
+
+其中：
+
+- `Use[B]`：在块内首次定义前被使用的变量；
+- `Def[B]`：块内定义的变量；
+- 这是后向 may analysis；
+- 通常从出口方向传播。
+
+## 6.5 Worklist 实现
+
+```cpp
+#include <deque>
+
+struct LivenessResult {
+    std::vector<DynamicBitSet> live_in;
+    std::vector<DynamicBitSet> live_out;
+};
+
+LivenessResult compute_liveness(const ControlFlowGraph& cfg,
+                                 const std::vector<DynamicBitSet>& use,
+                                 const std::vector<DynamicBitSet>& def,
+                                 std::size_t value_count) {
+    const std::size_t block_count = cfg.successors.size();
+    if (use.size() != block_count || def.size() != block_count) {
+        throw std::invalid_argument("liveness input size mismatch");
+    }
+
+    LivenessResult result{
+        std::vector<DynamicBitSet>(block_count, DynamicBitSet(value_count)),
+        std::vector<DynamicBitSet>(block_count, DynamicBitSet(value_count))};
+
+    std::deque<BlockId> worklist;
+    std::vector<bool> queued(block_count, true);
+    for (BlockId block = 0; block < block_count; ++block) {
+        worklist.push_back(block);
+    }
+
+    while (!worklist.empty()) {
+        const BlockId block = worklist.front();
+        worklist.pop_front();
+        queued[block] = false;
+
+        DynamicBitSet new_out(value_count);
+        for (const BlockId successor : cfg.successors[block]) {
+            new_out.union_with(result.live_in[successor]);
+        }
+
+        DynamicBitSet new_in = new_out;
+        new_in.subtract(def[block]);
+        new_in.union_with(use[block]);
+
+        if (new_out == result.live_out[block] &&
+            new_in == result.live_in[block]) {
+            continue;
+        }
+
+        result.live_out[block] = std::move(new_out);
+        result.live_in[block] = std::move(new_in);
+        for (const BlockId predecessor : cfg.predecessors[block]) {
+            if (!queued[predecessor]) {
+                queued[predecessor] = true;
+                worklist.push_back(predecessor);
+            }
+        }
+    }
+    return result;
+}
+```
+
+这段代码按 block 粒度计算。真实寄存器分配还需要沿 block 内指令反向扫描，以获得每条指令位置的 kill、dead、live range 和 PHI edge use。
+
+## 6.6 PHI 的边语义
+
+SSA PHI 的输入使用发生在对应 predecessor edge 上，而不是普通地发生在 PHI 所在块开头。做 liveness 时若忽略这一点，会把值错误地认为在所有前驱上都活跃。
+
+常见处理：
+
+- 把 PHI operand 计入对应 predecessor 的 LiveOut；
+- PHI result 在当前块入口定义；
+- critical edge split 后边语义会更容易表达，但不能假设所有 IR 都已拆边。
+
+## 6.7 到达定值
+
+令每个定义有唯一编号：
+
+```text
+ReachIn[B]  = Union(ReachOut[P] for P in predecessors(B))
+ReachOut[B] = Gen[B] union (ReachIn[B] - Kill[B])
+```
+
+这是前向 may analysis。`Kill[B]` 通常包含对同一变量的其他定义；SSA 中每个虚拟值只定义一次，很多 def-use 查询可以转为稀疏传播，不再需要传统 dense reaching-definitions。
+
+---
+
+# 7. SSA 与稀疏传播
+
+## 7.1 SSA 解决什么
+
+Static Single Assignment 要求每个 SSA value 只定义一次。控制流合并处使用 PHI 表达“值来自哪条前驱边”：
+
+```llvm
+entry:
+  br i1 %cond, label %left, label %right
+
+left:
+  %x.left = add i32 %a, 1
+  br label %merge
+
+right:
+  %x.right = sub i32 %a, 1
+  br label %merge
+
+merge:
+  %x = phi i32 [ %x.left, %left ], [ %x.right, %right ]
+```
+
+优势：
+
+- def-use 链明确；
+- 常量传播、DCE、GVN 等可直接沿 use 传播；
+- 每个 value 不需要传统“同名变量的多个 reaching definitions”；
+- 仍需 MemorySSA 或 alias analysis 处理内存状态。
+
+## 7.2 PHI 放置
+
+Cytron 算法的核心是 iterated dominance frontier：
+
+```text
+worklist = 定义变量 v 的所有 block
+has_phi = empty
+
+while worklist 非空:
+    x = pop(worklist)
+    for y in DF[x]:
+        if y 尚未为 v 放 PHI:
+            在 y 放置 v 的 PHI
+            if y 原本不定义 v:
+                push y
+```
+
+为什么 PHI 自身也可能继续加入 worklist？因为 PHI 是一个新定义，它的值继续流向后续合流点。
+
+## 7.3 Minimal、Pruned 与 Semi-pruned SSA
+
+- Minimal SSA：只避免明显多余的 PHI，但可能在变量不活跃处放 PHI；
+- Pruned SSA：结合 liveness，只在变量 live-in 的合流点放 PHI；
+- Semi-pruned SSA：用较便宜的近似减少部分无用 PHI。
+
+因此 dominance frontier 给出候选位置，liveness 决定很多候选是否真的需要。
+
+## 7.4 重命名
+
+沿 dominator tree 做 DFS，为每个源变量维护一个定义栈：
+
+```text
+rename(block):
+    记录当前栈高度
+
+    为 block 中的 PHI result 分配新版本并压栈
+    按指令顺序:
+        每个 use 替换为对应变量栈顶版本
+        每个 def 分配新版本并压栈
+
+    对每条 block -> successor 边:
+        填写 successor PHI 中属于该边的 operand
+
+    for child in dominator_tree_children(block):
+        rename(child)
+
+    恢复进入 block 前的栈高度
+```
+
+关键点：遍历的是 dominator tree，不是普通 CFG DFS。支配树保证当前栈顶是沿所有到达当前定义域路径都合法的最近定义。
+
+## 7.5 从 SSA 退出
+
+机器后端通常不能直接执行 PHI。PHI elimination 会在 predecessor edge 上插入 parallel copy，再把 parallel copy 顺序化。
+
+若边是 critical edge：
+
+```text
+predecessor 有多个 successor
+且 successor 有多个 predecessor
+```
+
+直接把 copy 放在任一端都可能在错误路径执行，通常需要 split critical edge 或使用目标后端能表达的边级操作。
+
+Parallel copy 顺序化还要处理环：
+
+```text
+a <- b
+b <- a
+```
+
+必须借助临时值，不能逐条直接覆盖。
+
+## 7.6 稀疏条件常量传播 SCCP
+
+SCCP 同时传播：
+
+- 哪些 CFG edge 可执行；
+- SSA value 的格状态。
+
+简化值格：
+
+```text
+Unknown / Undef
+      ↓
+Constant(c)
+      ↓
+Overdefined
+```
+
+合并规则示例：
+
+- Unknown 与 Constant(3) 合并为 Constant(3)；
+- Constant(3) 与 Constant(3) 仍为 Constant(3)；
+- Constant(3) 与 Constant(4) 合并为 Overdefined；
+- Overdefined 与任何状态合并仍为 Overdefined。
+
+如果分支条件成为常量，只标记实际分支边可执行；不可执行前驱不参与 PHI 合并。这比普通常量传播更精确。
+
+LLVM 中还要严格区分 `undef`、poison、`freeze`、trap 和 UB。教学格里的 Unknown 不能不加说明地等同于 LLVM `undef`。
+
+## 7.7 Worklist 的稀疏化
+
+传统 dense 分析反复扫描 block 集合；SSA 上可以沿 def-use edge 只通知真正依赖该值的用户。常见两个队列：
+
+- CFG worklist：新发现可执行的 block/edge；
+- SSA worklist：值状态变化后需要重新求值的 user。
+
+稀疏传播减少无关节点扫描，但维护 def-use、边可执行状态和删除指令时的失效也更复杂。
+
+---
+
+# 8. Live Interval 与寄存器分配
+
+## 8.1 从 Liveness 到冲突
+
+若两个虚拟寄存器在某程序点同时活跃，它们不能占用同一个物理寄存器。可以表示为：
+
+- Interference Graph：节点是虚拟寄存器，边表示冲突；
+- Live Interval：在线性化程序位置上的活跃范围；
+- Live Range：可能由多个不连续 segment 组成，单一 `[start, end)` 只是近似。
+
+真实后端还要考虑：
+
+- register class / bank；
+- fixed physical register；
+- caller-saved / callee-saved；
+- subregister 与 lane mask；
+- early-clobber、tied operand；
+- call clobber、inline asm；
+- spill slot、rematerialization 和 debug value。
+
+## 8.2 区间操作
+
+半开区间 `[start, end)` 的合并：
+
+```cpp
+#include <algorithm>
+#include <utility>
+#include <vector>
+
+using Segment = std::pair<std::size_t, std::size_t>;
+
+std::vector<Segment> merge_segments(std::vector<Segment> segments) {
+    segments.erase(
+        std::remove_if(segments.begin(), segments.end(),
+                       [](const Segment& segment) {
+                           return segment.first >= segment.second;
+                       }),
+        segments.end());
+    std::sort(segments.begin(), segments.end());
+
+    std::vector<Segment> merged;
+    for (const auto& [start, end] : segments) {
+        if (merged.empty() || merged.back().second < start) {
+            merged.push_back({start, end});
+        } else {
+            merged.back().second = std::max(merged.back().second, end);
+        }
+    }
+    return merged;
+}
+```
+
+这里把首尾相接的 `[a,b)` 与 `[b,c)` 合并，因为它们并集连续。判断寄存器冲突时，端点相接本身不重叠，但还要结合指令 use/def 发生在位置的前半还是后半等 slot index 语义。
+
+## 8.3 Linear Scan
+
+Linear Scan 按 interval 起点排序，维护当前活跃集合：
+
+1. 过期 interval 释放寄存器；
+2. 有空闲寄存器则分配；
+3. 否则选择当前或某个 active interval spill；
+4. 必要时切分 live range。
+
+教学版实现：
+
+```cpp
+#include <algorithm>
+#include <limits>
+#include <numeric>
+
+struct LiveInterval {
+    std::size_t vreg{};
+    std::size_t start{};
+    std::size_t end{}; // 半开区间
+    int physical_register = -1;
+    bool spilled = false;
+};
+
+void linear_scan_allocate(std::vector<LiveInterval>& intervals,
+                          int register_count) {
+    if (register_count < 0) {
+        throw std::invalid_argument("negative register count");
+    }
+
+    std::sort(intervals.begin(), intervals.end(),
+              [](const LiveInterval& a, const LiveInterval& b) {
+                  if (a.start != b.start) return a.start < b.start;
+                  return a.end < b.end;
+              });
+
+    std::vector<int> free_registers(static_cast<std::size_t>(register_count));
+    std::iota(free_registers.begin(), free_registers.end(), 0);
+    std::vector<LiveInterval*> active;
+
+    auto sort_active = [&] {
+        std::sort(active.begin(), active.end(),
+                  [](const LiveInterval* a, const LiveInterval* b) {
+                      return a->end < b->end;
+                  });
+    };
+
+    for (LiveInterval& current : intervals) {
+        if (current.start >= current.end) continue;
+
+        auto first_live = active.begin();
+        while (first_live != active.end() &&
+               (*first_live)->end <= current.start) {
+            free_registers.push_back((*first_live)->physical_register);
+            ++first_live;
+        }
+        active.erase(active.begin(), first_live);
+
+        if (!free_registers.empty()) {
+            current.physical_register = free_registers.back();
+            free_registers.pop_back();
+            active.push_back(&current);
+            sort_active();
+            continue;
+        }
+
+        if (active.empty()) {
+            current.spilled = true;
+            continue;
+        }
+
+        LiveInterval* spill_candidate = active.back();
+        if (spill_candidate->end > current.end) {
+            current.physical_register = spill_candidate->physical_register;
+            spill_candidate->physical_register = -1;
+            spill_candidate->spilled = true;
+            active.back() = &current;
+            sort_active();
+        } else {
+            current.spilled = true;
+        }
+    }
+}
+```
+
+这个版本只处理单段 interval 和同质寄存器，目的是展示核心策略。真实分配器绝不能直接照搬。
+
+## 8.4 为什么选择结束最晚者 spill
+
+如果 active 中某 interval 结束得比 current 更晚，让 current 使用它的寄存器可以更早释放资源。这是局部启发式，不等于全局最优。
+
+更真实的 spill cost 会考虑：
+
+- use/def 频率与 block frequency；
+- loop depth；
+- reload 是否能被 fold；
+- rematerialization 是否比 load 便宜；
+- spill 对其他 register class 的影响；
+- live range splitting 位置。
+
+## 8.5 Graph Coloring
+
+构建冲突图后，K 个物理寄存器对应 K-coloring：
+
+1. Simplify：反复移除度数小于 K 的节点并压栈；
+2. Coalesce：尝试合并 copy 两端，消除 move；
+3. Freeze：放弃某些 coalesce 候选；
+4. Spill：没有低度节点时选择潜在 spill；
+5. Select：逆序弹栈并选择不与邻居冲突的颜色；
+6. Rewrite：插入 spill/reload 后重新分析。
+
+一般图着色是 NP-complete，所以工业分配器使用启发式。Coalescing 能减少 copy，却可能增加节点度数和 spill 风险。
+
+## 8.6 SSA-based Allocation
+
+SSA live range 在很多条件下具有 chordal graph 性质，可利用支配关系获得更高效着色。但 PHI、寄存器约束、SSA destruction、copy coalescing 和目标机器细节仍会使生产实现复杂。
+
+---
+
+# 9. 依赖 DAG 与指令调度
+
+## 9.1 依赖类型
+
+构建调度 DAG 时至少有：
+
+- RAW，Read After Write：真实数据依赖；
+- WAR，Write After Read：反依赖；
+- WAW，Write After Write：输出依赖；
+- Memory dependency：可能 alias 的 load/store；
+- Control dependency；
+- 隐式寄存器、flags、barrier、call 等目标约束。
+
+寄存器重命名可以消除 WAR/WAW，但不能消除 RAW。Alias analysis 越保守，内存依赖边越多，可调度空间越小。
+
+## 9.2 Critical Path
+
+在 DAG 上，从节点到出口的最长延迟可作为调度优先级：
+
+```text
+height(node) = latency(node) + max(height(successor))
+```
+
+先调度关键路径上的节点通常有助于缩短总执行时间，但还要考虑资源端口和寄存器压力。
+
+```cpp
+#include <queue>
+
+struct SchedulingDag {
+    std::vector<std::vector<std::size_t>> successors;
+    std::vector<int> latency;
+};
+
+std::optional<std::vector<int>> compute_critical_heights(
+    const SchedulingDag& dag) {
+    const std::size_t n = dag.successors.size();
+    if (dag.latency.size() != n) return std::nullopt;
+
+    std::vector<std::size_t> indegree(n, 0);
+    for (const auto& edges : dag.successors) {
+        for (const std::size_t to : edges) {
+            if (to >= n) return std::nullopt;
+            ++indegree[to];
+        }
+    }
+
+    std::queue<std::size_t> ready;
+    for (std::size_t node = 0; node < n; ++node) {
+        if (indegree[node] == 0) ready.push(node);
+    }
+
+    std::vector<std::size_t> topo;
+    while (!ready.empty()) {
+        const std::size_t node = ready.front();
+        ready.pop();
+        topo.push_back(node);
+        for (const std::size_t next : dag.successors[node]) {
+            if (--indegree[next] == 0) ready.push(next);
+        }
+    }
+    if (topo.size() != n) return std::nullopt;
+
+    std::vector<int> height(n, 0);
+    for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
+        int successor_height = 0;
+        for (const std::size_t next : dag.successors[*it]) {
+            successor_height = std::max(successor_height, height[next]);
+        }
+        height[*it] = dag.latency[*it] + successor_height;
+    }
+    return height;
+}
+```
+
+## 9.3 List Scheduling
+
+基本算法：
+
+```text
+计算每个节点未满足前驱数
+ready = 所有前驱均已完成的节点
+
+for each cycle:
+    从 ready 中按优先级选节点
+    检查功能单元、issue width、数据 ready time
+    发射可用节点
+    更新资源占用和后继
+```
+
+优先级可以综合：
+
+- critical path height；
+- block frequency；
+- latency hiding；
+- resource pressure；
+- register pressure；
+- load 提前量；
+- 代码大小。
+
+## 9.4 资源约束
+
+仅有拓扑序还不够。若一周期只有两个 issue slot、一个 load port 和一个 vector ALU，就必须建模：
+
+- 指令占用哪些资源；
+- 资源占用多少周期；
+- operand 何时 ready；
+- 多条指令是否能同周期发射；
+- target itinerary / scheduling model。
+
+这是资源受限项目调度问题的一种形式，最优求解通常困难，工程上使用启发式。
+
+## 9.5 Pre-RA 与 Post-RA
+
+- Pre-RA：虚拟寄存器尚未映射，移动自由度大，但要估计寄存器压力；
+- Post-RA：看到真实物理寄存器和 hazard，移动空间较小；
+- 过度提前计算会延长 live range，引发 spill；
+- 调度和寄存器分配具有天然耦合，不能孤立优化。
+
+## 9.6 GPU 调度差异
+
+GPU 通过大量 warp 切换隐藏 latency，但编译器仍需考虑：
+
+- 每线程寄存器数影响 occupancy；
+- memory pipeline 与 compute pipeline 平衡；
+- barrier 限制跨区域移动；
+- divergence 让同 warp 路径串行化；
+- software pipelining 和 double buffering；
+- Tensor Core 指令的数据布局和依赖距离。
+
+---
+
+# 10. 张量 Shape、Stride 与 Layout
+
+## 10.1 多维下标如何变成地址
+
+一个 rank 为 R 的张量可用：
+
+```text
+shape   = [d0, d1, ..., d(R-1)]
+stride  = [s0, s1, ..., s(R-1)]
+offset  = base + sum(index[i] * stride[i])
+```
+
+若 stride 以元素为单位，最后还要乘元素字节数；若 stride 已按字节定义，就不能重复乘。
+
+行主序连续二维矩阵 `[M, N]`：
+
+```text
+stride = [N, 1]
+offset(i, j) = i * N + j
+```
+
+转置 view 可以只交换 shape 和 stride，不立即搬移数据：
+
+```text
+shape  = [N, M]
+stride = [1, N]
+```
+
+## 10.2 安全计算线性偏移
+
+```cpp
+#include <limits>
+#include <optional>
+#include <vector>
+
+std::optional<std::size_t> linear_offset(
+    const std::vector<std::size_t>& shape,
+    const std::vector<std::size_t>& stride,
+    const std::vector<std::size_t>& index) {
+    if (shape.size() != stride.size() || shape.size() != index.size()) {
+        return std::nullopt;
+    }
+
+    std::size_t offset = 0;
+    for (std::size_t axis = 0; axis < shape.size(); ++axis) {
+        if (index[axis] >= shape[axis]) return std::nullopt;
+        if (index[axis] != 0 &&
+            stride[axis] > std::numeric_limits<std::size_t>::max() / index[axis]) {
+            return std::nullopt;
+        }
+        const std::size_t term = index[axis] * stride[axis];
+        if (offset > std::numeric_limits<std::size_t>::max() - term) {
+            return std::nullopt;
+        }
+        offset += term;
+    }
+    return offset;
+}
+```
+
+函数返回相对于 storage 起点的元素偏移，实际地址还要结合 base pointer 和元素字节数。这里没有处理负 stride；某些 runtime 支持反向 view，需要有符号偏移并验证最终地址范围。
+
+## 10.3 Contiguous 不是唯一 Layout
+
+真实布局可能包含：
+
+- padding；
+- blocked / tiled layout；
+- channels-last；
+- vector lane packing；
+- swizzle；
+- GPU shared-memory bank-aware layout；
+- 稀疏格式 CSR/CSC/BSR；
+- quantized packed int4/int8。
+
+因此“shape 相同”不代表可直接复用同一 kernel，“转置”也不一定需要物理 copy。
+
+## 10.4 Broadcasting
+
+广播轴可看作 stride 为 0：多个逻辑下标读取同一个物理元素。优化时要注意：
+
+- 读广播通常安全；
+- 写入 stride-0 view 可能让多个逻辑元素 alias；
+- 并行写会产生 data race；
+- inplace 变换必须证明别名和覆盖顺序合法。
+
+## 10.5 Shape Inference
+
+Shape inference 可能是：
+
+- 静态整数传播；
+- 符号表达式；
+- 区间或整除约束；
+- 运行时 guard；
+- 无法证明时保留 dynamic dimension。
+
+以矩阵乘法为例：
+
+```text
+A: [M, K]
+B: [K, N]
+C: [M, N]
+```
+
+若两个 K 是动态值，编译器只能证明符号相等、插入 runtime check，或生成通用 fallback。不能因测试输入相等就静态假设永远相等。
+
+## 10.6 Affine Indexing
+
+仿射表达式形如：
+
+```text
+c0 + c1*i1 + c2*i2 + ...
+```
+
+Loop interchange、tiling、fusion、dependence analysis 常利用仿射结构。出现数据相关下标 `A[B[i]]` 后，经典 affine 分析通常必须保守处理。
+
+---
+
+# 11. GEMM、Tiling 与 Roofline
+
+## 11.1 GEMM 基础
+
+```text
+C[M,N] += A[M,K] * B[K,N]
+```
+
+浮点运算量通常约为：
+
+```text
+2 * M * N * K FLOPs
+```
+
+因为每个输出元素执行 K 次乘加，若把 multiply 和 add 各计一次就是 `2K`。
+
+## 11.2 循环顺序影响局部性
+
+行主序下，一个常见顺序：
+
+```cpp
+for (std::size_t i = 0; i < m; ++i) {
+    for (std::size_t k = 0; k < k_size; ++k) {
+        const float a = A[i * lda + k];
+        for (std::size_t j = 0; j < n; ++j) {
+            C[i * ldc + j] += a * B[k * ldb + j];
+        }
+    }
+}
+```
+
+内层 j 连续访问 B 的一行和 C 的一行，比 `i-j-k` 中沿 k 跨行访问 B 更容易利用缓存和向量化。但最优顺序取决于 layout、尺寸和硬件。
+
+## 11.3 Blocked GEMM
+
+```cpp
+#include <algorithm>
+#include <cstddef>
+#include <stdexcept>
+
+void blocked_gemm_accumulate(const float* a,
+                             const float* b,
+                             float* c,
+                             std::size_t m,
+                             std::size_t n,
+                             std::size_t k_size,
+                             std::size_t lda,
+                             std::size_t ldb,
+                             std::size_t ldc,
+                             std::size_t block_m,
+                             std::size_t block_n,
+                             std::size_t block_k) {
+    const bool has_a = m != 0 && k_size != 0;
+    const bool has_b = k_size != 0 && n != 0;
+    const bool has_c = m != 0 && n != 0;
+    if ((has_a && (a == nullptr || lda < k_size)) ||
+        (has_b && (b == nullptr || ldb < n)) ||
+        (has_c && (c == nullptr || ldc < n)) ||
+        block_m == 0 || block_n == 0 || block_k == 0) {
+        throw std::invalid_argument("invalid GEMM arguments");
+    }
+
+    for (std::size_t ii = 0; ii < m;) {
+        const std::size_t i_end = ii + std::min(block_m, m - ii);
+        for (std::size_t kk = 0; kk < k_size;) {
+            const std::size_t k_end = kk + std::min(block_k, k_size - kk);
+            for (std::size_t jj = 0; jj < n;) {
+                const std::size_t j_end = jj + std::min(block_n, n - jj);
+                for (std::size_t i = ii; i < i_end; ++i) {
+                    for (std::size_t k = kk; k < k_end; ++k) {
+                        const float a_value = a[i * lda + k];
+                        for (std::size_t j = jj; j < j_end; ++j) {
+                            c[i * ldc + j] += a_value * b[k * ldb + j];
+                        }
+                    }
+                }
+                jj = j_end;
+            }
+            kk = k_end;
+        }
+        ii = i_end;
+    }
+}
+```
+
+接口语义是累加到 C，调用者必须事先初始化 C，并保证三块存储的实际长度及地址乘加都可表示。生产接口可以接收显式 buffer 长度或安全 view，避免只凭裸指针和 leading dimension 推断边界。示例没有实现：
+
+- micro-kernel 和 register tiling；
+- SIMD intrinsics；
+- packed panel；
+- prefetch；
+- 多线程与 NUMA；
+- mixed precision 和数值补偿。
+
+## 11.4 为什么 Tiling 有效
+
+朴素循环会反复把 A、B、C 数据从低层内存搬入 cache。Tiling 让一个小块在更快层级中被重复使用，从而提高数据复用。
+
+Tile 尺寸需要同时满足：
+
+- 工作集能放入目标 cache/shared memory；
+- 向量宽度和 Tensor Core tile 对齐；
+- 寄存器使用不能过高；
+- 边界 tile 正确处理；
+- 线程块数量足以占满设备；
+- padding 不引入过多无效计算。
+
+## 11.5 Arithmetic Intensity
+
+算术强度：
+
+```text
+Arithmetic Intensity = FLOPs / Bytes transferred
+```
+
+Roofline 的简化性能上界：
+
+```text
+Attainable Performance
+= min(Peak Compute, Memory Bandwidth * Arithmetic Intensity)
+```
+
+- 低算术强度通常受带宽限制；
+- 高算术强度可能受计算峰值限制；
+- Tiling 通过复用减少慢速内存流量，提高有效算术强度；
+- 实际性能还受指令吞吐、延迟、occupancy、同步和 launch overhead 影响。
+
+## 11.6 合法性与收益
+
+Loop interchange、fusion 和 tiling 先要满足 dependence legality。浮点 reduction 的重排还可能改变舍入结果：
+
+- 严格 IEEE 语义下，不能随意重结合；
+- `fast-math` 或显式允许近似时才有更大空间；
+- 即使合法，tile 太小或太大也可能更慢。
+
+---
+
+# 12. GPU 并行原语
+
+## 12.1 SIMT 执行模型
+
+CUDA 风格层次：
+
+```text
+Grid
+  → Thread Block / CTA
+      → Warp
+          → Thread
+```
+
+需要区分：
+
+- 线程是逻辑执行实例；
+- warp 是常见硬件调度粒度；
+- block 内线程可用 shared memory 和 barrier 协作；
+- 不同 block 一般不能依赖普通 block barrier 同步；
+- warp size、资源限制和具体指令能力属于目标相关信息。
+
+## 12.2 Reduction
+
+归约把一组元素通过结合运算合成一个结果，例如 sum、max。树形归约把串行深度从 `O(n)` 降到 `O(log n)`，总工作仍为 `O(n)`。
+
+教学版 CUDA kernel：
+
+```cpp
+// 要求 blockDim.x 是 2 的幂；每个 block 输出一个 partial sum。
+__global__ void reduce_sum_blocks(const float* input,
+                                  float* block_sums,
+                                  std::size_t size) {
+    extern __shared__ float scratch[];
+    const unsigned int lane = threadIdx.x;
+    const std::size_t first =
+        static_cast<std::size_t>(blockIdx.x) * blockDim.x * 2 + lane;
+
+    float value = 0.0F;
+    if (first < size) value += input[first];
+    if (first + blockDim.x < size) value += input[first + blockDim.x];
+    scratch[lane] = value;
+    __syncthreads();
+
+    for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (lane < stride) {
+            scratch[lane] += scratch[lane + stride];
+        }
+        __syncthreads();
+    }
+
+    if (lane == 0) block_sums[blockIdx.x] = scratch[0];
+}
+```
+
+完整求和还要对 `block_sums` 再次归约。生产实现会使用 warp shuffle、更少同步、向量化 load，并针对数据类型和架构调优。
+
+浮点加法不满足严格结合律，不同归约树可能产生不同低位结果。并行正确性要说明允许的数值误差，而不是只比较 bitwise equal。
+
+## 12.3 Prefix Scan
+
+Scan 输出所有前缀聚合：
+
+```text
+input:          [a, b, c, d]
+exclusive scan: [e, a, a+b, a+b+c]
+inclusive scan: [a, a+b, a+b+c, a+b+c+d]
+```
+
+Blelloch scan 包含：
+
+1. upsweep/reduce：构建树形部分和；
+2. 把根设为单位元；
+3. downsweep：把前缀传播给子节点。
+
+并行工作可做到 `O(n)`，深度 `O(log n)`。Scan 是 compaction、radix sort、stream compaction 和并行内存分配的基础。
+
+## 12.4 Histogram
+
+朴素 histogram 让大量线程 atomic 更新同一组桶，热点严重。优化思路：
+
+- 每个 block 或 warp 私有直方图；
+- shared memory 中局部累加；
+- 最后合并全局结果；
+- 根据桶数、分布和 shared memory 容量选策略。
+
+私有化减少竞争但增加内存和合并成本。输入高度倾斜时热点仍需单独处理。
+
+## 12.5 Softmax
+
+稳定 softmax：
+
+```text
+m = max(x)
+s = sum(exp(x_i - m))
+y_i = exp(x_i - m) / s
+```
+
+核心原语是两次 reduction：max 和 sum。高性能实现会：
+
+- 融合读取、max、exp、sum、normalize 的部分阶段；
+- 使用在线更新合并局部 `(max, sum)`；
+- 减少 global memory round trip；
+- 处理长行、多 warp 协作和数值精度。
+
+## 12.6 Coalescing、Bank Conflict 与 Divergence
+
+### Global Memory Coalescing
+
+同一 warp 的线程访问相邻、适当对齐的地址，通常能合并为更少内存事务。若线程跨大 stride 访问，带宽利用率会下降。
+
+### Shared Memory Bank Conflict
+
+若同一 warp 多线程在一次访问中映射到同一 bank 的不同地址，访问可能串行化。Padding 或 swizzle 可改变映射；广播同一地址在某些架构上是特殊高效情况，不能笼统视为冲突。
+
+### Warp Divergence
+
+同一 warp 线程走不同控制分支时，路径通常需要掩码串行执行。可以通过数据重排、predication 或重新划分工作降低 divergence，但也可能增加额外指令。
+
+## 12.7 Occupancy 不是最终目标
+
+Occupancy 受每 block 线程数、寄存器、shared memory 和硬件上限共同约束。更高 occupancy 能帮助隐藏 latency，但：
+
+- 减少寄存器可能引入 spill；
+- 更小 tile 会降低数据复用；
+- 已有足够并行度时继续提高 occupancy 未必提升性能。
+
+最终应看吞吐、延迟、带宽利用率和瓶颈，而不是只追一个 occupancy 数字。
+
+---
+
+# 13. Fusion、内存规划与 Buffer Reuse
+
+## 13.1 为什么做算子融合
+
+假设：
+
+```text
+T = relu(A + B)
+Y = T * C
+```
+
+分开执行通常要把中间张量 T 写入显存，再读回来。融合后可能让 T 留在寄存器或 shared memory 中，减少：
+
+- kernel launch；
+- 全局内存读写；
+- 中间 buffer 容量；
+- producer/consumer 之间的同步。
+
+## 13.2 Fusion 不是越多越好
+
+过度融合可能导致：
+
+- kernel 代码体积膨胀；
+- 寄存器压力上升、occupancy 降低；
+- shared memory 超限；
+- producer 被不同 consumer 重复计算；
+- 并行维度受限；
+- 编译时间和 autotuning 空间爆炸；
+- 动态 shape 需要大量版本化；
+- 原本可调用高优化 library kernel 的算子被拆成较差自定义 kernel。
+
+因此 fusion 同时是 legality 与 profitability 问题。
+
+## 13.3 Fusion Legality
+
+至少检查：
+
+- 数据依赖方向是否被保持；
+- 是否跨越有副作用操作；
+- memory alias 是否安全；
+- reduction 的并行和同步边界；
+- layout 是否兼容；
+- inplace 写是否覆盖后续仍需读取的值；
+- device/stream/collective 边界；
+- 浮点重排是否被语义允许。
+
+## 13.4 张量生命周期
+
+对按执行顺序线性化的算子图，可以估计每个中间 buffer：
+
+```text
+start = producer 完成位置
+end   = 最后一个 consumer 完成位置之后
+size  = shape * element_size（考虑 padding/alignment）
+```
+
+生命周期不重叠且布局、对齐、memory space 兼容的 buffer 可以复用同一存储。
+
+这与 Linear Scan 寄存器分配非常相似：
+
+- tensor 对应 virtual register；
+- memory block 对应 physical register；
+- tensor lifetime 对应 live interval；
+- 容量不同使问题变成 variable-size allocation；
+- dynamic shape 使 size 可能只能运行时确定。
+
+## 13.5 Greedy Memory Planning
+
+一种简单策略：
+
+1. 按 buffer start 排序；
+2. 释放所有 end 不晚于当前 start 的 block；
+3. 从 free list 中找满足大小与对齐的最小 block；
+4. 找不到就扩展 arena；
+5. 必要时拆分或合并 free block。
+
+目标可能是：
+
+- 最小化 peak memory；
+- 最小化碎片；
+- 减少动态分配次数；
+- 保持地址稳定；
+- 避免不同 stream 的异步生命周期冲突。
+
+这些目标并不总是一致。
+
+## 13.6 In-place 与 Alias
+
+`relu(x)` 看起来可以原地覆盖 x，但必须证明：
+
+- x 没有其他尚未执行的 consumer；
+- x 不是只读常量；
+- 输出 shape/layout 与输入存储兼容；
+- view alias 不会观察到意外修改；
+- 自动微分反向过程不需要原始 x；
+- 异步 kernel 已经完成对旧值的读取。
+
+引用计数为 1 只是一个线索，不是完整的 alias 和时序证明。
+
+## 13.7 静态与动态内存规划
+
+- 完全静态 shape：编译期可给每个 buffer 固定 offset；
+- 有上界的动态 shape：按上界预留，简单但可能浪费；
+- 无界动态 shape：运行时 allocator 或分段计划；
+- 多 stream：释放时间取决于 event，而非仅取决于 host 调用顺序；
+- 跨设备：host、pinned、device、shared memory 属于不同 memory space。
+
+---
+
+# 14. CPU 缓存、SIMD 与数据布局
+
+## 14.1 Big O 之外的成本
+
+对相同的 `O(n)` 扫描，主要差异可能来自：
+
+- cache miss；
+- TLB miss；
+- 分支预测失败；
+- 指令级并行；
+- SIMD lane 利用率；
+- 内存带宽；
+- NUMA remote access；
+- 同步与 false sharing。
+
+优化顺序应是：先测量瓶颈，再判断是算法、数据布局、指令还是并行问题。
+
+## 14.2 AoS 与 SoA
+
+```cpp
+struct ParticleAoS {
+    float x, y, z;
+    float velocity_x, velocity_y, velocity_z;
+};
+
+struct ParticlesSoA {
+    std::vector<float> x, y, z;
+    std::vector<float> velocity_x, velocity_y, velocity_z;
+};
+```
+
+如果 kernel 只更新所有 x，SoA 让相关数据连续，减少无用字段加载并利于 SIMD。如果每次总是处理同一粒子的全部字段，AoS 可能更自然。
+
+AoSoA 按 SIMD 宽度分块，可以兼顾对象分组与向量化。
+
+## 14.3 Cache Blocking
+
+矩阵 tiling 是 cache blocking 的典型案例。类似思想也用于：
+
+- 图分块；
+- stencil；
+- 图像卷积；
+- 数据库 join；
+- 编译器稠密 BitSet 批处理。
+
+目标是让工作集在被驱逐前尽可能多次复用，而不是简单“循环层数越多越快”。
+
+## 14.4 SIMD 的前提
+
+自动向量化需要编译器证明：
+
+- 循环迭代间无不安全依赖；
+- 内存访问模式可向量化；
+- alias 不阻止重排；
+- trip count 和 remainder 可处理；
+- 操作存在目标向量指令；
+- 浮点语义允许所需重排。
+
+C 中的 `restrict` 或 C++ 的别名分析信息可以帮助，但错误承诺无别名会导致未定义行为。
+
+## 14.5 Alignment
+
+对齐可能影响：
+
+- 某些向量 load/store 是否需要额外处理；
+- cache line 跨越次数；
+- 原子操作支持；
+- ABI 与对象布局。
+
+不能为了对齐直接把任意指针向下取整后解引用；必须保证分配范围、对象生命周期和类型别名规则均合法。
+
+## 14.6 False Sharing
+
+不同线程写不同变量，如果变量落在同一 cache line，缓存一致性仍会让该行来回迁移。
+
+缓解方式：
+
+- 每线程私有累加，最后归约；
+- 对热点写字段做 cache-line padding；
+- 分块让线程处理不重叠区域；
+- 降低共享写频率。
+
+Padding 会增加内存占用和 cache footprint，只应对测量确认的热点使用。
+
+## 14.7 NUMA
+
+多 socket 系统中，访问本地 NUMA node 内存通常比远端更低延迟、更高带宽。需要考虑：
+
+- first-touch placement；
+- 线程绑核；
+- 数据分片与线程归属；
+- 跨 node work stealing；
+- 内存带宽是否集中在一个 node。
+
+只增加线程数可能让性能下降，因为瓶颈从计算变成远端访存或带宽竞争。
+
+## 14.8 分支与 Branchless
+
+Branchless 写法不是天然更快：
+
+- 可预测分支成本很低；
+- branchless 可能执行两条路径的无用工作；
+- `cmov`、mask 或 predication 仍占用执行资源；
+- GPU 上减少 divergence 的收益模式又不同。
+
+应结合数据分布、目标机器和 profile 判断。
+
+---
+
+# 15. 搜索、Cost Model 与自动调优
+
+## 15.1 为什么需要 Cost Model
+
+同一个合法变换可能有很多参数：
+
+```text
+tile_m, tile_n, tile_k
+vector_width
+unroll_factor
+threads_per_block
+warps_per_block
+pipeline_stages
+layout / swizzle
+fusion boundary
+```
+
+搜索空间是这些选择的笛卡尔积，很快组合爆炸。编译器需要：
+
+- 静态规则过滤非法组合；
+- 分析模型估计成本；
+- profile 或硬件测量校准；
+- autotuner 搜索剩余空间；
+- cache 编译结果与测量结果。
+
+## 15.2 Matrix Chain DP
+
+矩阵连乘的结合顺序会改变运算量：
+
+```text
+A: p0 x p1
+B: p1 x p2
+C: p2 x p3
+```
+
+`(AB)C` 与 `A(BC)` 数学结果相同，但代价可能差很多。经典 DP：
+
+```text
+dp[i][j] = min over i <= k < j:
+    dp[i][k] + dp[k+1][j] + p[i] * p[k+1] * p[j+1]
+```
+
+```cpp
+#include <algorithm>
+#include <limits>
+#include <optional>
+#include <vector>
+
+std::optional<unsigned long long>
+matrix_chain_cost(const std::vector<unsigned long long>& dimensions) {
+    if (dimensions.size() < 2) return 0;
+    const std::size_t matrix_count = dimensions.size() - 1;
+    for (const auto dimension : dimensions) {
+        if (dimension == 0) return std::nullopt;
+    }
+
+    using Cost = unsigned long long;
+    const Cost infinity = std::numeric_limits<Cost>::max();
+    std::vector<std::vector<Cost>> dp(
+        matrix_count, std::vector<Cost>(matrix_count, 0));
+
+    auto checked_multiply = [](Cost a, Cost b) -> std::optional<Cost> {
+        if (a != 0 && b > std::numeric_limits<Cost>::max() / a) {
+            return std::nullopt;
+        }
+        return a * b;
+    };
+
+    for (std::size_t length = 2; length <= matrix_count; ++length) {
+        for (std::size_t first = 0; first + length <= matrix_count; ++first) {
+            const std::size_t last = first + length - 1;
+            dp[first][last] = infinity;
+            for (std::size_t split = first; split < last; ++split) {
+                auto product = checked_multiply(dimensions[first],
+                                                dimensions[split + 1]);
+                if (!product) continue;
+                product = checked_multiply(*product, dimensions[last + 1]);
+                if (!product || dp[first][split] == infinity ||
+                    dp[split + 1][last] == infinity) {
+                    continue;
+                }
+                if (dp[first][split] > infinity - dp[split + 1][last]) continue;
+                const Cost partial = dp[first][split] + dp[split + 1][last];
+                if (partial > infinity - *product) continue;
+                dp[first][last] = std::min(dp[first][last], partial + *product);
+            }
+        }
+    }
+
+    if (dp[0][matrix_count - 1] == infinity) return std::nullopt;
+    return dp[0][matrix_count - 1];
+}
+```
+
+状态数是 `O(n^2)`，枚举区间长度、起点和分割点，因此时间复杂度是 `O(n^3)`，空间复杂度是 `O(n^2)`。若要恢复具体结合顺序，还需记录每个区间的最优 split。
+
+真实 AI Compiler 不能只看 FLOPs：中间张量大小、layout conversion、并行度、library kernel、fusion 和数值语义都会改变最优顺序。
+
+## 15.3 搜索策略
+
+| 策略 | 优点 | 风险 |
+|---|---|---|
+| 穷举 | 简单、可找全局最好 | 组合爆炸 |
+| Grid / Random Search | 易并行 | 可能浪费样本 |
+| 贪心 | 编译快 | 容易局部最优 |
+| Beam Search | 保留多个候选 | beam width 决定成本和质量 |
+| 动态规划 | 子问题结构明确时精确 | 状态可能爆炸 |
+| Bayesian Optimization | 少量昂贵测量时有效 | 高维离散约束较难 |
+| Learned Cost Model | 推理快、可泛化 | 分布漂移和训练数据偏差 |
+
+## 15.4 剪枝
+
+静态剪枝示例：
+
+- tile 超过 shared memory；
+- 每 block 线程数超过硬件上限；
+- vector width 不满足对齐或整除条件；
+- 估计寄存器数导致 occupancy 太低；
+- layout 与指令 shape 不兼容；
+- reduction 需要的同步无法在当前层级表达。
+
+剪枝规则必须保守：错误删除合法优质配置会永久限制搜索上限。
+
+## 15.5 Cost Model 的误差
+
+静态模型通常无法完整预测：
+
+- cache 和 TLB 行为；
+- 编译器后端生成的具体指令；
+- 寄存器 spill；
+- GPU occupancy 与 latency hiding；
+- 动态 shape 分布；
+- 其他进程或 kernel 干扰；
+- thermal 和 frequency variation。
+
+因此高质量系统通常结合静态分析与真实测量，并记录模型预测误差。
+
+## 15.6 Rewrite 与 E-graph
+
+局部 peephole rewrite 按固定顺序应用容易遇到 phase ordering：先做 A 可能错过 B，先做 B 又可能错过 A。
+
+E-graph / equality saturation 的思路：
+
+- 同时保存多个等价表达式；
+- 反复应用等价规则直到饱和或达到预算；
+- 用 cost model 从等价类中抽取最优表达式。
+
+风险：
+
+- e-graph 尺寸爆炸；
+- 浮点、溢出、poison 语义下很多代数恒等式并不合法；
+- extraction cost 需要反映目标硬件和共享子表达式；
+- 必须设置节点数、时间和迭代预算。
+
+---
+
+# 16. 正确性验证与性能实验
+
+## 16.1 先验证 Legality
+
+每个优化 Pass 都应明确：
+
+- 前置条件；
+- 保持的语义；
+- 修改哪些 IR；
+- 保留或失效哪些 analyses；
+- 遇到无法证明的情况如何保守退出。
+
+“在测试样例上结果相同”不是语义证明。
+
+## 16.2 常见语义陷阱
+
+### Integer
+
+- 有符号溢出；
+- `nsw` / `nuw`；
+- shift amount 范围；
+- 除零和 `INT_MIN / -1`；
+- trunc、extend 与位宽。
+
+### Floating Point
+
+- NaN、Infinity、signed zero；
+- rounding mode；
+- reassociation；
+- contraction / FMA；
+- fast-math flags。
+
+### Memory
+
+- alias；
+- volatile；
+- atomic ordering；
+- data race；
+- object lifetime；
+- alignment；
+- trap 与 observable side effect。
+
+### Control Flow
+
+- unreachable；
+- exception edge；
+- deoptimization / guard；
+- PHI incoming edge；
+- musttail、convergent、barrier 等特殊约束。
+
+## 16.3 测试层次
+
+- Unit test：单个算法和边界；
+- IR regression：输入 IR 与期望 pattern；
+- Verifier：每次关键变换后检查 IR 不变量；
+- Differential test：优化前后在多组输入比较；
+- Fuzzing：生成随机合法程序或图；
+- Metamorphic test：利用已知等价变换构造关系；
+- End-to-end：编译并运行真实 workload；
+- Performance regression：固定硬件和统计口径跟踪。
+
+LLVM 场景还应熟练最小复现、`FileCheck`、`llvm-lit`、`opt -verify-each` 和 pass pipeline 二分。详细工具背景可回到[LLVM 笔记的调试部分](post.html?slug=llvm_review#15-调试-llvm-pass)。
+
+## 16.4 差分测试的边界
+
+随机输入比较优化前后结果很有用，但要避免：
+
+- 输入程序本身含 UB；
+- 浮点结果要求错误的 bitwise equality；
+- nondeterministic 并发程序；
+- 只覆盖很小值域，错过溢出；
+- reference implementation 与被测实现共享同一 bug。
+
+## 16.5 Benchmark 方法
+
+至少记录：
+
+- 硬件、频率策略、驱动、编译器与 flags；
+- 输入 shape、dtype、layout 和分布；
+- warm-up 次数；
+- 测量次数和 P50/P90/P99 或置信区间；
+- 是否包含数据传输、分配、编译和 launch；
+- CPU 绑核、NUMA、后台负载；
+- GPU 同步位置；
+- 正确性误差阈值。
+
+只报告最快一次容易把噪声当成优化收益。
+
+## 16.6 GPU 计时陷阱
+
+Kernel launch 通常异步。Host 侧调用返回不代表 kernel 完成：
+
+- 使用 GPU event 测设备时间；
+- 或在明确位置同步；
+- 不要把首次 JIT、cache warm-up 与稳定执行混在一起；
+- 多 stream 时要明确 event 依赖；
+- 端到端延迟和单 kernel 延迟都应按目标分别报告。
+
+## 16.7 性能归因
+
+发现变快或变慢后继续回答：
+
+- 指令数变化？
+- cache miss 或带宽变化？
+- register spill？
+- occupancy？
+- launch 数量？
+- fusion 是否减少中间内存流量？
+- vector lane 利用率？
+- 负载是否从 compute-bound 变为 memory-bound？
+
+没有归因的 benchmark 很难指导下一次优化。

@@ -1,5 +1,19 @@
 [
   {
+    "title": "编译器与高性能系统算法",
+    "titleEn": "Algorithms for Compilers and High-Performance Systems",
+    "slug": "compiler_algorithms",
+    "description": "CFG、数据流、SSA、寄存器分配、张量布局与 CPU/GPU 性能算法",
+    "descriptionEn": "CFGs, data flow, SSA, register allocation, tensor layouts, and CPU/GPU performance algorithms."
+  },
+  {
+    "title": "算法与数据结构",
+    "titleEn": "Algorithms and Data Structures",
+    "slug": "algorithms_review",
+    "description": "C/C++ 算法与数据结构的系统复习与实现",
+    "descriptionEn": "A systematic C/C++ review of algorithms and data structures."
+  },
+  {
     "title": "安卓🤖",
     "titleEn": "Android🤖",
     "slug": "Android",

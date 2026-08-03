@@ -6,7 +6,7 @@ Android 不是简单的“Linux 内核加 Java 应用”。它是由应用、Jav
 flowchart TB
     A[应用与系统应用<br/>Activity / Service / Provider / Receiver]
     B[Framework API<br/>android.app / android.view / android.os]
-    C[system_server 系统服务<br/>AMS / ATMS / WMS / PMS / PMS-Power 等]
+    C[system_server 系统服务<br/>AMS / ATMS / WMS<br/>PackageManagerService / PowerManagerService 等]
     D[Native Framework 与守护进程<br/>SurfaceFlinger / AudioFlinger / vold / netd]
     E[Android Runtime<br/>ART / Core Libraries / JNI]
     F[HAL<br/>Camera / Audio / Sensors / Power / Graphics]
@@ -1356,7 +1356,7 @@ RegionSpace 把堆划分为固定大小 Region，可支持：
 - 碎片或地址空间压力。
 - GC 周期更频繁。
 
-典型大对象包括大数组、Bitmap 像素数据和大序列化 Buffer。
+ART 的 Large Object Space 主要用于符合运行时策略的大型托管对象，例如大型 primitive 数组或用于序列化的 `byte[]`。Bitmap 需要区分 Java 层对象和像素数据：Android 8.0（API 26）及以上的 Bitmap 像素数据位于 Native Heap，不属于 ART Large Object Space；更早版本的内存归属有所不同。
 
 ## 12.8 Read Barrier
 
@@ -1388,7 +1388,7 @@ GC 扫描脏 Card，发现跨代或新增引用
 
 ## 12.10 Safe Point 与线程挂起
 
-GC 需要在可准确识别对象引用的位置观察线程。编译器会生成栈映射和挂起检查。线程长时间运行在不易挂起的 Native 代码、内核调用或异常路径中，可能增加 time-to-suspend。
+GC 需要在可准确识别对象引用的位置观察线程。编译器会生成栈映射和挂起检查，处于 ART Runnable 状态的线程需要定期响应挂起请求。普通 JNI Native 代码或阻塞中的内核调用通常会进入非 Runnable 状态并释放 mutator lock，GC 可将其视为已挂起；长时间运行的 `@FastNative`、`@CriticalNative`、仍持有 mutator lock 的 ART 内部代码，或迟迟到不了挂起点的 Runnable 线程，才可能明显增加 time-to-suspend。
 
 ## 12.11 GC 触发因素
 
