@@ -61,6 +61,7 @@
     <a href="../" class="back-top" data-i18n="backHome">← 返回主页</a>
   </footer>
 
+  <script src="../assets/js/markdown-code.js"></script>
   <script>
     (function () {
       var mathItems = new Map();
@@ -303,30 +304,7 @@
           } else if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
             MathJax.typesetPromise([container]).catch(function () {});
           }
-          container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
-            if (pre.querySelector(".copy-btn")) return;
-            var btn = document.createElement("button");
-            btn.className = "copy-btn";
-            btn.textContent = t("copy");
-            btn.setAttribute("aria-label", t("copy"));
-            btn.addEventListener("click", function () {
-              var code = pre.querySelector("code");
-              var text = code ? code.textContent : "";
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(function () {
-                  btn.textContent = t("copied");
-                  setTimeout(function () { btn.textContent = t("copy"); }, 1500);
-                }).catch(function () {
-                  btn.textContent = t("copyFailed");
-                  setTimeout(function () { btn.textContent = t("copy"); }, 1500);
-                });
-              } else {
-                btn.textContent = t("copyFailed");
-                setTimeout(function () { btn.textContent = t("copy"); }, 1500);
-              }
-            });
-            pre.appendChild(btn);
-          });
+          MarkdownCode.attachCopyButtons(container, { label: t });
           var mermaidBlocks = container.querySelectorAll("pre code.language-mermaid");
           if (mermaidBlocks.length > 0 && typeof mermaid !== "undefined") {
             mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
@@ -500,7 +478,7 @@
             }, { passive: true });
             updateTOC();
           }
-          container.querySelectorAll("pre:not(:has(.language-mermaid))").forEach(function (pre) {
+          MarkdownCode.getCopyableCodeBlocks(container).forEach(function (pre) {
             var code = pre.querySelector("code");
             if (!code) return;
             var lines = code.textContent.replace(/\n$/, "").split("\n").length;
