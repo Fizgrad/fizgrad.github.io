@@ -392,6 +392,8 @@ D
 其中，\(B_{\mathrm{micro}}\) 是每个设备一次处理的样本数，
 \(K_{\mathrm{acc}}\) 是梯度累积次数，\(D\) 是数据并行设备数。
 
+---
+
 ## 2.10 过拟合与欠拟合
 
 ### 欠拟合
@@ -1102,9 +1104,9 @@ $$
 \min
 \sum_{k=1}^{K}
 \sum_{x_i\in C_k}
-\left|
+\left\lVert
 x_i-\boldsymbol\mu_k
-\right|^2
+\right\rVert_2^2
 $$
 
 算法通常迭代执行两个步骤：
@@ -1149,7 +1151,7 @@ PCA 是 **Principal Component Analysis，主成分分析**，属于无监督线�
 
 设原始数据有 $d$ 个特征，可以选择前 $k$ 个主成分，将数据从 $d$ 维压缩到 $k$ 维。
 
-PCA 可以通过协方差矩阵的特征值分解或奇异值分解实现。特征值越大，表示对应主成分保留的数据方差越多。
+PCA 通常先对每个特征减去均值，再通过协方差矩阵的特征值分解或对中心化数据进行奇异值分解实现。特征值越大，表示对应主成分保留的数据方差越多。
 
 PCA 的主要作用包括：
 
@@ -1459,7 +1461,7 @@ $$
 样本 1：[1,  10, 100, 1000]
 样本 2：[2,  20, 200, 2000]
 样本 3：[3,  30, 300, 3000]
-````
+```
 
 BatchNorm 会按列计算：
 
@@ -2944,7 +2946,7 @@ Softmax
 与 V 相乘
 ```
 
-当序列长度为 (N) 时，注意力分数矩阵大小为 (N\times N)。
+当序列长度为 $N$ 时，注意力分数矩阵大小为 $N\times N$。
 长序列下，这个矩阵会占用大量显存，并产生多次显存读写。
 
 FlashAttention 的核心思路是：
@@ -2969,7 +2971,7 @@ FlashAttention 的核心思路是：
 
 因此，FlashAttention 可以：
 
-* 避免保存大小为 (N\times N) 的完整中间矩阵；
+* 避免保存大小为 $N\times N$ 的完整中间矩阵；
 * 减少 GPU 高带宽显存 HBM 与片上存储之间的数据搬运；
 * 降低 Attention 的显存占用；
 * 提高长序列训练和推理的运行效率；
@@ -2983,7 +2985,7 @@ FlashAttention 属于 **I/O-aware** 优化：它不仅考虑计算次数，还�
 * FlashAttention 不属于稀疏 Attention 或近似 Attention；
 * 它不会改变模型结构和 Attention 的计算结果；
 * 它主要降低内存访问开销，不会改变标准 Attention 的
-  (O(N^2)) 理论计算复杂度；
+  $O(N^2)$ 理论计算复杂度；
 * 序列越长，避免保存完整注意力矩阵带来的收益通常越明显。
 
 可以简单理解为：
@@ -3009,6 +3011,232 @@ MLA（Multi-Head Latent Attention，多头潜在注意力）通过低维潜在�
 
 - MLA：模型架构和推理优化；
 - LoRA：参数高效微调方法。
+
+---
+
+## 8.15 Qwen3.5-397B-A17B：从公开配置读懂模型结构
+
+Qwen3.5-397B-A17B 已经开放权重、Model Card、配置文件和推理实现，
+适合用来把前面的多模态、Attention、MoE、KV Cache、RMSNorm 与
+推测解码串联起来。
+
+模型名称中的两组数字分别表示：
+
+```text
+397B：总参数量约 3970 亿
+A17B：一次前向路径约激活 170 亿参数
+```
+
+它不是 17B Dense 模型，而是总参数量为 397B 的稀疏 MoE 模型。
+
+### 模型总览
+
+| 项目 | 公开配置 |
+|---|---|
+| 模型类型 | 带视觉编码器的 Causal Language Model |
+| 模型类 | `Qwen3_5MoeForConditionalGeneration` |
+| 参数量 | 397B 总参数，约 17B 激活参数 |
+| 文本主干 | 60 层，隐藏维度 4096 |
+| 词表 | 248,320 个 Token |
+| 层排列 | 15 组 ×（3 层 Gated DeltaNet + 1 层 Gated Attention） |
+| MoE | 512 个路由 Expert；每个 Token 选择 10 个，再加 1 个共享 Expert |
+| 视觉编码器 | 27 层，隐藏维度 1152，16 个 Attention Head |
+| 原生上下文 | 262,144 Token，可通过 YaRN 扩展到 1,010,000 Token |
+| 其他结构 | RMSNorm、SiLU、Multi-Token Prediction |
+| 权重许可 | Apache 2.0 |
+
+### 整体数据流
+
+官方 Model Card 将它定义为“带视觉编码器的因果语言模型”。图像或视频
+先转换为视觉 Token，再与文本 Token 一起进入同一个语言模型主干：
+
+```mermaid
+flowchart TB
+    T[文本 Token ID] --> E[Token Embedding<br/>词表 248320，隐藏维度 4096]
+    V[图像或视频] --> P[时空 Patch Embedding]
+    P --> VE[27 层 Vision Encoder<br/>隐藏维度 1152]
+    VE --> PM[2×2 Patch Merger<br/>投影到 4096 维]
+    E --> F[统一的多模态 Token 序列]
+    PM --> F
+
+    subgraph R[四层一组，共重复 15 次]
+        L1[Gated DeltaNet + Sparse MoE]
+        L2[Gated DeltaNet + Sparse MoE]
+        L3[Gated DeltaNet + Sparse MoE]
+        L4[Gated Full Attention + Sparse MoE]
+        L1 --> L2 --> L3 --> L4
+    end
+
+    F --> L1
+    L4 --> N[Final RMSNorm]
+    N --> H[LM Head]
+    H --> O[下一个 Token]
+```
+
+这张图对应公开配置中的真实层排列：
+
+$$
+15\times(3\times\mathrm{GDN}+1\times\mathrm{FullAttention})
+=60\text{ 层}
+$$
+
+每一层都先执行一种 Token Mixer，再进入 Sparse MoE，最后通过残差连接
+继续向后传递。
+
+### 混合注意力：45 层 GDN 与 15 层全注意力
+
+60 层中，每 4 层的前三层使用 Gated DeltaNet，第四层使用带输出门控的
+全注意力，因此共有：
+
+- 45 层 Gated DeltaNet 线性注意力；
+- 15 层 Gated Full Attention；
+- 全注意力层间隔 `full_attention_interval = 4`。
+
+Gated DeltaNet 的公开配置是：
+
+| 配置 | 数值 |
+|---|---:|
+| Q/K Head 数 | 16 |
+| V Head 数 | 64 |
+| Head Dimension | 128 |
+| 一维卷积 Kernel | 4 |
+
+它在增量解码时维护卷积状态和递归状态，不需要像标准全注意力那样为
+所有历史 Token 保存完整 K/V，适合承担大部分长序列计算。
+
+全注意力层使用 GQA：
+
+| 配置 | 数值 |
+|---|---:|
+| Query Head 数 | 32 |
+| Key/Value Head 数 | 2 |
+| Head Dimension | 256 |
+| RoPE Dimension | 64 |
+
+这正好对应前面的 MHA、MQA 与 GQA：32 个 Query Head 共享 2 组 K/V，
+明显减少全注意力层的 KV Cache。
+
+Gated DeltaNet 与 FlashAttention 仍然不是同一个概念：
+
+```text
+Gated DeltaNet：改变 Attention 的计算结构和增量状态
+FlashAttention：不改变全注意力的数学定义，优化 Kernel 与显存读写
+```
+
+### Sparse MoE：512 选 10，再加共享 Expert
+
+每个 Decoder Layer 后面都有一个 Sparse MoE Block：
+
+```mermaid
+flowchart LR
+    X[Token 隐藏状态] --> R[Router]
+    R -->|Top-k = 10| E[从 512 个 Expert 中选择 10 个]
+    X --> S[1 个共享 Expert]
+    E --> W[按路由权重聚合]
+    S --> W
+    W --> Y[MoE 输出]
+```
+
+具体配置包括：
+
+- 512 个 Routed Expert；
+- 每个 Token 激活其中 10 个；
+- 另有 1 个始终参与计算的 Shared Expert；
+- Routed Expert 和 Shared Expert 的中间维度都是 1024；
+- Router 对 Top-k 概率重新归一化后加权聚合 Expert 输出。
+
+激活参数占总参数的比例约为：
+
+$$
+\frac{17\text{B}}{397\text{B}}
+\approx 4.28\%
+$$
+
+模型的隐藏维度只有 4096，大量参数来自每层的 512 组 Expert 权重。
+这说明 MoE 主要是在“专家数量”方向扩展容量，而不是让每个 Token 都
+经过一个极宽的 Dense FFN。
+
+不过，17B 激活参数只描述一次计算路径，不代表部署时只需装入 17B 权重：
+
+- 512 个 Expert 的权重仍要存放在内存或分布式设备上；
+- Expert Parallel 通常需要 All-to-All 通信；
+- Router 负载不均会造成部分设备拥塞；
+- 实际速度还取决于 Batch、序列长度、通信拓扑和推理 Kernel。
+
+### 原生多模态与视觉编码器
+
+视觉编码器的公开配置为：
+
+| 配置 | 数值 |
+|---|---:|
+| Vision Block 数 | 27 |
+| Hidden Size | 1152 |
+| Intermediate Size | 4304 |
+| Attention Head 数 | 16 |
+| 空间 Patch Size | 16 × 16 |
+| 时间 Patch Size | 2 |
+| Spatial Merge Size | 2 × 2 |
+| 输出维度 | 4096 |
+
+图像和视频首先通过三维卷积形成时空 Patch。Vision Encoder 提取特征后，
+Patch Merger 合并相邻的 $2\times2$ 空间 Patch，并投影到语言模型的
+4096 维隐藏空间。这样视觉 Token 与文本 Token 可以在进入 60 层主干时
+使用相同维度，实现 Early Fusion。
+
+这与“先让独立视觉模型生成一段文字，再交给语言模型”不同：视觉信息
+在模型内部仍以 Token 表示参与后续的 Attention、MoE 和自回归推理。
+
+### RMSNorm、MTP 与推测解码
+
+文本主干在每个 Token Mixer 和 MoE 前使用 RMSNorm，公开配置中的
+$\epsilon=10^{-6}$。实现采用 Zero-Centered 参数化：可训练权重初始化为
+0，实际缩放因子使用 $1+w$，从而让初始缩放仍然等于 1。
+
+模型还包含一个 MTP Hidden Layer，并进行了 Multi-Token Prediction
+训练。普通自回归模型每次只预测下一个 Token；MTP 额外学习更远位置的
+候选 Token，可在 SGLang 或 vLLM 中用于推测解码：
+
+```text
+MTP 快速提出多个候选 Token
+→ 主模型并行验证候选
+→ 接受正确前缀
+→ 从第一个不匹配处继续生成
+```
+
+MTP 的目标是减少逐 Token 串行解码次数，但实际加速比仍取决于候选接受率、
+Batch Size、硬件和推理框架。
+
+### 262K 原生上下文与 1M 扩展上下文
+
+开放权重的原生上下文长度是 262,144 Token。Model Card 给出的
+1,010,000 Token 是通过 YaRN 位置外推得到的扩展能力，两者不能混为一谈。
+
+混合注意力也改变了长上下文缓存的构成：
+
+- 15 个全注意力层需要保存随序列增长的 K/V；
+- 45 个 Gated DeltaNet 层主要维护固定大小的递归与卷积状态；
+- GQA 又将全注意力层的 K/V Head 从 32 个减少到 2 个；
+- 上下文越长，Prefill、视觉 Token 和剩余 KV Cache 仍会产生显著开销。
+
+静态 YaRN 会对所有长度使用同一个缩放因子，官方提示它可能影响短文本效果，
+因此只有确实需要超长上下文时才应启用，并根据常用长度选择缩放倍数。
+
+### 部署时应怎样理解 397B-A17B
+
+官方权重使用 BF16，模型仓库总体接近 800 GB。即使每次只激活约 17B 参数，
+完整权重、视觉编码器、运行时 Buffer、Expert 通信以及长上下文状态仍然决定
+部署资源，因此该模型通常需要量化、Tensor Parallel、Expert Parallel 或
+CPU/GPU 异构推理。
+
+公开实现已经支持 Transformers、vLLM、SGLang 和 KTransformers，
+但“框架能够加载”不代表任意硬件都能达到相同的吞吐和上下文长度。
+
+公开资料：
+
+- [Qwen3.5-397B-A17B 官方 Model Card](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)
+- [Qwen3.5-397B-A17B 官方配置文件](https://huggingface.co/Qwen/Qwen3.5-397B-A17B/blob/main/config.json)
+- [Qwen3.5 官方发布说明](https://qwen.ai/blog?id=qwen3.5)
+- [Transformers 中的 Qwen3.5 MoE 实现](https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen3_5_moe/modeling_qwen3_5_moe.py)
 
 ---
 
@@ -4424,6 +4652,8 @@ Chunk 变大后召回率提高，但回答准确率下降，可能是什么原�
 | KV Cache | Key-Value Cache | 键值缓存 |
 | MoE | Mixture of Experts | 混合专家模型 |
 | MLA | Multi-Head Latent Attention | 多头潜在注意力 |
+| GDN | Gated Delta Network | 门控 Delta 网络（线性注意力） |
+| MTP | Multi-Token Prediction | 多 Token 预测 |
 
 ## 16.3 训练与对齐
 
