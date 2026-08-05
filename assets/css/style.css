@@ -1271,6 +1271,12 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 
 .toc-nav { list-style: none; }
 .toc-nav li { margin: 0; }
+.toc-nav .toc-sections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.toc-nav .toc-sections[hidden] { display: none; }
 .toc-nav a {
   display: block;
   padding: 0.35rem 0.8rem;
@@ -1292,6 +1298,23 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   border-left-color: var(--accent-2);
   background: rgba(34, 211, 238, 0.06);
   font-weight: 500;
+}
+.toc-nav .toc-chapter.current > .toc-h1 {
+  color: var(--text);
+  border-left-color: var(--border-strong);
+}
+.toc-nav .toc-chapter.has-sections > .toc-h1 {
+  position: relative;
+  padding-right: 1.6rem;
+}
+.toc-nav .toc-chapter.has-sections > .toc-h1::after {
+  content: "›";
+  position: absolute;
+  right: 0.65rem;
+  transition: transform 0.2s ease;
+}
+.toc-nav .toc-chapter.has-sections.current > .toc-h1::after {
+  transform: rotate(90deg);
 }
 .toc-nav .toc-h2 { padding-left: 1.4rem; font-size: 0.8rem; }
 .toc-nav .toc-h3 { padding-left: 2rem; font-size: 0.78rem; }

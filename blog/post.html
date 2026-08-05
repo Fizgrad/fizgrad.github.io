@@ -394,18 +394,28 @@
           });
 
           /* ===================== Build TOC ===================== */
-          var headings = container.querySelectorAll("h1, h2, h3, h4, h5");
+          var headings = container.querySelectorAll("h1, h2");
           if (headings.length >= 2) {
             var tocNav = document.getElementById("toc-nav");
             var headingData = [];
+            var currentChapterId = "";
 
             headings.forEach(function (h) {
               var level = parseInt(h.tagName.charAt(1), 10);
               var text = h.textContent.replace(/#\s*$/, "").trim();
-              headingData.push({ el: h, id: h.id, level: level, text: text });
+              if (level === 1) currentChapterId = h.id;
+              headingData.push({
+                el: h,
+                id: h.id,
+                level: level,
+                text: text,
+                chapterId: currentChapterId || h.id
+              });
             });
 
             tocNav.replaceChildren();
+            var chapterItems = {};
+            var chapterLists = {};
             headingData.forEach(function (item) {
               var li = document.createElement("li");
               var tocLink = document.createElement("a");
@@ -415,7 +425,27 @@
               tocLink.dataset.tocTarget = item.id;
               tocLink.textContent = item.text;
               li.appendChild(tocLink);
-              tocNav.appendChild(li);
+
+              if (item.level === 1) {
+                var sectionList = document.createElement("ul");
+                sectionList.className = "toc-sections";
+                sectionList.id = "toc-sections-" + item.id;
+                sectionList.hidden = true;
+                li.className = "toc-chapter";
+                li.dataset.tocChapter = item.id;
+                li.appendChild(sectionList);
+                tocNav.appendChild(li);
+                chapterItems[item.id] = li;
+                chapterLists[item.id] = sectionList;
+              } else if (chapterLists[item.chapterId]) {
+                chapterLists[item.chapterId].appendChild(li);
+                chapterItems[item.chapterId].classList.add("has-sections");
+                var chapterLink = chapterItems[item.chapterId].firstElementChild;
+                chapterLink.setAttribute("aria-controls", chapterLists[item.chapterId].id);
+                chapterLink.setAttribute("aria-expanded", "false");
+              } else {
+                tocNav.appendChild(li);
+              }
             });
 
             /* Smooth scroll for TOC links (account for fixed nav) */
@@ -449,6 +479,17 @@
               }
               tocLinks.forEach(function (link) {
                 link.classList.toggle("active", link.dataset.tocTarget === headingData[currentIdx].id);
+              });
+
+              var activeChapterId = headingData[currentIdx].chapterId;
+              Object.keys(chapterItems).forEach(function (chapterId) {
+                var chapterItem = chapterItems[chapterId];
+                var isCurrent = chapterId === activeChapterId;
+                chapterItem.classList.toggle("current", isCurrent);
+                chapterLists[chapterId].hidden = !isCurrent;
+                if (chapterItem.classList.contains("has-sections")) {
+                  chapterItem.firstElementChild.setAttribute("aria-expanded", String(isCurrent));
+                }
               });
 
               /* Auto-scroll TOC sidebar to keep active item visible */

@@ -1,4 +1,4 @@
-# Android 架构
+# 1. Android 系统架构
 
 Android 不是简单的“Linux 内核加 Java 应用”。它是由应用、Java/Kotlin Framework、系统服务、Native 服务、运行时、硬件抽象层、Linux 内核和硬件共同组成的分层系统。
 
@@ -1706,26 +1706,63 @@ Android 使用 cgroup 对线程和进程分组，以控制：
 
 cpuset 可限制任务在哪些 CPU 上运行。例如前台关键任务可获得更有利 CPU 集合，后台任务可能被限制在节能核。
 
-## 14.6 uclamp 与性能提示
+## 14.6 PELT 与 uclamp 调度信号
 
-Utilization Clamping 可以为调度器提供利用率上下界，影响 CPU 频率和核选择。性能提示、Power HAL、task profile 与调度器协作，目标是在延迟和功耗之间权衡。
+PELT（Per-Entity Load Tracking）为任务、运行队列和 cgroup 维护带时间衰减的
+负载与利用率信号。它反映一段时间内的运行行为，不是当前瞬间 CPU 占用率：
 
-## 14.7 Energy Aware Scheduling
+```text
+新近运行时间权重较大
+久远历史按指数方式逐渐衰减
+        ↓
+形成 util_avg 等调度信号
+```
 
-在大小核系统中，调度器可结合：
+因此，突发任务刚唤醒时 PELT 可能还没完全增长，工作结束后也不会立刻归零。
+频率不变性和 CPU capacity 归一化又使利用率能在不同频率、不同大小核之间比较。
 
-- 任务利用率。
-- CPU 容量。
-- 能耗模型。
-- 热状态。
-- uclamp。
+Utilization Clamping 在利用率信号上增加约束：
 
-选择更合适的 CPU。调度错误可能表现为：
+- `uclamp.min` 表达最低性能需求，可影响选核和 `schedutil` 的频率请求；
+- `uclamp.max` 限制任务对 CPU capacity 的需求上界，可用于约束后台负载；
+- 实际生效值还会合并任务、cgroup 和系统策略，并受到可用 CPU、热限制等约束；
+- uclamp 是提示和约束，不保证线程固定运行在某个核或某个频率。
 
-- 关键线程长期在小核。
-- 大核频率提升过慢。
-- 后台任务挤占大核。
-- 任务频繁迁核导致缓存失效。
+Android 可以通过 task profile、Power HAL、性能提示会话等机制，把前台状态和工作
+期限转换为线程分组、cpuset、uclamp 或平台相关请求。具体映射属于设备策略，应用
+不应假设某个提示必然对应固定频率或固定大核。Android 策略如何连接这些内核信号，
+见第 28.1 节的整体能效链路。
+
+## 14.7 EAS 与 Energy Model
+
+Energy Aware Scheduling 在任务唤醒选核时，结合 PELT 利用率、CPU capacity 和
+Energy Model 估算不同放置方案的能量代价：
+
+```mermaid
+flowchart LR
+    W[任务唤醒] --> U[PELT 利用率与 uclamp]
+    U --> C[检查各 CPU 剩余 capacity]
+    C --> E[Energy Model 估算候选方案]
+    E --> P[选择满足性能约束且能量代价较低的 CPU]
+```
+
+EAS 负责选择运行位置，不直接设置 CPU 频率。`schedutil` 使用同类利用率信号向
+CPUFreq 请求频率，二者共享一致信号时才能形成较连贯的选核与调频决策。
+
+EAS 依赖正确的异构 CPU capacity、频率不变利用率和平台 Energy Model。系统进入
+过载状态时，内核可能退出节能放置路径并恢复以吞吐和负载均衡为主的选择。因此
+“打开 EAS”不等于所有场景都会优先放到小核。
+
+调度异常常见表现包括：
+
+- 短任务的 PELT 爬升滞后，频率或大核响应太慢；
+- `uclamp.min` 过高导致长期高频，`uclamp.max` 过低又造成关键线程延迟；
+- Energy Model、CPU capacity 或频率不变性不准确，导致能耗估算偏离真实硬件；
+- 线程频繁迁核破坏缓存局部性；
+- 热限制压低可用 capacity，使同一策略在热机状态下表现完全不同。
+
+本节只解释调度器如何形成利用率和选择 CPU；调频、空闲状态与热反馈分别在
+第 28.6～28.8 节展开。
 
 ## 14.8 futex
 
@@ -1993,7 +2030,10 @@ mmap 将文件或匿名内存映射到地址空间。优势：
 
 ---
 
-# 17. Linux 驱动、设备模型与安全
+# 17. Linux 驱动与设备接口
+
+这一章先建立设备发现、驱动绑定和用户空间接口的基本路径；下一章再说明这些驱动
+如何通过 GKI/KMI 边界进入具体 Android 产品。
 
 ## 17.1 驱动模型
 
@@ -2034,7 +2074,101 @@ mmap 将文件或匿名内存映射到地址空间。优势：
 
 这些是排查 CPU、内存、驱动、电源和设备状态的重要入口。
 
-## 17.5 SELinux
+---
+
+# 18. GKI、KMI 与厂商模块
+
+Android Common Kernel（ACK）在上游 LTS 内核基础上承载 Android 所需的公共改动。
+Generic Kernel Image（GKI）进一步把设备无关的公共内核与 SoC、板级代码分开，
+降低每台设备长期维护一棵大型私有内核分支的成本。
+
+```mermaid
+flowchart TB
+    U["Linux LTS / upstream"] --> A["Android Common Kernel"]
+    A --> G["GKI 内核"]
+    A --> M["GKI modules"]
+    K["KMI 稳定接口"] --> V["Vendor modules"]
+    G --> K
+    G --> B["通用调度、内存、VFS、安全等核心能力"]
+    M --> C["与 GKI 同步构建的通用可加载能力"]
+    V --> H["SoC 与设备专用驱动"]
+```
+
+GKI 不表示一份内核镜像无需任何设备代码就能驱动所有硬件。设备树、vendor ramdisk、
+固件、HAL 和厂商模块仍负责具体 SoC 与板级差异；GKI 解决的是公共核心与设备扩展
+之间的边界和更新关系。
+
+## 18.1 KMI 稳定的范围
+
+KMI（Kernel Module Interface）是 GKI 内核与厂商模块之间的内核二进制接口，
+包括受监控的导出符号及其相关类型布局。它不是：
+
+- Linux mainline 对所有内核模块承诺的永久 ABI；
+- 所有内核导出符号的集合；
+- Android 用户空间 ABI、HAL 接口或 VINTF；
+- 跨 Android 版本和跨 LTS 分支任意混用模块的保证。
+
+KMI 只在特定 Android 版本与 LTS 内核组合的分支内维护，例如
+`android15-6.6`。厂商模块只能依赖符号列表允许的 KMI 符号，并应使用与目标 GKI
+兼容的配置、AOSP LLVM 工具链和构建环境。ABI 监控会比较符号与类型变化；
+`CONFIG_MODVERSIONS` 还能在加载阶段辅助发现不兼容模块。
+
+## 18.2 GKI module 与 Vendor module
+
+| 类型 | 主要内容 | 接口约束 | 更新关系 |
+|---|---|---|---|
+| GKI module | 通用、硬件无关但不必内建的能力 | 受保护模块可使用非 KMI 内部接口 | 必须与对应 GKI 一起构建和更新 |
+| Vendor module | SoC、板级和设备专用驱动 | 只能依赖稳定 KMI 与允许的扩展点 | 可在 KMI 兼容范围内独立于 GKI 构建 |
+
+产品相关代码通常应放在厂商模块，而不是直接修改 GKI 公共核心。通用改动优先提交
+上游；确实需要从核心路径调用厂商扩展时，Android 还提供受约束的 vendor hook。
+hook 不是随意绕过 KMI 的入口，仍要考虑回调上下文、数据生命周期和 ABI 兼容。
+
+## 18.3 模块所在分区与加载时机
+
+具体布局随 Android 版本和设备启动配置变化，常见关系是：
+
+```text
+boot
+  └─ GKI 内核
+
+init_boot（较新启动设备）
+  └─ 通用 ramdisk；不存放内核
+
+system_dlkm
+  └─ 与 GKI 同步构建、签名的 GKI modules
+
+vendor_boot 中的 vendor ramdisk
+  └─ 挂载根文件系统前就必须加载的厂商模块
+
+vendor_dlkm 或 vendor
+  └─ 启动后期加载的厂商模块
+```
+
+早期存储、文件系统或加密链路依赖的模块必须进入 first-stage `init` 可访问的位置。
+`modules.dep`、`modules.alias` 和 `modules.load` 描述依赖与加载顺序，但模块仍应尽量
+避免把正确性建立在脆弱的手工顺序上；driver probe dependency 应由设备模型表达。
+
+## 18.4 常见加载失败
+
+- `Unknown symbol`：引用了不存在、未导出或不在允许 KMI 中的符号；
+- `version magic` / modversion 不匹配：模块和运行内核的版本、配置或 ABI 不一致；
+- 签名、AVB 或 SELinux 拒绝：模块来源、分区或加载者权限不符合策略；
+- 依赖未就绪：`modules.dep`、模块位置或 first-stage 加载集合不完整；
+- probe 失败：模块已经加载，但设备树、固件、时钟、中断或 regulator 等资源有误。
+
+排查时先区分“`.ko` 没有装载”和“模块已装载但驱动没有绑定设备”。前者查看
+模块签名、依赖和 KMI，后者查看 `/sys/bus/*/devices`、driver bind 状态、设备树和
+`dmesg` 中的 probe 错误。
+
+---
+
+# 19. Android 安全模型
+
+Android 的权限边界由应用身份、Linux 权限和强制访问控制共同构成。排查权限问题时，
+需要区分 Framework 授权、UID/GID、Capability、SELinux 与系统调用过滤分别在哪一层生效。
+
+## 19.1 SELinux
 
 Android 使用 SELinux enforcing 模式实施强制访问控制。一次操作通常需要同时满足：
 
@@ -2050,19 +2184,19 @@ Android 使用 SELinux enforcing 模式实施强制访问控制。一次操作�
 4. 只添加最小必要规则。
 5. 验证无越权通路。
 
-## 17.6 Linux Capability
+## 19.2 Linux Capability
 
 系统服务可使用 capability 获得特定内核权限，而不必以完整 root 权限运行。capability 仍需与 SELinux、UID/GID 和 seccomp 共同考虑。
 
-## 17.7 seccomp
+## 19.3 seccomp
 
 seccomp 可限制进程允许执行的系统调用，减少攻击面。Native 服务增加新系统调用时，可能还需要更新相应策略。
 
 ---
 
-# 18. Android 网络体系
+# 20. Android 网络体系
 
-## 18.1 数据通路概览
+## 20.1 数据通路概览
 
 ```mermaid
 flowchart LR
@@ -2084,7 +2218,7 @@ Framework 还通过 ConnectivityService、NetworkAgent、netd 等管理：
 - 网络验证。
 - 路由和防火墙。
 
-## 18.2 epoll
+## 20.2 epoll
 
 高并发 Native 服务常使用 epoll：
 
@@ -2098,7 +2232,7 @@ Framework 还通过 ConnectivityService、NetworkAgent、netd 等管理：
 - LT：条件仍满足时可重复通知。
 - ET：状态边沿变化时通知，通常必须循环读写到 `EAGAIN`。
 
-## 18.3 网络性能常见瓶颈
+## 20.3 网络性能常见瓶颈
 
 - DNS 慢。
 - TCP 建连和 TLS 握手。
@@ -2110,15 +2244,15 @@ Framework 还通过 ConnectivityService、NetworkAgent、netd 等管理：
 - Socket Buffer 过小或过大。
 - VPN、代理或防火墙额外路径。
 
-## 18.4 网络与功耗
+## 20.4 网络与功耗
 
 无线硬件从低功耗状态唤醒有固定成本。把许多零散请求合并，通常比持续发送小请求更省电。Doze 和后台网络限制也是基于这一现实。
 
 ---
 
-# 19. 性能分析工具体系
+# 21. 性能分析工具体系
 
-## 19.1 工具与问题类型
+## 21.1 工具与问题类型
 
 | 工具 | 主要用途 |
 |---|---|
@@ -2135,7 +2269,7 @@ Framework 还通过 ConnectivityService、NetworkAgent、netd 等管理：
 | Java heap dump | 托管对象引用和泄漏分析 |
 | `/proc` | 进程、线程、内存、调度和文件描述符状态 |
 
-## 19.2 Perfetto
+## 21.2 Perfetto
 
 Perfetto 是现代 Android 系统级性能分析主工具，可采集：
 
@@ -2161,7 +2295,7 @@ Perfetto 是现代 Android 系统级性能分析主工具，可采集：
 7. 查看 CPU 频率、核类型和热限制。
 8. 对照日志和系统状态。
 
-## 19.3 Systrace、atrace 与 ftrace 的关系
+## 21.3 Systrace、atrace 与 ftrace 的关系
 
 可以把三者理解为：
 
@@ -2174,7 +2308,7 @@ Perfetto：更现代的采集、存储、查询和分析体系
 
 掌握 Systrace 的轨道和事件仍有价值，但新问题通常优先使用 Perfetto。
 
-## 19.4 Simpleperf
+## 21.4 Simpleperf
 
 Simpleperf 适合回答：CPU 时间究竟花在哪些函数？
 
@@ -2201,7 +2335,7 @@ simpleperf report
 - 采样频率太高会增加开销。
 - Java、JIT 和 Native 混合栈需要相应支持和正确产物。
 
-## 19.5 perf
+## 21.5 perf
 
 Linux perf 可用于：
 
@@ -2214,7 +2348,7 @@ Linux perf 可用于：
 
 在 Android 量产设备上可能受到权限、内核配置和 SELinux 限制。
 
-## 19.6 常用 adb 命令
+## 21.6 常用 adb 命令
 
 ```bash
 adb shell ps -A -T
@@ -2233,7 +2367,7 @@ adb bugreport
 
 不同设备对命令和文件权限限制不同。
 
-## 19.7 `dumpsys` 的价值
+## 21.7 `dumpsys` 的价值
 
 `dumpsys` 不是单一工具，而是调用各 Binder 服务的 dump 接口。常见：
 
@@ -2249,7 +2383,7 @@ adb shell dumpsys input
 adb shell dumpsys cpuinfo
 ```
 
-## 19.8 分析工具选择原则
+## 21.8 分析工具选择原则
 
 - 时间线问题：Perfetto。
 - CPU 热点：Simpleperf/perf。
@@ -2262,9 +2396,9 @@ adb shell dumpsys cpuinfo
 
 ---
 
-# 20. 启动性能分析
+# 22. 启动性能分析
 
-## 20.1 启动时间组成
+## 22.1 启动时间组成
 
 ```mermaid
 flowchart LR
@@ -2278,7 +2412,7 @@ flowchart LR
     H --> I[SurfaceFlinger 显示]
 ```
 
-## 20.2 冷启动瓶颈
+## 22.2 冷启动瓶颈
 
 - Zygote fork 和进程调度。
 - 大量动态库加载和重定位。
@@ -2291,7 +2425,7 @@ flowchart LR
 - 主线程 Binder 调用。
 - Shader 或 RenderThread 初始化。
 
-## 20.3 启动分析步骤
+## 22.3 启动分析步骤
 
 1. 清楚定义冷、温、热启动。
 2. 固定设备温度、电量、刷新率和后台负载。
@@ -2302,7 +2436,7 @@ flowchart LR
 7. 检查 major fault、I/O、Binder、锁和 GC。
 8. 修改后对比中位数和尾延迟。
 
-## 20.4 启动优化原则
+## 22.4 启动优化原则
 
 - 首屏只做首屏必需工作。
 - 延迟初始化非关键模块。
@@ -2315,9 +2449,9 @@ flowchart LR
 
 ---
 
-# 21. 卡顿与显示性能分析
+# 23. 卡顿与显示性能分析
 
-## 21.1 先判断慢在哪一段
+## 23.1 先判断慢在哪一段
 
 一帧慢可能是：
 
@@ -2330,7 +2464,7 @@ flowchart LR
 7. Buffer 不可用。
 8. 线程调度延迟。
 
-## 21.2 Perfetto 中的关键轨道
+## 23.2 Perfetto 中的关键轨道
 
 - UI Thread。
 - RenderThread。
@@ -2343,7 +2477,7 @@ flowchart LR
 - Binder transaction。
 - GC。
 
-## 21.3 Runnable 但未运行
+## 23.3 Runnable 但未运行
 
 关键线程处于 Runnable，却长时间没有 Running，说明：
 
@@ -2353,7 +2487,7 @@ flowchart LR
 - 实时线程或中断抢占。
 - 热限制导致性能下降。
 
-## 21.4 Running 时间过长
+## 23.4 Running 时间过长
 
 需要进一步用 Simpleperf 或方法 Trace 找热点：
 
@@ -2365,7 +2499,7 @@ flowchart LR
 - JSON 解析。
 - Native 算法。
 
-## 21.5 锁等待
+## 23.5 锁等待
 
 主线程等待 futex 时：
 
@@ -2375,7 +2509,7 @@ flowchart LR
 4. 沿链继续追踪。
 5. 检查是否持锁执行 I/O 或回调。
 
-## 21.6 GC 卡顿
+## 23.6 GC 卡顿
 
 不要看到 GC 就直接认定 GC 是根因。需要区分：
 
@@ -2386,9 +2520,9 @@ flowchart LR
 
 ---
 
-# 22. CPU 性能分析
+# 24. CPU 性能分析
 
-## 22.1 CPU 高的几种含义
+## 24.1 CPU 高的几种含义
 
 - 单线程满核。
 - 多线程并行占满多个核。
@@ -2397,7 +2531,7 @@ flowchart LR
 - irq/softirq 高。
 - Runnable 队列长但进程自身 CPU 不高。
 
-## 22.2 分析流程
+## 24.2 分析流程
 
 ```mermaid
 flowchart TB
@@ -2411,7 +2545,7 @@ flowchart TB
     G --> H[验证算法、锁、轮询或数据规模]
 ```
 
-## 22.3 常见 CPU 问题
+## 24.3 常见 CPU 问题
 
 ### 忙轮询
 
@@ -2446,7 +2580,7 @@ CPU 总占用未必极高，但深度睡眠被破坏，功耗上升。
 - 驱动 ioctl。
 - Binder 驱动活动。
 
-## 22.4 硬件计数器
+## 24.4 硬件计数器
 
 可关注：
 
@@ -2462,9 +2596,9 @@ CPU 总占用未必极高，但深度睡眠被破坏，功耗上升。
 
 ---
 
-# 23. 内存问题分析
+# 25. 内存问题分析
 
-## 23.1 先分类
+## 25.1 先分类
 
 ```mermaid
 flowchart TB
@@ -2477,7 +2611,7 @@ flowchart TB
     B --> H[Kernel 资源]
 ```
 
-## 23.2 Java Heap 泄漏
+## 25.2 Java Heap 泄漏
 
 步骤：
 
@@ -2498,7 +2632,7 @@ flowchart TB
 - ThreadLocal。
 - ClassLoader 和动态模块。
 
-## 23.3 Native Heap 泄漏
+## 25.3 Native Heap 泄漏
 
 可使用：
 
@@ -2517,7 +2651,7 @@ flowchart TB
 - 解码器和媒体资源。
 - OpenGL/Vulkan 对象。
 
-## 23.4 线程泄漏
+## 25.4 线程泄漏
 
 每个线程都消耗：
 
@@ -2534,7 +2668,7 @@ adb shell ps -T -p <pid>
 adb shell ls /proc/<pid>/task | wc -l
 ```
 
-## 23.5 Bitmap 与 Graphics 内存
+## 25.5 Bitmap 与 Graphics 内存
 
 Bitmap 像素、GraphicBuffer、GPU 资源和 DMA-BUF 可能分散在不同统计项。应结合：
 
@@ -2544,7 +2678,7 @@ Bitmap 像素、GraphicBuffer、GPU 资源和 DMA-BUF 可能分散在不同统�
 - SurfaceFlinger 图层和 Buffer。
 - DMA-BUF 统计。
 
-## 23.6 内存抖动和 LMK
+## 25.6 内存抖动和 LMK
 
 即使没有泄漏，也可能因工作集过大导致：
 
@@ -2558,9 +2692,9 @@ Bitmap 像素、GraphicBuffer、GPU 资源和 DMA-BUF 可能分散在不同统�
 
 ---
 
-# 24. Binder 与系统服务性能分析
+# 26. Binder 与系统服务性能分析
 
-## 24.1 Binder 慢调用类型
+## 26.1 Binder 慢调用类型
 
 - 客户端 Parcel 构造慢。
 - Binder 驱动排队。
@@ -2570,7 +2704,7 @@ Bitmap 像素、GraphicBuffer、GPU 资源和 DMA-BUF 可能分散在不同统�
 - 返回数据过大。
 - 客户端收到回复后处理慢。
 
-## 24.2 线程池饥饿
+## 26.2 线程池饥饿
 
 现象：
 
@@ -2587,7 +2721,7 @@ Bitmap 像素、GraphicBuffer、GPU 资源和 DMA-BUF 可能分散在不同统�
 - 限制回调频率和数据量。
 - 修复下游服务拥塞，而不是盲目扩大线程池。
 
-## 24.3 系统服务锁
+## 26.3 系统服务锁
 
 系统服务状态复杂，常有全局锁。风险包括：
 
@@ -2599,7 +2733,7 @@ Bitmap 像素、GraphicBuffer、GPU 资源和 DMA-BUF 可能分散在不同统�
 
 分析时要把 Java monitor、Native mutex 和跨进程等待统一成一张依赖图。
 
-## 24.4 Binder 数据设计
+## 26.4 Binder 数据设计
 
 - 控制 Parcel 大小。
 - 大数据使用 FD、共享内存或流。
@@ -2609,9 +2743,9 @@ Bitmap 像素、GraphicBuffer、GPU 资源和 DMA-BUF 可能分散在不同统�
 
 ---
 
-# 25. I/O 性能分析
+# 27. I/O 性能分析
 
-## 25.1 I/O 慢的层次
+## 27.1 I/O 慢的层次
 
 ```mermaid
 flowchart TB
@@ -2623,7 +2757,7 @@ flowchart TB
     F --> G[UFS/eMMC 固件与介质]
 ```
 
-## 25.2 关键问题
+## 27.2 关键问题
 
 - 是读慢还是写慢？
 - 是同步 I/O 还是后台 I/O？
@@ -2634,7 +2768,7 @@ flowchart TB
 - 是否有大量小文件随机访问？
 - 是否与内存回收相互放大？
 
-## 25.3 优化原则
+## 27.3 优化原则
 
 - 主线程不做不可预测 I/O。
 - 合并小写入和事务。
@@ -2646,11 +2780,37 @@ flowchart TB
 
 ---
 
-# 26. 功耗分析与优化
+# 28. 功耗分析与优化
 
-功耗问题本质上是硬件资源在多长时间内处于什么状态。
+功耗问题本质上是硬件资源在多长时间内处于什么状态。本章先建立 Android 策略到
+内核机制的完整链路，再分别讨论功耗来源、唤醒、调频、空闲状态和热反馈。
 
-## 26.1 主要功耗来源
+## 28.1 整体能效链路：Power HAL 与性能提示
+
+Android Framework 知道启动、交互、音视频等场景，内核知道任务利用率和硬件状态，
+Power HAL 负责把平台相关策略连接起来。常见输入包括系统状态、task profile、
+Power Mode，以及 ADPF Performance Hint Session 提交的线程集合、目标工作时长和
+实际工作时长。PELT、uclamp 和 EAS 的调度语义见第 14.6～14.7 节。
+
+```mermaid
+flowchart LR
+    A["应用工作期限 / Framework 场景"] --> H["ADPF / Power HAL"]
+    H --> P["平台功耗策略"]
+    P --> U["task profile / cpuset / uclamp"]
+    U --> E["PELT / EAS 选核"]
+    U --> Q["PELT / schedutil 频率请求"]
+    E --> W["完成时间、能耗与温升"]
+    Q --> F["CPUFreq / DVFS"]
+    F --> W
+    W --> T["Thermal 约束"]
+    T --> P
+```
+
+提示表达的是工作意图，不是“固定打开大核”的命令。设备拓扑、可用频率、热余量
+和厂商策略不同，同一个提示的具体动作也可能不同。持续发送过强提示会增加能耗，
+更快触发热限制，反而降低长时间性能。
+
+## 28.2 主要功耗来源
 
 - CPU 活跃时间和频率。
 - GPU 活跃时间。
@@ -2662,7 +2822,7 @@ flowchart TB
 - 内存带宽。
 - 设备无法进入 suspend。
 
-## 26.2 WakeLock
+## 28.3 WakeLock
 
 WakeLock 用于阻止系统进入某些低功耗状态。风险：
 
@@ -2679,7 +2839,7 @@ adb shell dumpsys power
 adb shell dumpsys batterystats
 ```
 
-## 26.3 Suspend 与唤醒源
+## 28.4 Suspend 与唤醒源
 
 屏幕关闭不等于系统已 suspend。若存在活跃 Wakeup Source、定时器、中断或后台工作，设备可能持续处于 active/idle 状态。
 
@@ -2691,7 +2851,7 @@ adb shell dumpsys batterystats
 - 唤醒后工作持续多久。
 - 是否形成周期性唤醒。
 
-## 26.4 Doze 和 App Standby
+## 28.5 Doze 和 App Standby
 
 Doze 在设备长时间未使用时限制后台 CPU、网络、Alarm、Job 和同步活动，并通过维护窗口批量执行延迟任务。
 
@@ -2703,48 +2863,111 @@ Doze 在设备长时间未使用时限制后台 CPU、网络、Alarm、Job 和�
 - 使用有时限的 WakeLock。
 - 网络请求批处理。
 
-## 26.5 Power HAL
+## 28.6 CPUFreq、schedutil 与 DVFS
 
-Power HAL 为系统提供平台相关性能/功耗控制，例如：
+CPUFreq 分为三个主要层次：
 
-- 交互性能提示。
-- 启动性能提示。
-- 持续性能模式。
-- 性能会话和线程提示。
+- core：维护 `cpufreq_policy` 和 sysfs 等公共接口；
+- governor：根据负载决定请求哪个性能点；
+- driver：把请求转换为平台具体的频率、电压或硬件性能状态。
 
-优化时不能只追求高频率和大核。过度 Boost 会：
+一组 CPU 可能共享同一个 `cpufreq_policy`，因为它们共用时钟或电压域。调整其中
+一个 CPU 的策略，实际可能影响整个 cluster。
 
-- 增加能耗。
-- 更快触发热限制。
-- 使长期性能下降。
+`schedutil` 直接使用调度器提供的 PELT 利用率，并考虑有效 uclamp 约束，向
+CPUFreq driver 请求频率。请求频率不等于硬件瞬时真实频率：转换延迟、OPP 表、
+电源预算、thermal cooling state 和固件控制都可能进一步限制结果。
 
-## 26.6 Thermal
+排查时可结合设备权限查看：
 
-热管理会根据传感器温度降低 CPU/GPU 频率或限制功能。性能测试必须记录温度和 throttling 状态，否则前后结果可能不可比。
+```bash
+adb shell cat /sys/devices/system/cpu/cpufreq/policy*/scaling_governor
+adb shell cat /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq
+adb shell cat /sys/devices/system/cpu/cpufreq/policy*/scaling_min_freq
+adb shell cat /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq
+```
 
-## 26.7 功耗问题分析流程
+不要只观察 `scaling_cur_freq` 单点值。应把频率、Running/Runnable 时间、任务所在
+CPU、工作完成时间和 thermal 状态放到同一时间线上分析。
+
+## 28.7 CPUIdle 与唤醒成本
+
+CPU 没有可运行任务时进入 idle loop。CPUIdle driver 提供平台支持的 idle state，
+governor 根据预计空闲时间选择状态。更深状态通常功耗更低，但进入和退出代价更高：
+
+- target residency：进入该状态后，至少空闲多久才可能抵消进入成本；
+- exit latency：收到唤醒事件后恢复执行所需的最坏时间上界；
+- PM QoS：限制可接受的恢复延迟，可能阻止选择过深状态。
+
+因此，降低平均 CPU 利用率不一定降低功耗。高频 timer、轮询、短 WakeLock、零散
+网络包或 IRQ 会不断打断 idle，使 CPU 无法达到深状态的 target residency。
+
+```bash
+adb shell cat /sys/devices/system/cpu/cpuidle/current_governor_ro
+adb shell cat /sys/devices/system/cpu/cpu0/cpuidle/state*/name
+adb shell cat /sys/devices/system/cpu/cpu0/cpuidle/state*/time
+adb shell cat /sys/devices/system/cpu/cpu0/cpuidle/state*/usage
+```
+
+CPUIdle 是每个 CPU 在系统仍处于运行状态时的空闲管理；system suspend 是更大范围
+的系统低功耗状态，两者不能混为一谈。
+
+## 28.8 Thermal 约束与反馈环
+
+Thermal 不是最后才触发的“保护开关”，而是持续参与性能预算的反馈系统：
+
+```text
+传感器温度与平台估计
+  → kernel thermal zone / 平台控制
+  → cooling device 限制 CPU、GPU、充电或其他部件
+  → Thermal HAL 上报温度与 severity
+  → Framework、系统服务和应用降低工作强度
+```
+
+Android 10 及以后由 Framework thermal service 持续接收 Thermal HAL 2.0 信号；
+较新版本使用 AIDL 接口。具体限制可能由内核、固件或厂商服务执行，但所有导致
+设备性能受限的重要热与供电状态都应形成可观察的 severity。
+
+优化必须区分：
+
+- 短时延迟是否改善；
+- 稳态吞吐是否提高；
+- 功耗和温升是否增加；
+- 是否更早进入 throttling；
+- 降频发生在 CPU、GPU、内存总线还是其他电源域。
+
+只比较冷机的前几次结果，往往会把不可持续的 Boost 误认为长期优化。
+
+## 28.9 功耗问题分析流程
 
 ```mermaid
 flowchart TB
-    A[确认电量异常场景] --> B[拆分屏上/屏下]
-    B --> C[查看 WakeLock 与唤醒次数]
-    C --> D[查看 CPU/GPU/网络/传感器活动]
-    D --> E[关联具体 UID、线程和调用路径]
-    E --> F[减少活跃时长、次数或硬件状态]
-    F --> G[长时间重复测试]
+    A[固定场景、亮度、网络和环境温度] --> B[确认屏上、屏下或 suspend 阶段]
+    B --> C[查看 WakeLock、timer、IRQ 与唤醒源]
+    C --> D[关联 PELT、选核、频率与 idle state]
+    D --> E[检查 CPU/GPU/网络/传感器和内存带宽]
+    E --> F[对照 Thermal severity 与限频]
+    F --> G[定位 UID、线程、驱动和调用路径]
+    G --> H[修改单一因素并长时间重复测量]
 ```
 
-## 26.8 功耗优化的三个杠杆
+Perfetto 适合关联调度、频率、idle、Binder 和业务区间；外部功耗仪或可靠的板级
+Power Stats 用于确认真实能量变化。电量百分比和一次瞬时电流不足以证明优化有效。
 
-1. **减少次数**：合并唤醒、网络和定时任务。
-2. **缩短持续时间**：快速完成后释放资源。
-3. **降低强度**：降低频率、采样率、刷新率或计算量。
+## 28.10 功耗优化的三个杠杆
+
+1. **减少次数**：合并唤醒、网络、timer 和设备事务。
+2. **缩短持续时间**：提高有效工作比例，完成后尽快释放 WakeLock 和硬件资源。
+3. **降低强度**：选择合适频率、核、刷新率、采样率和算法精度。
+
+三个杠杆会互相影响。例如降低频率可能延长活跃时间，批处理虽然减少唤醒次数，
+却可能提高瞬时负载。最终应比较任务总能量、用户可见延迟和热稳定状态。
 
 ---
 
-# 27. 稳定性问题分析
+# 29. 稳定性问题分析
 
-## 27.1 Java 异常崩溃
+## 29.1 Java 异常崩溃
 
 分析：
 
@@ -2757,7 +2980,7 @@ flowchart TB
 
 不要只修最外层 `NullPointerException`，还要确认对象为何进入非法状态。
 
-## 27.2 Native 崩溃
+## 29.2 Native 崩溃
 
 Tombstone 通常包含：
 
@@ -2778,7 +3001,7 @@ Tombstone 通常包含：
 
 Native 崩溃必须使用匹配构建的符号文件符号化。
 
-## 27.3 ANR
+## 29.3 ANR
 
 ANR 常见原因：
 
@@ -2800,7 +3023,7 @@ ANR 常见原因：
 6. 对照 Perfetto、logcat 和系统负载。
 7. 不要只看 ANR 文件中某一瞬间的栈。
 
-## 27.4 system_server Watchdog
+## 29.4 system_server Watchdog
 
 Watchdog 会监控关键线程和锁是否在规定时间内响应。可能原因：
 
@@ -2812,7 +3035,7 @@ Watchdog 会监控关键线程和锁是否在规定时间内响应。可能原�
 
 system_server Watchdog 往往是系统级级联故障，需要结合所有被监控线程和 Binder 依赖分析。
 
-## 27.5 服务反复崩溃和重启循环
+## 29.5 服务反复崩溃和重启循环
 
 关键进程反复崩溃可能导致：
 
@@ -2829,7 +3052,7 @@ system_server Watchdog 往往是系统级级联故障，需要结合所有被监
 - 数据损坏导致的稳定复现。
 - 依赖服务未就绪造成的连锁失败。
 
-## 27.6 Binder 服务死亡处理
+## 29.6 Binder 服务死亡处理
 
 客户端可注册 DeathRecipient 监听远端 Binder 死亡。健壮客户端应：
 
@@ -2839,7 +3062,7 @@ system_server Watchdog 往往是系统级级联故障，需要结合所有被监
 - 有界重试。
 - 防止重连风暴。
 
-## 27.7 稳定性设计原则
+## 29.7 稳定性设计原则
 
 - 明确线程和资源所有权。
 - 所有跨进程调用都考虑远端死亡。
@@ -2852,9 +3075,9 @@ system_server Watchdog 往往是系统级级联故障，需要结合所有被监
 
 ---
 
-# 28. 系统优化的方法论
+# 30. 系统优化的方法论
 
-## 28.1 不要从“优化代码”开始
+## 30.1 不要从“优化代码”开始
 
 正确顺序：
 
@@ -2869,7 +3092,7 @@ flowchart LR
     G --> H[加入回归监控]
 ```
 
-## 28.2 指标必须明确
+## 30.2 指标必须明确
 
 不应只说“更流畅”“更省电”。应明确：
 
@@ -2883,7 +3106,7 @@ flowchart LR
 - 某场景能量消耗。
 - ANR/崩溃发生率。
 
-## 28.3 相关性不等于因果
+## 30.3 相关性不等于因果
 
 例如发现卡顿时恰好发生 GC，不代表 GC 是根因。可能是：
 
@@ -2893,7 +3116,7 @@ flowchart LR
 
 需要通过时间线、对照实验和因果链验证。
 
-## 28.4 平均值会掩盖尾延迟
+## 30.4 平均值会掩盖尾延迟
 
 系统体验常由 P95/P99 决定。应记录：
 
@@ -2904,7 +3127,7 @@ flowchart LR
 - 前后台负载。
 - 设备型号。
 
-## 28.5 优化的转移效应
+## 30.5 优化的转移效应
 
 - 把主线程任务移到后台，可能与 RenderThread 抢 CPU。
 - 增大缓存减少 I/O，可能提高内存压力和 LMK。
@@ -2914,7 +3137,7 @@ flowchart LR
 
 优化必须评估全系统代价。
 
-## 28.6 建立证据闭环
+## 30.6 建立证据闭环
 
 一个完整结论应包含：
 
@@ -2927,9 +3150,9 @@ flowchart LR
 7. 副作用评估。
 8. 回归检测方式。
 
-# 29. 思考问题
+# 31. 思考问题
 
-## 29.1 架构与启动
+## 31.1 架构与启动
 
 1. Android 从 Bootloader 到 Launcher 可交互经历哪些阶段？
 2. `init` 为什么必须是 PID 1？
@@ -2940,7 +3163,7 @@ flowchart LR
 7. `BOOT_COMPLETED` 是否代表系统所有后台初始化都结束？
 8. 如何区分开机慢发生在 Bootloader、内核、init 还是 Framework？
 
-## 29.2 Framework
+## 31.2 Framework
 
 9. `ActivityManager` 与 `ActivityManagerService` 是什么关系？
 10. AMS 和 ATMS 的职责如何区分？
@@ -2951,7 +3174,7 @@ flowchart LR
 15. ContentProvider 为什么可能影响应用启动时间？
 16. 应用进程重要性如何影响内存回收？
 
-## 29.3 Handler 与线程
+## 31.3 Handler 与线程
 
 17. Handler、Looper、MessageQueue 的关系是什么？
 18. MessageQueue 没有消息时为什么不持续占 CPU？
@@ -2960,7 +3183,7 @@ flowchart LR
 21. Handler 泄漏的完整引用链是什么？
 22. Runnable 时间长和 Running 时间长分别说明什么？
 
-## 29.4 Binder
+## 31.4 Binder
 
 23. Binder Client、Server、Proxy、Stub、Driver 分别是什么？
 24. 同步事务和 `oneway` 的区别是什么？
@@ -2973,7 +3196,7 @@ flowchart LR
 31. DeathRecipient 的作用是什么？
 32. Binder 优先级继承解决什么问题？
 
-## 29.5 HAL
+## 31.5 HAL
 
 33. HAL 的核心价值是什么？
 34. Binderized HAL 相比进程内 HAL 有何取舍？
@@ -2983,7 +3206,7 @@ flowchart LR
 38. VINTF manifest 和 compatibility matrix 分别表达什么？
 39. Camera 请求如何从 Framework 走到驱动？
 
-## 29.6 图形
+## 31.6 图形
 
 40. 一帧从输入到显示经历哪些组件？
 41. Choreographer 的作用是什么？
@@ -2995,7 +3218,7 @@ flowchart LR
 47. 60/90/120 Hz 的帧周期分别是多少？
 48. 关键线程 Runnable 但未运行时应查什么？
 
-## 29.7 ART 与编译
+## 31.7 ART 与编译
 
 49. ART 的职责是否只有 GC？
 50. DEX 校验检查哪些内容？
@@ -3011,7 +3234,7 @@ flowchart LR
 60. `speed-profile` 和 `speed` 的目标差异是什么？
 61. OTA 为什么可能使旧编译产物失效？
 
-## 29.8 GC
+## 31.8 GC
 
 62. GC Root 有哪些？
 63. Mark-Sweep、Mark-Compact、Copying 的区别是什么？
@@ -3025,7 +3248,7 @@ flowchart LR
 71. 如何区分 GC 根因与伴随现象？
 72. Java Heap 正常时还可能有哪些内存增长？
 
-## 29.9 JNI
+## 31.9 JNI
 
 73. `JavaVM*` 和 `JNIEnv*` 的生命周期有何区别？
 74. 为什么 `JNIEnv*` 不能跨线程使用？
@@ -3039,7 +3262,7 @@ flowchart LR
 82. JNI pending exception 为什么必须及时处理？
 83. 如何降低 JNI 边界调用开销？
 
-## 29.10 Linux 与性能
+## 31.10 Linux 与性能
 
 84. Android 线程在 Linux 内核中如何表示？
 85. nice、cgroup、cpuset、uclamp 分别影响什么？
@@ -3054,10 +3277,38 @@ flowchart LR
 94. 直接回收为什么可能造成卡顿？
 95. `fsync` 为什么可能很慢？
 
-## 29.11 工具与优化
+## 31.11 GKI 与内核模块
 
-96. Perfetto、Simpleperf 和 heap dump 分别解决什么问题？
-97. Systrace、atrace、ftrace 之间是什么关系？
-98. 分析卡顿时如何区分主线程、RenderThread、GPU 和 SurfaceFlinger？
-99. 为什么优化结果要看 P95/P99 而不只看平均值？
-100. 一个可验证的系统优化结论应包含哪些证据？
+96. GKI 把哪些能力放在公共内核，哪些能力留给厂商模块？
+97. KMI 为什么只在特定 Android 版本与 LTS 分支内稳定？
+98. `system_dlkm`、`vendor_boot` 和 `vendor_dlkm` 中的模块加载时机有什么区别？
+
+## 31.12 调度与能效
+
+99. PELT、uclamp、EAS 和 `schedutil` 分别解决什么问题？
+100. CPUFreq 与 CPUIdle 的 governor 为什么不是同一种策略？
+101. target residency 和 exit latency 如何影响 idle state 选择？
+102. Thermal 限频为什么可能让短时优化降低长时间性能？
+
+## 31.13 工具与优化
+
+103. Perfetto、Simpleperf 和 heap dump 分别解决什么问题？
+104. Systrace、atrace、ftrace 之间是什么关系？
+105. 分析卡顿时如何区分主线程、RenderThread、GPU 和 SurfaceFlinger？
+106. 为什么优化结果要看 P95/P99 而不只看平均值？
+107. 一个可验证的系统优化结论应包含哪些证据？
+
+# 参考资料
+
+1. [Android Open Source Project: Kernel overview](https://source.android.com/docs/core/architecture/kernel)
+2. [Android Open Source Project: Maintain a stable KMI](https://source.android.com/docs/core/architecture/kernel/stable-kmi)
+3. [Android Open Source Project: Kernel modules overview](https://source.android.com/docs/core/architecture/kernel/modules)
+4. [Android Open Source Project: Kernel module support](https://source.android.com/docs/core/architecture/kernel/kernel-module-support)
+5. [Android Open Source Project: GKI module partitions](https://source.android.com/docs/core/architecture/partitions/gki-partitions)
+6. [Android Open Source Project: Performance Hint API](https://source.android.com/docs/core/perf/performance-hint-api)
+7. [Android Open Source Project: Thermal mitigation](https://source.android.com/docs/core/power/thermal-mitigation)
+8. [Linux Kernel Documentation: Capacity Aware Scheduling](https://docs.kernel.org/scheduler/sched-capacity.html)
+9. [Linux Kernel Documentation: Energy Aware Scheduling](https://docs.kernel.org/scheduler/sched-energy.html)
+10. [Linux Kernel Documentation: Utilization Clamping](https://docs.kernel.org/scheduler/sched-util-clamp.html)
+11. [Linux Kernel Documentation: CPUFreq](https://docs.kernel.org/admin-guide/pm/cpufreq.html)
+12. [Linux Kernel Documentation: CPUIdle](https://docs.kernel.org/admin-guide/pm/cpuidle.html)

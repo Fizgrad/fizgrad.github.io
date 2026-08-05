@@ -5045,7 +5045,7 @@ master
 
 不存在对所有负载最优的唯一模型。
 
-# 十五、系统实现细节
+# 十五、Linux 内核实现与性能
 
 ## 1. 多级页表
 
@@ -5985,9 +5985,16 @@ flowchart TD
 
 容器安全不是单一开关，而是内核攻击面、配置、供应链和运行权限的组合问题。
 
-## 10. Linux 内核模块化与可加载内核模块 
+---
 
-### 10.1 Linux 为什么既是单体内核，又具有模块化设计？
+# 十六、内核工程、启动与设备驱动
+
+这一章关注如何把内核机制落实到可构建、可加载、可启动、可驱动和可观测的工程系统。
+阅读顺序依次是模块边界、系统启动、设备驱动，最后回到源码构建和问题定位。
+
+## 1. Linux 内核模块化与可加载内核模块
+
+### 1.1 Linux 为什么既是单体内核，又具有模块化设计？
 
 Linux 通常被归类为**单体内核或宏内核**。进程调度、内存管理、VFS、网络协议栈和设备驱动等核心组件都运行在内核空间，并可以直接调用其他内核组件提供的接口。
 
@@ -6024,7 +6031,7 @@ flowchart TB
 
 各子系统通过数据结构、回调函数、注册接口和导出符号协作。部分代码可以编译进内核镜像，也可以编译成运行时加载的内核模块。模块被加载后进入内核地址空间，不具备普通用户进程那样的故障隔离。
 
-### 10.2 内核功能的三种编译状态
+### 1.2 内核功能的三种编译状态
 
 Linux 的 Kconfig 配置经常使用三态选项：
 
@@ -6052,7 +6059,7 @@ CONFIG_UNUSED_DRIVER=n
 
 并不是所有配置项都支持 `m`。部分核心功能只能选择是否内建，而某些设备驱动、文件系统、网络协议和加密算法通常可以编译为模块。Kconfig 使用 `bool` 和 `tristate` 等类型描述这些选择。
 
-### 10.3 Built-in 与可加载模块
+### 1.3 Built-in 与可加载模块
 
 #### 内建代码
 
@@ -6101,7 +6108,7 @@ example.ko
 
 外部模块需要使用目标内核对应的配置、头文件和构建产物进行编译；内核升级后，外部模块通常也需要针对新内核重新构建或重新安装。
 
-### 10.4 内核模块不是普通动态库
+### 1.4 内核模块不是普通动态库
 
 内核模块和用户态 `.so` 都涉及运行时装载和符号解析，但二者并不等价。
 
@@ -6126,7 +6133,7 @@ pthread锁    → 内核 mutex / spinlock
 
 模块被装入后，其代码和数据成为内核运行状态的一部分；加载模块的底层系统调用会把模块 ELF 映像装入内核空间、完成符号重定位并调用初始化函数。
 
-### 10.5 模块的加载过程
+### 1.5 模块的加载过程
 
 模块的简化加载过程如下：
 
@@ -6152,7 +6159,7 @@ flowchart TD
 
 中寻找当前内核对应的模块，并结合模块配置和依赖信息加载所需模块。`depmod` 会扫描模块的导出符号和引用关系，生成 `modules.dep`、`modules.dep.bin` 等依赖数据。
 
-### 10.6 模块初始化和退出
+### 1.6 模块初始化和退出
 
 内核模块通常使用：
 
@@ -6221,7 +6228,7 @@ demo_exit()
 
 如果卸载后仍存在指向模块代码或数据的引用，后续访问可能变成严重的 use-after-free。因此内核会使用模块引用计数等机制，阻止仍在使用的模块被正常卸载。
 
-### 10.7 常见模块管理命令
+### 1.7 常见模块管理命令
 
 #### 查看已加载模块
 
@@ -6305,7 +6312,7 @@ sudo depmod -a
 
 安装新的模块文件后，通常需要运行 `depmod` 更新依赖数据库，随后才能方便地通过模块名使用 `modprobe`。
 
-### 10.8 模块依赖和内核符号
+### 1.8 模块依赖和内核符号
 
 一个模块经常需要调用内核或其他模块提供的函数。
 
@@ -6344,7 +6351,7 @@ Unknown symbol ...
 
 这也是直接使用 `insmod` 时经常遇到的问题之一；`modprobe` 会根据依赖数据库尝试提前加载依赖。
 
-### 10.9 模块参数
+### 1.9 模块参数
 
 模块可以定义运行参数。例如：
 
@@ -6383,7 +6390,7 @@ modinfo -p demo
 
 是否允许运行时修改由参数权限和模块实现决定。内建模块的参数一般需要通过内核命令行传入；可加载模块可以通过 `modprobe` 参数传入。
 
-### 10.10 自动加载
+### 1.10 自动加载
 
 用户通常不需要手工加载所有硬件驱动。当系统发现设备或某个内核功能需求时，可以根据设备标识、模块 alias 和用户空间设备管理机制请求加载匹配模块。
 
@@ -6403,7 +6410,7 @@ modprobe 加载对应驱动及其依赖
 
 因此，插入 USB 设备后驱动能够自动出现，并不表示所有驱动都已经内建；它也可能是运行时自动加载了相应模块。
 
-### 10.11 模块安全
+### 1.11 模块安全
 
 内核模块拥有内核级权限。恶意或存在缺陷的模块可以：
 
@@ -6425,7 +6432,7 @@ cat /proc/sys/kernel/tainted
 
 加载未知来源的 `.ko` 本质上相当于让未知代码以最高权限进入内核，不应像运行普通用户程序一样随意操作。
 
-### 10.12 常见错误理解
+### 1.12 常见错误理解
 
 #### “Linux 支持模块，所以 Linux 是微内核”
 
@@ -6457,7 +6464,7 @@ Linux 核心子系统和已加载模块仍在同一内核地址空间运行。�
 
 驱动既可以编译为 `.ko`，也可以直接编译进内核。是否支持模块形式取决于对应 Kconfig 选项和依赖。
 
-### 10.13 总结
+### 1.13 总结
 
 Linux 的模块化包含两个层次：
 
@@ -6483,7 +6490,7 @@ Linux 的模块化包含两个层次：
 * 外部模块应针对目标内核构建，并注意签名和安全来源。
 
 
-## 11. Linux 启动流程
+## 2. Linux 启动流程
 
 Linux 启动不是由单一程序完成，而是由固件、引导程序、内核、早期用户空间和正式用户空间依次接管。
 
@@ -6507,7 +6514,7 @@ flowchart TD
     M --> N["挂载文件系统、启动服务和登录环境"]
 ```
 
-### 11.1 固件阶段
+### 2.1 固件阶段
 
 计算机上电后，CPU 从体系结构规定的复位入口开始执行固件代码。
 
@@ -6527,7 +6534,7 @@ flowchart TD
 
 固件还没有进入 Linux 内核，因此此时不能使用 Linux 的驱动模型、系统调用或内核模块机制。
 
-### 11.2 引导程序阶段
+### 2.2 引导程序阶段
 
 引导程序负责把启动所需内容放入内存，通常包括：
 
@@ -6561,7 +6568,7 @@ initrd /boot/initramfs.img
 
 这时 `.ko` 模块仍然不能通过 `modprobe` 加载，因为 Linux 用户空间尚未建立，`modprobe` 也还没有开始运行。
 
-### 11.3 内核早期入口和解压
+### 2.3 内核早期入口和解压
 
 许多 Linux 内核启动映像是压缩的。体系结构相关启动代码会完成：
 
@@ -6582,7 +6589,7 @@ initrd /boot/initramfs.img
 
 此时还不能从普通根文件系统读取 `.ko` 模块。
 
-### 11.4 `start_kernel()`：初始化核心内核
+### 2.4 `start_kernel()`：初始化核心内核
 
 完成体系结构相关准备后，内核进入通用初始化流程，核心入口通常可以概括为：
 
@@ -6613,7 +6620,7 @@ modprobe
 insmod
 ```
 
-### 11.5 内建组件的 initcall
+### 2.5 内建组件的 initcall
 
 内核初始化到一定阶段后，会执行编译进内核的初始化函数。
 
@@ -6663,7 +6670,7 @@ CONFIG_DEMO=y
 
 > **内建驱动并不是在模块加载阶段加载的，而是在内核启动过程中直接执行初始化函数。**
 
-### 11.6 initramfs 是什么？
+### 2.6 initramfs 是什么？
 
 initramfs 是引导程序交给内核、或者直接嵌入内核映像的一份早期根文件系统。
 
@@ -6698,7 +6705,7 @@ initramfs 的主要任务通常是：
 
 initramfs 是早期用户空间，不是内核的一部分。它里面的 `/init`、Shell、`modprobe` 都属于用户空间程序。
 
-### 11.7 `.ko` 模块最早什么时候可以加载？
+### 2.7 `.ko` 模块最早什么时候可以加载？
 
 从普通启动流程看，`.ko` 模块最早通常在下面这个阶段加载：
 
@@ -6747,7 +6754,7 @@ modprobe dm_crypt
 
 如果这些内容没有被打包进 initramfs，对应模块就不能在早期用户空间中加载。
 
-### 11.8 为什么根磁盘驱动经常放进 initramfs？
+### 2.8 为什么根磁盘驱动经常放进 initramfs？
 
 假设系统根文件系统位于 NVMe 设备上，而 NVMe 驱动被编译成模块：
 
@@ -6795,7 +6802,7 @@ initramfs 中包含 nvme.ko
 
 不能只把启动所需模块放在尚未挂载的真实根文件系统中。
 
-### 11.9 没有 initramfs 时怎么办？
+### 2.9 没有 initramfs 时怎么办？
 
 Linux 并非绝对要求使用 initramfs。
 
@@ -6825,7 +6832,7 @@ Linux 并非绝对要求使用 initramfs。
 
 继续加载其他非启动必需模块。
 
-### 11.10 切换到真实根文件系统
+### 2.10 切换到真实根文件系统
 
 initramfs 完成准备后，会把真实根文件系统挂载到某个目录，例如：
 
@@ -6866,7 +6873,7 @@ initramfs 中的 `/init` 和真实系统中的 `/sbin/init` 不是必须为同�
 * 切换根文件系统后，继续执行正式系统启动事务；
 * 也可以使用 Shell 脚本、BusyBox 或 dracut 提供的早期 `/init`。
 
-### 11.11 PID 1 和正式用户空间
+### 2.11 PID 1 和正式用户空间
 
 进入真实根文件系统后，内核通常执行：
 
@@ -6900,7 +6907,7 @@ systemd-modules-load.service
 
 不过多数硬件模块更常通过设备发现和模块 alias 按需加载，而不是全部写入静态列表。
 
-### 11.12 模块自动加载发生在什么时候？
+### 2.12 模块自动加载发生在什么时候？
 
 内核某些子系统发现缺少某项功能时，可以调用类似：
 
@@ -6945,7 +6952,7 @@ finit_module()
 
 早期启动是否能自动加载某个模块，取决于该模块及加载工具是否被包含在 initramfs 中。
 
-### 11.13 启动阶段与模块能力对照
+### 2.13 启动阶段与模块能力对照
 
 | 启动阶段              | 内建代码 `=y`   | `.ko` 模块 `=m`            |
 | ----------------- | ----------- | ------------------------ |
@@ -6958,7 +6965,7 @@ finit_module()
 | 真实根文件系统挂载后        | 已经可用        | 可以加载 `/lib/modules` 中的模块 |
 | 正式系统运行            | 已经可用        | 可手动、静态或按需加载              |
 
-### 11.14 一个典型启动例子
+### 2.14 一个典型启动例子
 
 假设系统使用：
 
@@ -6994,7 +7001,7 @@ sequenceDiagram
 
 其中，若 NVMe 或 dm-crypt 驱动是模块，就必须包含在 initramfs 中；如果它们直接编译进内核，则不需要在 initramfs 阶段加载对应 `.ko`。
 
-### 11.15 查看当前系统的启动信息
+### 2.15 查看当前系统的启动信息
 
 查看内核命令行：
 
@@ -7070,7 +7077,7 @@ systemd-analyze critical-chain
 
 需要注意，`systemd-analyze` 主要观察用户空间和 systemd 管理的启动阶段，不能完整代表固件、引导器和所有内核初始化成本。
 
-### 11.16 总结
+### 2.16 总结
 
 Linux 的启动流程可以概括为：
 
@@ -7095,8 +7102,341 @@ Linux 的启动流程可以概括为：
 * 没有 initramfs 时，挂载真实根文件系统所必需的驱动必须内建；
 * 模块自动加载仍依赖用户空间加载器和可访问的模块文件。
 
+## 3. Linux 设备模型、中断与 DMA
 
-# 十六、常见排查
+驱动代码不能只理解为“读写寄存器”。它还要接入统一设备模型，处理设备发现、
+资源管理、并发、异步完成、热插拔和电源状态，并在设备消失时安全停止所有访问。
+
+### 3.1 设备、驱动、总线与 class
+
+Linux Driver Core 用一组公共对象组织不同总线和设备：
+
+| 对象 | 主要职责 |
+|---|---|
+| `struct device` | 表示一个设备实例，保存父子关系、资源、DMA 与电源管理信息 |
+| `struct device_driver` | 表示一类驱动及其 `probe`、`remove`、PM 等回调 |
+| `struct bus_type` | 定义总线匹配规则，并组织挂在该总线上的设备和驱动 |
+| `struct class` | 按用户可见功能组织设备，例如 block、net、tty |
+| kobject / sysfs | 提供引用计数、层级关系及 `/sys` 中的对象视图 |
+
+设备和驱动无论谁先注册，Driver Core 都可以在另一方出现时尝试匹配。匹配规则由
+总线决定，例如 PCI ID、USB ID、ACPI ID 或 Device Tree 的 `compatible`：
+
+```mermaid
+flowchart LR
+    F["固件描述或总线枚举"] --> D["注册 device"]
+    R["驱动初始化"] --> V["注册 driver"]
+    D --> M{"bus match"}
+    V --> M
+    M -->|匹配| P["probe"]
+    P --> A["申请资源并启动设备"]
+    A --> S["/sys 与设备接口"]
+```
+
+`probe()` 应验证硬件、取得寄存器、中断、时钟、reset、DMA 等资源，再向上层子系统
+注册能力。依赖的时钟、regulator 或总线控制器尚未就绪时，驱动可能返回
+`-EPROBE_DEFER`，让 Driver Core 稍后重试，而不是把暂时缺失误判成永久失败。
+
+`devm_*` 接口能把许多资源绑定到 `struct device` 生命周期，但它不能自动解决所有
+并发问题。驱动移除前仍要先阻止新请求、停止硬件、同步 IRQ、取消 work 和 timer，
+确保不会再有异步路径访问即将释放的状态。
+
+### 3.2 Device Tree 描述什么
+
+Device Tree 描述通常无法由硬件自行枚举的板级连接关系。DTS 经编译形成 DTB，
+由引导程序传给内核。它描述硬件事实，不放驱动算法，也不应承载随运行场景变化的
+策略。
+
+```dts
+uart0: serial@10010000 {
+    compatible = "vendor,soc-uart", "ns16550a";
+    reg = <0x0 0x10010000 0x0 0x1000>;
+    interrupts = <42>;
+    clocks = <&clock_controller 3>;
+    status = "okay";
+};
+```
+
+常见属性包括：
+
+- `compatible`：从具体实现到兼容实现的匹配字符串；
+- `reg`：寄存器或地址资源，具体编码由父节点的地址、长度 cell 规则决定；
+- `interrupts` / `interrupt-parent`：中断控制器和中断描述，具体 cell 编码由对应
+  interrupt-controller binding 定义；
+- `clocks`、`resets`、`dmas`、`iommus`：通过 phandle 引用资源提供者；
+- `status`：节点是否启用。
+
+根节点或简单 SoC 总线下的节点经常形成 `platform_device`，再与
+`platform_driver` 匹配。I2C、SPI 等总线的子设备通常由对应控制器驱动继续枚举。
+Device Tree 节点、Linux device 和驱动实例相关联，但三者不是同一个对象。
+
+新增或修改 binding 时应优先使用 YAML schema，并通过 `dt_binding_check`、
+`dtbs_check` 检查属性和编码。运行时可从 `/sys/firmware/devicetree/base` 查看内核
+实际收到的树；调试时要区分“DTS 源码正确”和“Bootloader 最终传入的 DTB 正确”。
+
+### 3.3 硬中断、线程化 IRQ 与延后执行
+
+外设中断从中断控制器进入体系结构代码，再由 Generic IRQ 层映射到 Linux IRQ，
+最后调用驱动注册的 handler。硬件中断是异步外部事件；page fault 等同步异常不能
+简单归入同一种机制。
+
+| 执行位置 | 能否睡眠 | 适合的工作 |
+|---|---|---|
+| hard IRQ handler | 不能 | 确认中断来源、读取必要状态、应答或屏蔽设备、唤醒后续处理 |
+| threaded IRQ | 可以 | 需要访问可睡眠总线、等待锁或完成较多设备处理 |
+| 普通 workqueue | 可以 | 不要求紧跟 IRQ 的异步任务、重试、状态机和批处理 |
+
+`request_threaded_irq()` 可以注册 primary handler 和 `thread_fn`。primary handler
+仍在 hardirq 上下文中运行；确认是本设备的中断后返回 `IRQ_WAKE_THREAD`，随后
+`thread_fn` 在线程上下文执行。配合 `IRQF_ONESHOT` 时，中断线可保持屏蔽直到线程
+handler 完成，具体是否适合仍取决于设备的应答语义。
+
+必须遵守：
+
+- hardirq 路径保持短小，不能调用可能睡眠的接口；
+- 共享 IRQ 上不是本设备的事件应返回 `IRQ_NONE`，`dev_id` 还要能唯一标识实例；
+- 中断状态的读取、清除和设备屏蔽顺序必须遵循硬件协议；
+- 移除驱动时先让硬件不再产生新中断，再同步并释放 IRQ；
+- IRQ affinity 会影响缓存局部性、吞吐和尾延迟，不能只追求平均分散；
+- 中断风暴通常要从设备状态未清除、触发类型错误和异常输入速率三方面排查。
+
+### 3.4 Workqueue 的语义与生命周期
+
+普通 workqueue 把 `work_struct` 交给内核管理的 kworker，在进程上下文异步执行。
+现代 concurrency-managed workqueue 共享底层 worker pool；创建一个逻辑 workqueue
+并不等于永久创建一组专属线程。
+
+常见选择：
+
+- 无特殊隔离、顺序或回收要求时，可以使用系统 workqueue；
+- 需要独立并发上限、严格顺序或统一 flush 边界时，创建专用 workqueue；
+- 可能参与内存回收路径的 workqueue 必须考虑 `WQ_MEM_RECLAIM`，否则内存压力下
+  可能因缺少执行上下文而死锁；
+- `WQ_UNBOUND` 牺牲固定 CPU 局部性，适合并发需求波动大或长时间 CPU 密集任务；
+- 普通 work item 可以睡眠；BH workqueue 属于 softirq 语义，是例外，不能睡眠。
+
+同一个 work item 不能在仍 pending 或执行时被当作全新的独立任务重复初始化。
+驱动关闭路径通常需要 `cancel_work_sync()`、`cancel_delayed_work_sync()` 或适当的
+flush，且不能持有 work handler 完成所需的锁等待它，否则会形成自锁。
+
+Workqueue 与 wait queue 名称相似但用途不同：workqueue 安排函数执行，wait queue
+让任务等待条件并在条件变化时被唤醒。
+
+### 3.5 DMA 地址、缓存一致性与所有权
+
+DMA 允许设备直接读写内存，但驱动仍负责分配或映射 Buffer、设置描述符、通知
+设备、处理中断以及回收资源。几个地址空间必须分清：
+
+```text
+CPU 虚拟地址 --CPU 页表--> CPU 物理地址
+                                 ^
+                                 |
+设备使用的 DMA 地址 / IOVA --IOMMU--+
+```
+
+`dma_addr_t` 是交给设备的地址，可能经过总线偏移或 IOMMU 翻译，不能把 CPU
+虚拟地址、物理地址和 DMA 地址互相强制转换代替 DMA API。
+
+| 模式 | 常见接口 | 适用场景 |
+|---|---|---|
+| coherent DMA | `dma_alloc_coherent()` / `dma_free_coherent()` | 描述符环、长期共享的小块控制数据 |
+| streaming DMA | `dma_map_single()` / `dma_unmap_single()`、SG 接口 | 已有数据 Buffer 的阶段性传输 |
+
+Streaming mapping 要明确 `DMA_TO_DEVICE`、`DMA_FROM_DEVICE` 或双向传输，检查
+`dma_mapping_error()`，并使用完全对应的地址、大小和方向解除映射。复用映射时，
+还可能需要 `dma_sync_*_for_cpu()` 与 `dma_sync_*_for_device()` 完成所有权交接。
+
+Coherent 表示 CPU 与设备不需要显式做缓存同步，不表示寄存器写入和描述符内容
+自动具有正确顺序。把描述符所有权交给设备前仍可能需要内存屏障；设备完成前，
+CPU 也不能提前覆盖或释放 Buffer。
+
+驱动初始化时应设置设备支持的 DMA mask。Scatter-Gather 可以描述不连续内存，
+映射后返回的 DMA 段数可能少于原始 SG 项数，驱动应使用映射结果而不是原始数量
+向硬件提交。
+
+### 3.6 IOMMU 的作用与限制
+
+IOMMU 为设备侧访问建立 `IOVA -> 物理地址` 映射，主要价值包括：
+
+- 让设备使用连续 IOVA 访问物理上分散的页面；
+- 限制设备只能访问授权映射，降低失控 DMA 的破坏范围；
+- 支持设备直通、共享虚拟地址等虚拟化和加速器场景；
+- 处理设备地址位宽受限等平台约束。
+
+IOMMU 不是 CPU MMU，也不意味着设备天然安全。共享同一 IOMMU domain 的设备
+可能仍共享访问边界；映射建立和 IOTLB miss 也有成本。普通驱动通常使用 DMA API，
+由平台决定底层走 IOMMU、SWIOTLB bounce buffer 还是直接映射，而不是自行依赖
+某一种 IOMMU 实现。
+
+看到 IOMMU fault 时，应同时核对 IOVA、访问方向、长度、设备 stream ID、Buffer
+生命周期和映射解除时机。很多故障不是“IOMMU 配错”，而是设备仍在访问已经释放
+或提前解除映射的 Buffer。
+
+## 4. 内核源码配置、构建、调试与追踪
+
+内核工程问题通常横跨配置、编译产物、运行时上下文和具体硬件。有效方法不是从头
+通读源码，而是从一个可观察事件沿调用路径和数据所有权逐层收敛。
+
+### 4.1 源码树的常用入口
+
+| 目录 | 主要内容 |
+|---|---|
+| `kernel/`、`kernel/sched/` | 核心机制、调度、锁和通用内核逻辑 |
+| `mm/` | 页分配、映射、回收和内存控制 |
+| `fs/` | VFS 与具体文件系统 |
+| `drivers/` | 设备驱动和大量通用驱动框架 |
+| `arch/<arch>/` | 启动、异常、页表和体系结构相关代码 |
+| `include/linux/` | 内核内部公共接口与数据结构 |
+| `Documentation/` | 接口语义、配置和子系统说明 |
+| `scripts/`、`tools/` | 构建辅助、检查、追踪和分析工具 |
+
+阅读时先找到外部入口，例如系统调用、`file_operations`、`probe()`、IRQ handler 或
+trace event，再顺着调用关系和核心结构体走。函数名相同不代表不同内核版本的实现
+完全一致，源码、`.config`、编译器和运行镜像必须属于同一构建。
+
+### 4.2 Kconfig 决定“能配置什么”
+
+Kconfig 定义配置项类型、依赖、默认值和菜单结构，最终选择结果写入 `.config`：
+
+```text
+Kconfig 中的配置定义
+        ↓ menuconfig / defconfig / olddefconfig
+.config 中的具体选择
+        ↓ 生成 autoconf 等头文件
+C 预处理与 Kbuild 选择编译对象
+```
+
+`bool` 通常是 `y/n`，`tristate` 可以是 `y/m/n`。`depends on` 限制配置项可选范围；
+`select` 会反向强制其他符号，可能绕过被选符号自己的依赖，因此只应谨慎用于简单
+的内部符号。修改配置后要保存完整 `.config` 或可复现的 defconfig 片段，不能只
+记录一次 `menuconfig` 操作。
+
+常用目标包括：
+
+```bash
+make defconfig
+make menuconfig
+make olddefconfig
+make savedefconfig
+```
+
+### 4.3 Kbuild 决定“如何编译”
+
+Kbuild 根据配置把对象编进内核、模块或排除：
+
+```make
+obj-$(CONFIG_DEMO_DEVICE) += demo_device.o
+demo_device-y := demo_core.o demo_io.o
+```
+
+推荐使用独立输出目录，避免生成文件污染源码树：
+
+```bash
+make O=out defconfig
+make O=out -j$(nproc)
+make O=out modules
+```
+
+交叉编译时必须固定目标架构和工具链。以下只是通用形式，实际 defconfig、镜像目标
+和交叉工具链前缀由平台决定：
+
+```bash
+# GCC 交叉工具链
+make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+
+# Clang/LLVM
+make O=out ARCH=arm64 LLVM=1 defconfig
+make O=out ARCH=arm64 LLVM=1 -j$(nproc)
+```
+
+构建外部模块时，应针对目标内核的构建目录，而不是只拿一份相似版本头文件：
+
+```make
+obj-m += demo.o
+```
+
+```bash
+make -C /lib/modules/$(uname -r)/build M=$PWD modules
+```
+
+`modules_prepare` 可以准备部分外部模块构建信息，但启用 `CONFIG_MODVERSIONS` 时，
+它不会生成完整的 `Module.symvers`；此时仍需要与目标内核一致的完整构建产物。
+
+### 4.4 从低干扰证据开始调试
+
+建议按成本逐步升级：
+
+1. 核对复现条件、内核版本、命令行、`.config`、模块和 taint 状态；
+2. 查看 `dmesg`、错误码、设备状态与 `/proc`、`/sys` 统计；
+3. 使用限速日志、dynamic debug 或已有 trace event 缩小范围；
+4. 使用 ftrace、perf、trace-cmd、kprobe 或 eBPF 建立时间线；
+5. 需要时再启用 lockdep、KASAN、KCSAN、UBSAN、DMA API debug 等检查内核；
+6. 对 Oops、panic 或 hang 使用匹配的 `vmlinux`、符号、vmcore、GDB/KGDB 或 QEMU。
+
+调试型配置会显著改变内存布局、时序和性能，不应把所有检查长期打开在生产镜像中。
+解析栈和地址时，`vmlinux`、模块、`System.map` 和运行镜像的 Build ID 必须匹配。
+
+如果问题只在某个版本范围出现，可以先写出可靠的自动判定脚本，再使用
+`git bisect` 缩小首个异常提交。无法稳定判定“好/坏”的测试会让二分结果失真。
+
+### 4.5 Tracepoint、trace event 与 ftrace
+
+Tracepoint 是编译在内核关键路径上的静态探针。探针启用后，回调在触发点调用者的
+上下文执行，因此不能假设它总能睡眠；回调必须保持低开销，并遵守该路径的锁、
+RCU、IRQ 和抢占约束。
+
+许多 `TRACE_EVENT` 会在 tracefs 中形成可启用的事件：
+
+```text
+/sys/kernel/tracing/
+├── available_events
+├── events/<system>/<event>/enable
+├── set_event
+├── trace
+└── trace_pipe
+```
+
+例如短时间记录调度和 IRQ 事件：
+
+```bash
+sudo trace-cmd record \
+  -e sched:sched_switch \
+  -e sched:sched_wakeup \
+  -e irq:irq_handler_entry \
+  -e irq:irq_handler_exit \
+  sleep 2
+sudo trace-cmd report
+```
+
+ftrace 的 function 和 function_graph tracer 适合观察函数调用，`set_ftrace_filter`
+可限制函数范围。Tracepoint 更接近稳定的语义事件，函数追踪更贴近具体实现；二者
+都不是跨所有内核版本保持不变的用户 ABI。
+
+写新 trace event 时应只暴露定位问题所需的数据，避免在高频路径复制大对象或执行
+复杂格式化。模块卸载前还要先注销 probe，并等待正在执行的回调退出，不能让
+tracepoint 保留指向已卸载模块代码的函数指针。
+
+### 4.6 一条可验证的定位链
+
+```text
+用户可见现象
+  → 确定异常时间窗口
+  → 判断 CPU / 调度 / IRQ / 锁 / 内存 / I/O / 驱动层级
+  → 选择已有 tracepoint 和计数器
+  → 定位函数、设备与资源所有者
+  → 阅读对应版本源码和配置
+  → 提出单一可证伪假设
+  → 最小修改或对照实验
+  → 重复测量并检查副作用
+```
+
+日志只能说明“某条路径发生过”，采样只能估计时间分布，trace 也可能因缓冲区覆盖
+丢失事件。可靠结论应同时说明时间顺序、资源状态、因果机制和对照实验，而不是只
+展示一张调用栈或一次波形。
+
+
+# 十七、常见排查
 
 性能排查应先确认现象和边界，再选择工具。不要一看到 CPU、内存或 `%util` 某个指标升高就直接下结论。
 
@@ -7376,7 +7716,7 @@ cat /proc/pressure/io
 
 不要同时无依据地调整多个参数，否则会破坏因果关系。
 
-# 十七、常见疑问
+# 十八、常见疑问
 
 ## 1. malloc 一定会立刻分配物理内存吗？
 
@@ -7683,5 +8023,15 @@ page fault 通常发生在 TLB miss 后发现页表条件不满足
 11. [Linux man-pages: io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
 12. [Linux man-pages: namespaces(7)](https://man7.org/linux/man-pages/man7/namespaces.7.html)
 13. [Linux man-pages: eventfd(2)](https://man7.org/linux/man-pages/man2/eventfd.2.html)
+14. [Linux Kernel Documentation: Device Model](https://docs.kernel.org/driver-api/driver-model/overview.html)
+15. [Linux Kernel Documentation: Generic IRQ](https://docs.kernel.org/core-api/genericirq.html)
+16. [Linux Kernel Documentation: Workqueue](https://docs.kernel.org/core-api/workqueue.html)
+17. [Linux Kernel Documentation: DMA API](https://docs.kernel.org/core-api/dma-api.html)
+18. [Linux Kernel Documentation: Devicetree Usage Model](https://docs.kernel.org/devicetree/usage-model.html)
+19. [Linux Kernel Documentation: Kernel Build System](https://docs.kernel.org/kbuild/index.html)
+20. [Linux Kernel Documentation: Kconfig Language](https://docs.kernel.org/kbuild/kconfig-language.html)
+21. [Linux Kernel Documentation: Building External Modules](https://docs.kernel.org/kbuild/modules.html)
+22. [Linux Kernel Documentation: Tracepoints](https://docs.kernel.org/trace/tracepoints.html)
+23. [Linux Kernel Documentation: ftrace](https://docs.kernel.org/trace/ftrace.html)
 
 > 内核文档和 man-pages 会持续更新。阅读具体机器行为时，应同时检查发行版内核版本、配置选项和对应源码。
