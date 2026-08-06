@@ -2737,8 +2737,8 @@ ZREVRANGE leaderboard 0 9 WITHSCORES
 
 ```mermaid
 flowchart LR
-    A[成员查询] --> B[哈希表 O(1) 平均]
-    C[排名/范围查询] --> D[跳表 O(log N)]
+    A["按成员查询"] --> B["字典 / 哈希表<br/>平均 O(1)"]
+    C["按排名或分值范围查询"] --> D["跳表<br/>O(log N + M)"]
 ```
 
 ## 20.6 Bitmap
