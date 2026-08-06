@@ -17,11 +17,15 @@ flowchart LR
     K --> L[返回结果]
 ```
 
-# 2. SQL 基础与关系模型
+# 2. SQL 与关系模型：从 CRUD 到组合查询
+
+本章假设已经会写最基本的 `SELECT`、`INSERT`、`UPDATE` 和 `DELETE`，目标是把
+单条语句扩展成可读、可验证的多表查询和数据修改。示例以 MySQL 8.0 / InnoDB
+为主；关系模型、连接、聚合和窗口函数等核心概念也适用于多数关系数据库。
 
 ## 2.1 SQL 的基本组成
 
-SQL 常用语句可以分为四类：
+SQL 常用语句通常可以分为五类：
 
 | 类型 | 代表语句 | 作用 |
 |---|---|---|
@@ -29,140 +33,442 @@ SQL 常用语句可以分为四类：
 | DML | `INSERT`、`UPDATE`、`DELETE` | 修改数据 |
 | DQL | `SELECT` | 查询数据 |
 | TCL | `COMMIT`、`ROLLBACK` | 控制事务 |
+| DCL | `GRANT`、`REVOKE` | 控制访问权限 |
 
-## 2.2 JOIN
+一张关系表可以先理解为：
 
-假设有两张表：
+- 一行代表一个实体或一条事实；
+- 一列代表一个有固定含义和类型的属性；
+- 主键唯一标识一行；
+- 外键表达表之间的引用关系；
+- `NOT NULL`、`UNIQUE`、`CHECK` 等约束负责阻止非法状态进入数据库。
+
+纯关系模型以集合为基础，但 SQL 查询默认更接近 **bag / multiset** 语义：结果可以
+包含重复行。结果也没有天然顺序；只有写出 `ORDER BY`，返回顺序才具有明确含义。
+
+## 2.2 贯穿本章的示例表
+
+用户和订单是一对多关系：一个用户可以有多张订单，一张订单只属于一个用户。
 
 ```sql
 CREATE TABLE users (
-    id BIGINT PRIMARY KEY,
-    name VARCHAR(64) NOT NULL
+    id         BIGINT PRIMARY KEY,
+    email      VARCHAR(128) NOT NULL UNIQUE,
+    name       VARCHAR(64) NOT NULL,
+    manager_id BIGINT NULL,
+    created_at DATETIME NOT NULL
 );
 
 CREATE TABLE orders (
-    id BIGINT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    amount DECIMAL(12, 2) NOT NULL,
+    id         BIGINT PRIMARY KEY,
+    user_id    BIGINT NOT NULL,
+    status     VARCHAR(16) NOT NULL,
+    amount     DECIMAL(12, 2) NOT NULL,
     created_at DATETIME NOT NULL,
-    INDEX idx_user_id(user_id)
+    CONSTRAINT fk_orders_user
+        FOREIGN KEY (user_id) REFERENCES users(id),
+    INDEX idx_orders_user_created(user_id, created_at)
 );
 ```
 
-查询存在订单的用户：
+后续示例可以用下面的数据理解：
+
+```text
+users
+id | name  | manager_id
+1  | Alice | NULL
+2  | Bob   | 1
+3  | Carol | 1
+4  | David | 2
+
+orders
+id  | user_id | status  | amount
+101 | 1       | paid    | 120.00
+102 | 1       | pending |  80.00
+103 | 2       | paid    | 200.00
+```
+
+Alice 有两张订单，Bob 有一张，Carol 和 David 没有订单。这个“一对多”关系解释了
+为什么连接后 Alice 会出现两行：JOIN 匹配的是行组合，不是把右表压缩成一个对象。
+
+## 2.3 SELECT 的组成与逻辑执行顺序
+
+一个完整查询通常可以写成：
 
 ```sql
-SELECT u.id, u.name, o.id AS order_id
+SELECT [DISTINCT] expression_list
+FROM table_source
+[JOIN other_table ON join_condition]
+[WHERE row_condition]
+[GROUP BY group_expression]
+[HAVING group_condition]
+[ORDER BY sort_expression]
+[LIMIT row_count OFFSET skipped_rows];
+```
+
+书写顺序不是概念上的求值顺序。理解下面的顺序，可以解释很多“为什么别名不能在
+这里用”或“为什么先过滤再聚合”的问题：
+
+```mermaid
+flowchart LR
+    A["FROM / JOIN"] --> B["WHERE"]
+    B --> C["GROUP BY / 聚合"]
+    C --> D["HAVING"]
+    D --> E["窗口函数"]
+    E --> F["SELECT"]
+    F --> G["DISTINCT"]
+    G --> H["ORDER BY"]
+    H --> I["LIMIT / OFFSET"]
+```
+
+这是用于理解语义的逻辑模型，不代表优化器一定按此物理顺序执行。`SELECT` 中定义的
+别名通常可以用于 `ORDER BY`，却不能直接用于同一层的 `WHERE`，因为逻辑上
+`WHERE` 更早发生：
+
+```sql
+SELECT amount * 0.9 AS discounted_amount
+FROM orders
+WHERE amount * 0.9 >= 100
+ORDER BY discounted_amount DESC;
+```
+
+## 2.4 WHERE：组合过滤条件
+
+常见条件包括：
+
+| 写法 | 含义 | 容易忽略的边界 |
+|---|---|---|
+| `a = b`、`a <> b` | 相等、不等 | 与 `NULL` 比较不能这样写 |
+| `amount BETWEEN 100 AND 200` | 闭区间 | 两端都包含 |
+| `status IN ('paid', 'shipped')` | 属于给定集合 | `NOT IN` 遇到 `NULL` 有陷阱 |
+| `name LIKE 'Ali%'` | 前缀匹配 | `%` 匹配任意长度，`_` 匹配单个字符 |
+| `created_at IS NULL` | 判断空值 | 不能写成 `= NULL` |
+
+`AND` 的优先级高于 `OR`，复杂条件应使用括号明确意图：
+
+```sql
+SELECT id, user_id, status, amount
+FROM orders
+WHERE status = 'paid'
+  AND (amount >= 100 OR created_at >= '2026-01-01');
+```
+
+时间范围通常使用左闭右开区间，避免一天最后一秒、小数秒精度和月份天数问题：
+
+```sql
+WHERE created_at >= '2026-08-01'
+  AND created_at <  '2026-09-01'
+```
+
+应用程序传入的值应使用占位符和参数绑定，不要用字符串拼接构造 SQL：
+
+```sql
+SELECT id, name
+FROM users
+WHERE email = ?;
+```
+
+参数绑定既能降低 SQL 注入风险，也能避免引号和转义规则被业务代码重复实现。
+
+## 2.5 ORDER BY、LIMIT 与 DISTINCT
+
+只写 `LIMIT` 而不写 `ORDER BY`，得到的是数据库当前执行计划碰巧先返回的若干行，
+不是稳定的“前几条”。排序字段可能重复时，应增加唯一键作为最终排序条件：
+
+```sql
+SELECT id, user_id, amount, created_at
+FROM orders
+ORDER BY created_at DESC, id DESC
+LIMIT 20 OFFSET 40;
+```
+
+`OFFSET 40` 表示先跳过 40 行。偏移很大时数据库仍可能扫描并丢弃大量记录，深分页
+的索引写法在第 17 章继续说明。
+
+`DISTINCT` 针对整个投影结果去重，而不是只对紧邻它的第一列去重：
+
+```sql
+SELECT DISTINCT user_id, status
+FROM orders;
+```
+
+这条语句返回不同的 `(user_id, status)` 组合。如果只是因为 JOIN 后出现重复就盲目
+加 `DISTINCT`，往往会掩盖连接条件或数据关系问题，并额外引入去重成本。
+
+## 2.6 表达式、CASE 与 COALESCE
+
+`SELECT` 不只能返回原始列，也可以计算新列：
+
+```sql
+SELECT
+    id,
+    amount,
+    amount * 0.1 AS estimated_tax,
+    CASE
+        WHEN amount >= 1000 THEN 'large'
+        WHEN amount >= 100  THEN 'medium'
+        ELSE 'small'
+    END AS amount_level
+FROM orders;
+```
+
+`CASE` 也可用于条件更新和条件聚合。`COALESCE(a, b, c)` 返回从左到右第一个
+非 `NULL` 的值：
+
+```sql
+SELECT id, COALESCE(manager_id, 0) AS manager_or_root
+FROM users;
+```
+
+把 `NULL` 显示为默认值只是结果层转换，不代表数据库中存储的值发生了改变。
+
+## 2.7 JOIN：理解匹配和结果行数
+
+JOIN 的核心问题不是“从另一张表取字段”，而是：左边每一行能与右边多少行匹配。
+
+### INNER JOIN
+
+只保留两边能够匹配的组合。Alice 有两张订单，因此会产生两行：
+
+```sql
+SELECT u.id, u.name, o.id AS order_id, o.amount
 FROM users AS u
 INNER JOIN orders AS o ON o.user_id = u.id;
 ```
 
-查询所有用户，包括没有订单的用户：
+### LEFT JOIN
+
+保留全部左表行。右表没有匹配项时，右表投影列补成 `NULL`：
 
 ```sql
-SELECT u.id, u.name, o.id AS order_id
+SELECT u.id, u.name, o.id AS order_id, o.amount
 FROM users AS u
 LEFT JOIN orders AS o ON o.user_id = u.id;
 ```
 
-注意：对于 `LEFT JOIN`，右表过滤条件放在 `ON` 和 `WHERE` 中含义可能不同。
+如果只想判断用户是否存在订单，而不需要展开每张订单，`EXISTS` 往往比 JOIN 后再
+`DISTINCT` 更直接。
 
-- ON 条件决定右表中的哪些记录可以参与匹配。
-- WHERE 条件在连接完成后，对最终结果再次过滤。
+### ON 与 WHERE 的位置会改变 LEFT JOIN 语义
 
-### 第一种写法
+过滤条件放在 `ON` 中，表示“哪些右表行可以参与匹配”。没有大额订单的用户仍保留：
+
 ```sql
--- 保留没有订单的用户
-SELECT u.id, o.id
-FROM users u
-LEFT JOIN orders o
+SELECT u.id, u.name, o.id AS order_id
+FROM users AS u
+LEFT JOIN orders AS o
     ON o.user_id = u.id
    AND o.amount > 100;
 ```
 
-以 users 为主表，**为每个用户查找金额大于 100 的订单**。如果某个用户没有金额大于 100 的订单，仍然保留该用户，只是订单字段为 NULL。
-
-需要注意，保留的不只是“完全没有订单的用户”，还包括：
-- 没有任何订单的用户；
-- 有订单，但所有订单金额都不大于 100 的用户；
-- 有订单，但订单金额为 NULL 的用户。
+过滤条件放在 `WHERE` 中，是连接完成后再过滤。没有匹配订单的用户，其
+`o.amount > 100` 结果为 `UNKNOWN`，因此会被移除，效果接近 INNER JOIN：
 
 ```sql
--- WHERE 会过滤掉右表为 NULL 的记录，效果接近 INNER JOIN
-SELECT u.id, o.id
-FROM users u
-LEFT JOIN orders o ON o.user_id = u.id
+SELECT u.id, u.name, o.id AS order_id
+FROM users AS u
+LEFT JOIN orders AS o ON o.user_id = u.id
 WHERE o.amount > 100;
 ```
 
-### 第二种写法
+### 自连接
 
-只保留存在大额订单的用户
-它先进行普通的左连接：
+同一张表也可以使用不同别名连接。下面查询用户及其直属管理者：
+
 ```sql
-LEFT JOIN orders o ON o.user_id = u.id
+SELECT
+    employee.id,
+    employee.name,
+    manager.name AS manager_name
+FROM users AS employee
+LEFT JOIN users AS manager ON manager.id = employee.manager_id;
 ```
-此时，没有订单的用户，其右表字段都是 NULL。
 
-然后执行：
+连接条件遗漏或过宽会形成笛卡尔积，使结果行数接近两表行数乘积。分析 JOIN 时应先
+写清楚关系是一对一、一对多还是多对多，再估算每一步最多产生多少行。
+
+## 2.8 聚合、GROUP BY 与 HAVING
+
+聚合函数把多行计算成一个值：
+
+| 函数 | 作用 | NULL 行为 |
+|---|---|---|
+| `COUNT(*)` | 统计结果行数 | 包含列值为 `NULL` 的行 |
+| `COUNT(column)` | 统计该列非空值数量 | 忽略 `NULL` |
+| `SUM`、`AVG` | 求和、平均 | 忽略 `NULL` |
+| `MIN`、`MAX` | 最小值、最大值 | 忽略 `NULL` |
+
+按用户统计已支付订单的数量和总金额：
+
 ```sql
-WHERE o.amount > 100
-```
-对于没有匹配订单的用户，判断相当于：
-```sql
-NULL > 100
-```
-结果不是 TRUE，而是 UNKNOWN，因此被 WHERE 过滤掉。
-
-这种写法最终只保留金额大于 100 的订单记录
-
-## 2.3 GROUP BY 与 HAVING
-
-查询订单总金额大于 1000 的用户：
-
-```sql
-SELECT user_id, SUM(amount) AS total_amount
+SELECT
+    user_id,
+    COUNT(*) AS order_count,
+    SUM(amount) AS total_amount
 FROM orders
+WHERE status = 'paid'
 GROUP BY user_id
-HAVING SUM(amount) > 1000;
+HAVING SUM(amount) >= 100;
 ```
 
-`WHERE` 在分组前过滤行，`HAVING` 在分组后过滤组。
+- `WHERE` 在分组前过滤订单行；
+- `GROUP BY` 把相同 `user_id` 的行放进同一组；
+- 聚合函数对每组计算；
+- `HAVING` 在聚合后过滤整组。
 
-```mermaid
-flowchart LR
-    A[FROM / JOIN] --> B[WHERE]
-    B --> C[GROUP BY]
-    C --> D[HAVING]
-    D --> E[SELECT]
-    E --> F[ORDER BY]
-    F --> G[LIMIT]
-```
-
-## 2.4 EXISTS 与 IN
+在启用 `ONLY_FULL_GROUP_BY` 的 MySQL 中，普通选择列必须属于分组键，或者能由分组键
+函数依赖地确定。下面的写法含义不完整，因为同组可能存在多个不同 `status`：
 
 ```sql
-SELECT *
-FROM users u
+-- 不要依赖数据库随意挑选某一行的 status
+SELECT user_id, status, SUM(amount)
+FROM orders
+GROUP BY user_id;
+```
+
+条件聚合可以在一次分组中计算多个指标：
+
+```sql
+SELECT
+    user_id,
+    COUNT(*) AS all_orders,
+    SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END) AS paid_orders,
+    SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS paid_amount
+FROM orders
+GROUP BY user_id;
+```
+
+## 2.9 子查询、EXISTS 与 IN
+
+子查询可以返回一个值、一列值或一张临时结果表。
+
+标量子查询返回至多一个值，例如查询金额高于整体平均值的订单：
+
+```sql
+SELECT id, user_id, amount
+FROM orders
+WHERE amount > (SELECT AVG(amount) FROM orders);
+```
+
+如果标量子查询实际返回多行，数据库会报错，不能假设它会自动选择第一行。
+
+相关子查询会引用外层当前行。`EXISTS` 只关心是否至少存在一条匹配记录：
+
+```sql
+SELECT u.id, u.name
+FROM users AS u
 WHERE EXISTS (
     SELECT 1
-    FROM orders o
+    FROM orders AS o
     WHERE o.user_id = u.id
+      AND o.status = 'paid'
 );
 ```
 
-`EXISTS` 表达“是否至少存在一条匹配记录”。现代优化器经常能将 `EXISTS` 和 `IN` 改写为相似的半连接计划，因此不能机械地断言某一种写法永远更快，应结合执行计划判断。
+`IN` 更适合表达“值属于一个集合”：
 
-## 2.5 窗口函数
+```sql
+SELECT id, name
+FROM users
+WHERE id IN (
+    SELECT user_id
+    FROM orders
+    WHERE status = 'paid'
+);
+```
 
-窗口函数用于：
+现代优化器经常能把 `EXISTS` 和 `IN` 改写成相似的半连接计划，因此不能断言某一种
+永远更快。先选能准确表达语义的写法，再用执行计划检查。表达“不存在”时，若子查询
+结果可能包含 `NULL`，优先使用 `NOT EXISTS`，具体原因见第 2.14 节。
 
-> 在保留每一行明细数据的同时，基于这一行所属的一组数据进行排名、累计、比较或统计。
+## 2.10 UNION 与 UNION ALL
 
-窗口函数和 GROUP BY 最大的区别是：
+集合操作纵向拼接多个查询。各分支必须返回相同列数，对应列类型应当兼容：
 
-- GROUP BY 会把多行压缩成一行；
-- 窗口函数不会减少结果行数，而是在每一行旁边增加计算结果。
+```sql
+SELECT id, name, 'employee' AS source
+FROM users
+WHERE manager_id IS NOT NULL
+
+UNION ALL
+
+SELECT id, name, 'root' AS source
+FROM users
+WHERE manager_id IS NULL
+ORDER BY id;
+```
+
+- `UNION ALL` 保留重复行，通常更直接、成本更低；
+- `UNION` 会对最终结果去重；
+- 最终列名由第一个查询决定；
+- 对合并结果排序时，把 `ORDER BY` 放在最后。
+
+如果业务语义不要求去重，应优先考虑 `UNION ALL`，不要无意中为排序、Hash 或临时表
+去重付出成本。
+
+## 2.11 CTE：给复杂查询命名
+
+Common Table Expression 使用 `WITH` 为一个查询步骤命名，使后续逻辑更接近从上到下
+阅读：
+
+```sql
+WITH user_totals AS (
+    SELECT
+        user_id,
+        COUNT(*) AS order_count,
+        SUM(amount) AS total_amount
+    FROM orders
+    WHERE status = 'paid'
+    GROUP BY user_id
+)
+SELECT u.id, u.name, t.order_count, t.total_amount
+FROM users AS u
+JOIN user_totals AS t ON t.user_id = u.id
+WHERE t.total_amount >= 100;
+```
+
+CTE 的作用域只覆盖紧随其后的一条语句。它主要改善表达和复用，并不保证一定物化，
+也不保证一定比等价子查询更快；是否合并或物化由数据库和执行计划决定。
+
+递归 CTE 可以处理树和图式层级。下面从 Alice 开始向下展开组织关系，并用深度上限
+防止异常数据无限递归：
+
+```sql
+WITH RECURSIVE organization AS (
+    SELECT id, name, manager_id, 0 AS depth
+    FROM users
+    WHERE id = 1
+
+    UNION ALL
+
+    SELECT u.id, u.name, u.manager_id, o.depth + 1
+    FROM users AS u
+    JOIN organization AS o ON u.manager_id = o.id
+    WHERE o.depth < 20
+)
+SELECT id, name, manager_id, depth
+FROM organization
+ORDER BY depth, id;
+```
+
+真实图结构还要考虑环检测；单纯限制深度只能阻止无限执行，不能修正错误关系。
+
+## 2.12 窗口函数
+
+窗口函数在保留明细行的同时，基于这一行所属的一组数据进行排名、累计、比较或统计：
+
+```text
+function(...) OVER (
+    PARTITION BY 分组边界
+    ORDER BY 窗口内顺序
+    ROWS BETWEEN 窗口起点 AND 窗口终点
+)
+```
+
+它和 `GROUP BY` 的根本区别是：
+
+- `GROUP BY` 把多行压缩成每组一行；
+- 窗口函数不减少明细行数，而是在每一行旁增加计算结果。
 
 查询每个用户金额最高的订单：
 
@@ -183,27 +489,199 @@ FROM ranked_orders
 WHERE rn = 1;
 ```
 
-常见窗口函数：
+窗口函数结果不能直接用于同一层的 `WHERE`，因为窗口计算逻辑上晚于 `WHERE`；这里
+用 CTE 包一层后再过滤。
 
-- `ROW_NUMBER()`：连续编号，不并列。
-- `RANK()`：并列后跳号。
-- `DENSE_RANK()`：并列后不跳号。
-- `SUM() OVER(...)`：累计统计。
-- `LAG()`、`LEAD()`：读取前后行。
-
-## 2.6 NULL 的语义
-
-`NULL` 表示未知或缺失，不等于空字符串，也不等于 0。
+计算每个用户按时间排序的累计金额：
 
 ```sql
--- 错误
-WHERE deleted_at = NULL
-
--- 正确
-WHERE deleted_at IS NULL
+SELECT
+    id,
+    user_id,
+    amount,
+    SUM(amount) OVER (
+        PARTITION BY user_id
+        ORDER BY created_at, id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS running_amount
+FROM orders;
 ```
 
-SQL 使用三值逻辑：`TRUE`、`FALSE`、`UNKNOWN`。任何与 `NULL` 的普通比较通常都会得到 `UNKNOWN`。
+显式写出 `ROWS` frame 可以避免重复排序值下默认 `RANGE` frame 把多行一起纳入的
+意外。常见窗口函数还有：
+
+- `ROW_NUMBER()`：连续编号，不并列；
+- `RANK()`：并列后跳号；
+- `DENSE_RANK()`：并列后不跳号；
+- `LAG()`、`LEAD()`：读取窗口顺序中的前一行或后一行；
+- `SUM()`、`AVG()`、`COUNT()` 加 `OVER(...)`：窗口聚合。
+
+## 2.13 更安全地修改数据
+
+即使已经会写 `INSERT`、`UPDATE` 和 `DELETE`，仍要把约束、影响行数和事务边界纳入
+语句设计。
+
+`INSERT` 应明确列名；批量写入能减少往返，但单批不能无限增大：
+
+```sql
+INSERT INTO users(id, email, name, manager_id, created_at)
+VALUES
+    (1, 'alice@example.com', 'Alice', NULL, NOW()),
+    (2, 'bob@example.com',   'Bob',   1,    NOW());
+```
+
+也可以把查询结果写入另一张结构兼容的表：
+
+```sql
+INSERT INTO archived_orders(id, user_id, status, amount, created_at)
+SELECT id, user_id, status, amount, created_at
+FROM orders
+WHERE created_at < '2025-01-01';
+```
+
+执行大范围 `UPDATE` 或 `DELETE` 前，先用完全相同的条件做 `SELECT`，核对主键集合和
+预计行数，再在明确事务边界内修改：
+
+```sql
+SELECT id, status
+FROM orders
+WHERE status = 'pending'
+  AND created_at < '2026-01-01'
+ORDER BY id;
+
+UPDATE orders
+SET status = 'expired'
+WHERE status = 'pending'
+  AND created_at < '2026-01-01';
+```
+
+生产代码还应检查实际影响行数。需要防止并发覆盖时，可以把版本条件放进更新：
+
+```sql
+UPDATE inventory
+SET stock = stock - 1,
+    version = version + 1
+WHERE product_id = ?
+  AND stock > 0
+  AND version = ?;
+```
+
+影响行数为 `1` 才表示本次条件更新成功；为 `0` 时可能是库存不足或版本已变化，应由
+业务决定重读、重试还是失败。事务、锁和幂等分别在第 9、12、24 章展开。
+
+`DELETE`、`TRUNCATE TABLE` 和 `DROP TABLE` 不是同一级操作：
+
+| 操作 | 主要含义 |
+|---|---|
+| `DELETE ... WHERE ...` | 删除满足条件的行，可逐批执行 |
+| `TRUNCATE TABLE` | 快速清空整张表；在 MySQL 中属于 DDL，并会隐式提交 |
+| `DROP TABLE` | 删除表对象、数据和相关定义 |
+
+不要把 `TRUNCATE` 当成可以随意回滚的无条件 `DELETE`。大批量修改还会影响锁、日志、
+复制和缓存，具体治理见第 17.5 节。
+
+## 2.14 NULL 与三值逻辑
+
+`NULL` 表示未知或缺失，不等于空字符串，也不等于数字 `0`：
+
+```sql
+-- 错误：结果为 UNKNOWN
+WHERE manager_id = NULL
+
+-- 正确
+WHERE manager_id IS NULL
+WHERE manager_id IS NOT NULL
+```
+
+SQL 条件存在 `TRUE`、`FALSE`、`UNKNOWN` 三种结果，`WHERE` 只保留 `TRUE`。普通比较
+只要一侧是 `NULL`，通常就会得到 `UNKNOWN`。
+
+`NOT IN` 尤其容易被 `NULL` 影响。下面的判断不是 `TRUE`：
+
+```sql
+-- 相当于 id <> 1 AND id <> NULL，其中后半部分为 UNKNOWN
+WHERE id NOT IN (1, NULL)
+```
+
+如果子查询列可能为空，使用相关的 `NOT EXISTS` 更可靠：
+
+```sql
+SELECT u.id, u.name
+FROM users AS u
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM orders AS o
+    WHERE o.user_id = u.id
+);
+```
+
+还要记住：
+
+- `COUNT(*)` 统计行，`COUNT(column)` 忽略该列的 `NULL`；
+- `SUM`、`AVG`、`MIN`、`MAX` 通常忽略 `NULL`，全部为空时结果仍可能为 `NULL`；
+- `LEFT JOIN` 会为未匹配的右表列制造 `NULL`；
+- `COALESCE` 可以为读取结果提供默认值，但不改变原始数据；
+- 唯一约束如何处理多个 `NULL` 存在数据库差异，不能把 `NULL` 当成普通值推理。
+
+## 2.15 视图、临时表与数据库内逻辑
+
+视图为一条查询提供稳定名称和权限边界：
+
+```sql
+CREATE VIEW paid_orders AS
+SELECT id, user_id, amount, created_at
+FROM orders
+WHERE status = 'paid';
+```
+
+普通 MySQL View 不等于预先计算并保存结果的物化视图。查询视图时仍需分析其底层 SQL；
+多层嵌套视图可能隐藏 JOIN、过滤和权限依赖，使执行计划更难定位。修改底层字段前还要
+检查所有依赖视图。
+
+临时表适合保存需要重复访问、需要单独建立索引或分阶段核对的中间结果：
+
+```sql
+CREATE TEMPORARY TABLE active_user_ids (
+    id BIGINT PRIMARY KEY
+);
+
+INSERT INTO active_user_ids(id)
+SELECT id
+FROM users
+WHERE created_at >= '2026-01-01';
+```
+
+临时表通常属于当前会话。使用连接池时，同一个物理连接可能服务多个请求，因此应明确
+清理时机，不能假设业务请求结束就一定关闭数据库会话。数据量较小时，CTE 或派生表可能
+更简单；数据量大时要关注临时空间、索引和事务生命周期。
+
+存储过程和触发器可以把逻辑放到数据附近，但也会形成隐藏写入路径和部署依赖：
+
+- 触发器失败可能使原语句失败，额外写入也会增加锁、日志和复制成本；
+- 存储过程减少网络往返，但版本管理、测试和跨数据库迁移更复杂；
+- 不应同时在应用、触发器和异步任务中维护同一条规则，却没有明确唯一责任方；
+- View、过程和函数还要确认 `DEFINER`、调用者权限及对象所有者变化的影响。
+
+应用账号应遵循最小权限，只授予运行所需的库、表和操作权限。迁移账号、只读账号和
+应用写账号应分离，避免应用进程拥有 `DROP`、全局管理或任意授权能力。
+
+## 2.16 从 CRUD 过渡到复杂 SQL 的检查顺序
+
+写完一条查询后，可以按下面的顺序检查：
+
+1. 每张表的别名和连接关系是否清楚；
+2. 一对多连接最多会把一行展开成多少行；
+3. 条件应放在 `ON`、`WHERE` 还是 `HAVING`；
+4. 是否正确处理 `NULL` 和空结果；
+5. 聚合后每个非聚合列是否具有唯一含义；
+6. 排序是否包含稳定的唯一键；
+7. 是否真的需要 `DISTINCT` 或 `UNION` 去重；
+8. 子查询和 CTE 返回的是单值、一列还是多列结果；
+9. 修改语句是否核对了目标主键集合和影响行数；
+10. 所有外部输入是否通过参数绑定传入。
+
+语义正确之后，再使用索引和执行计划优化性能。不要为了“看起来能用索引”而先改写
+语句，结果却改变了连接、空值或聚合语义。
 
 ---
 
@@ -255,6 +733,15 @@ amount DECIMAL(12, 2) NOT NULL
 
 ## 3.5 范式与反范式
 
+常见范式可以按“依赖关系逐步收紧”理解：
+
+| 范式 | 主要约束 | 主要避免的问题 |
+|---|---|---|
+| 1NF | 每个属性在当前数据模型中是不可再分的单值 | 一列保存重复组或多个独立值 |
+| 2NF | 在 1NF 基础上，非主属性完全依赖整个候选键 | 组合键表中的部分依赖 |
+| 3NF | 在 2NF 基础上，避免非主属性之间的传递依赖 | 同一事实被多行重复保存 |
+| BCNF | 每个非平凡函数依赖的决定因素都是超键 | 候选键交叠时仍可能出现的异常 |
+
 第三范式（3NF）的形式化条件是：对关系中每个非平凡函数依赖 $X \to A$，$X$ 必须是超键，或者 $A$ 必须是主属性（属于某个候选键）。直观上，它要求避免非主属性通过其他非主属性传递依赖候选键。
 
 范式化的优点：
@@ -287,6 +774,108 @@ deleted_at DATETIME NULL
 - 统计和归档更复杂。
 
 可以通过归档表、定期清理、联合唯一索引或状态机设计减轻这些问题。
+
+## 3.7 时间、字符集与复杂字段
+
+字段类型不仅影响空间，还会影响比较语义、索引顺序和跨服务数据交换。
+
+### DATETIME 与 TIMESTAMP
+
+- `DATETIME` 保存日历日期和时间本身，不随会话时区自动换算，适合生日、预约时间等业务时间；
+- `TIMESTAMP` 在 MySQL 中会结合会话时区进行存取转换，适合记录创建、修改等时间点；
+- `TIMESTAMP` 的可表示范围通常比 `DATETIME` 小，选择前应确认数据跨度；
+- 分布式系统应明确统一时区，并在接口中携带时区或使用 UTC 时间点，不能只传一个含义不明的字符串。
+
+无论选择哪一种，都应统一小数秒精度。例如同一个链路不要混用 `DATETIME`、
+`DATETIME(3)` 和 `DATETIME(6)`，否则排序、去重和增量同步边界可能出现偏差。
+
+### 字符集与排序规则
+
+`utf8mb4` 决定字符如何编码，Collation 决定字符如何比较和排序。是否区分大小写、重音，
+以及字符串的排序结果，主要由 Collation 决定：
+
+```text
+字符集：能保存哪些字符，以及如何编码
+排序规则：字符是否相等，以及按什么顺序排列
+```
+
+字符串连接或比较时若两列的字符集、Collation 不兼容，可能发生隐式转换，影响结果或
+索引使用。账号标识、业务代码等需要精确匹配的字段，应先明确是否允许大小写折叠，
+不能直接沿用自然语言文本的排序规则。
+
+### JSON、TEXT 与 ENUM
+
+- `JSON` 适合结构可变但仍需局部读取的附加属性；高频过滤字段应提升为普通列，或建立生成列、函数索引；
+- `TEXT`、`BLOB` 适合较大内容，但放入高频主表会增加行访问、排序和临时结果成本；
+- `ENUM` 能约束小型稳定集合，但频繁扩展枚举值会带来 DDL 和跨语言映射成本；
+- 不能因为 JSON 灵活，就放弃主键、唯一约束和稳定字段的关系建模。
+
+## 3.8 候选键、外键与约束边界
+
+- 超键：能够唯一确定一行的任意属性集合；
+- 候选键：不包含多余属性的最小超键；
+- 主键：被选作主要标识的候选键；
+- 备用键：没有被选作主键的其他候选键，通常通过 `UNIQUE` 实现。
+
+数据库约束应保存“任何写入路径都必须成立”的规则。例如订单号唯一、金额非负：
+
+```sql
+CREATE TABLE payments (
+    id             BIGINT PRIMARY KEY,
+    payment_no     VARCHAR(64) NOT NULL UNIQUE,
+    order_id       BIGINT NOT NULL,
+    amount         DECIMAL(12, 2) NOT NULL,
+    status         VARCHAR(16) NOT NULL,
+    CONSTRAINT chk_payment_amount CHECK (amount >= 0),
+    CONSTRAINT fk_payment_order
+        FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+```
+
+约束语法能被解析不代表当前数据库版本一定会强制执行全部约束，升级自早期 MySQL 8.0
+版本时尤其应确认 `CHECK` 的实际行为，并用非法样例验证约束确实生效。
+
+外键的 `RESTRICT`、`CASCADE`、`SET NULL` 表达的是被引用行修改或删除后的动作。
+级联删除可能一次扩散到大量记录；由应用维护关系则更灵活，但必须补上重试、并发和
+数据校验机制。是否使用外键应基于写入路径和运维能力决定，不能把“不使用外键”等同于
+“不维护引用完整性”。
+
+## 3.9 在线表结构变更
+
+MySQL 8.0 的 `ALTER TABLE` 可能使用不同算法：
+
+| 算法 | 核心行为 | 需要关注的边界 |
+|---|---|---|
+| `INSTANT` | 主要修改数据字典，不重写既有表数据 | 仍会短暂获取元数据锁，并非所有操作都支持 |
+| `INPLACE` | 通常不复制整张表，但某些操作仍会重建表或索引 | 可能消耗大量 I/O、临时空间并造成复制延迟 |
+| `COPY` | 建新表并复制全部记录后切换 | 时间和空间成本高，并发 DML 受限 |
+
+如果必须禁止数据库静默退化到更重的算法，可以显式指定期望：
+
+```sql
+ALTER TABLE orders
+    ADD INDEX idx_status_created(status, created_at),
+    ALGORITHM=INPLACE,
+    LOCK=NONE;
+```
+
+不支持时让语句失败，通常比在高峰期意外复制大表更安全。`LOCK=NONE` 表示期望允许
+并发 DML，不代表整个过程从不获取 MDL；准备和最终切换阶段仍可能等待排他元数据锁。
+
+一次兼容性较好的字段变更可以拆成：
+
+```text
+确认算法、空间、耗时和复制影响
+→ 先部署同时兼容新旧结构的代码
+→ 执行 DDL
+→ 按主键小批回填历史数据
+→ 校验空值、数量和业务聚合
+→ 切换读取逻辑
+→ 稳定后再收紧约束或删除旧字段
+```
+
+执行前还应检查长事务、MDL 等待、磁盘余量、回滚成本和从库延迟。大表变更工具虽然
+可以通过影子表和增量同步降低阻塞，但仍需处理触发器冲突、额外写放大、切表锁和失败清理。
 
 ---
 
@@ -364,21 +953,23 @@ B+ 树的优势：
 
 ```mermaid
 flowchart TB
-    R[根节点: 20 | 50] --> N1[内部节点: 5 | 10]
-    R --> N2[内部节点: 30 | 40]
-    R --> N3[内部节点: 60 | 80]
-    N1 --> L1[叶子: 1 3 5]
-    N1 --> L2[叶子: 7 9 10]
-    N2 --> L3[叶子: 21 25 30]
-    N2 --> L4[叶子: 35 40 45]
-    N3 --> L5[叶子: 51 60 70]
-    N3 --> L6[叶子: 80 90 99]
-    L1 -.双向链表.-> L2
+    R["根节点<br/>20 · 50"] --> N1["内部节点<br/>5 · 10"]
+    R --> N2["内部节点<br/>30 · 40"]
+    R --> N3["内部节点<br/>60 · 80"]
+    N1 --> L1["叶子页<br/>1 · 3 · 5"]
+    N1 --> L2["叶子页<br/>7 · 9 · 10"]
+    N2 --> L3["叶子页<br/>21 · 25 · 30"]
+    N2 --> L4["叶子页<br/>35 · 40 · 45"]
+    N3 --> L5["叶子页<br/>51 · 60 · 70"]
+    N3 --> L6["叶子页<br/>80 · 90 · 99"]
+    L1 -.-> L2
     L2 -.-> L3
     L3 -.-> L4
     L4 -.-> L5
     L5 -.-> L6
 ```
+
+虚线表示叶子页之间的顺序链接；范围查询定位起点后，可以沿叶子页继续扫描。
 
 ## 5.2 为什么不用红黑树
 
@@ -394,6 +985,49 @@ Hash 索引适合等值查询，但不适合：
 - 最左前缀组合查询。
 
 因此 Hash 更适合作为特定场景的辅助结构，而不是通用磁盘索引。
+
+## 5.4 B+ 树与 LSM Tree
+
+B+ 树倾向于原地维护有序页，适合点查、范围查询和需要稳定读取延迟的场景。LSM Tree
+则先把写入变成内存和顺序 I/O，再异步整理磁盘文件：
+
+```mermaid
+flowchart LR
+    A[写请求] --> B[WAL]
+    A --> C[MemTable]
+    C -->|达到阈值| D[不可变 MemTable]
+    D --> E[SSTable]
+    E --> F[Compaction]
+    F --> G[更低层 SSTable]
+```
+
+读取时可能需要查询内存表和多个 SSTable，因此通常配合索引、缓存和 Bloom Filter
+减少无效磁盘访问。Compaction 会合并文件并清理旧版本，同时带来额外 I/O。
+
+| 维度 | B+ 树 | LSM Tree |
+|---|---|---|
+| 写入路径 | 修改有序页，可能页分裂 | WAL 加内存写，后台顺序落盘 |
+| 点查 | 路径稳定 | 可能查多个层级，依赖过滤器与缓存 |
+| 范围扫描 | 天然有序 | 需要归并多个有序文件 |
+| 后台工作 | 刷脏、页维护 | Flush、Compaction |
+| 典型代价 | 随机写、页分裂 | 读放大、写放大、空间放大 |
+
+LSM Tree 不是“写入永远更快”：当 Compaction 追不上写入时，延迟、空间和写放大都会
+上升。选择存储引擎时要结合读写比例、范围扫描、数据保留周期和尾延迟要求。
+
+## 5.5 行存、列存与工作负载
+
+行式存储把一行的多个字段放得较近，读取或修改完整记录更自然；列式存储把同一列的
+值放得较近，适合只读取少量列的大规模扫描，并更容易压缩和向量化执行。
+
+| 工作负载 | 典型特征 | 常见存储选择 |
+|---|---|---|
+| OLTP | 短事务、点查、小范围更新、高并发 | 行存、B+ 树索引 |
+| OLAP | 大范围扫描、聚合、少量列、批处理 | 列存、分区、向量化执行 |
+| HTAP | 同时服务事务与分析 | 行列副本、增量同步或混合引擎 |
+
+“列存压缩率高”不代表它适合频繁更新单行；“行存点查快”也不代表它适合扫描几十亿行
+做聚合。数据布局必须和访问模式一起判断。
 
 ---
 
@@ -725,6 +1359,80 @@ DELETE FROM orders WHERE id = 1;
 
 不能笼统地说“RR 完全依靠 MVCC 解决幻读”。对于当前读和范围修改，还需要记录锁、间隙锁与 Next-Key Lock。
 
+## 10.6 丢失更新
+
+丢失更新常出现在“先读到应用，再根据旧值写回”的流程中：
+
+```mermaid
+sequenceDiagram
+    participant T1 as 事务 T1
+    participant T2 as 事务 T2
+    participant DB as 数据库
+
+    T1->>DB: 读取 stock = 10
+    T2->>DB: 读取 stock = 10
+    T1->>DB: 写入 stock = 9
+    T2->>DB: 写入 stock = 8
+    Note over DB: T1 的结果被 T2 基于旧值覆盖
+```
+
+隔离级别不能自动理解应用中的“这个新值是由哪个旧值计算出来的”。常见处理方式：
+
+1. 尽量改成数据库内的原子表达式：
+
+   ```sql
+   UPDATE inventory
+   SET stock = stock - 1
+   WHERE sku_id = ?
+     AND stock > 0;
+   ```
+
+2. 使用版本号做 Compare-And-Swap，并检查影响行数；
+3. 在读取时使用 `SELECT ... FOR UPDATE`，让读和后续写处于同一短事务；
+4. 对不可交换的业务操作增加唯一键、状态机或幂等记录。
+
+## 10.7 写偏差
+
+写偏差发生在两个事务读取同一组条件，却分别修改不同的行，因此没有直接的写写冲突。
+例如规则要求“至少一名值班人员在线”：
+
+```text
+T1 看到 Alice、Bob 都在线，令 Alice 离线
+T2 也看到 Alice、Bob 都在线，令 Bob 离线
+两个事务修改不同记录，都能提交
+最终没有任何人在线，跨行约束被破坏
+```
+
+单纯给各自修改的行加锁不足以保护这个集合约束。可以根据数据模型选择：
+
+- 把约束收敛到一条可加锁的汇总记录；
+- 锁定参与判断的完整记录集合，并确保查询走可预测的索引范围；
+- 使用数据库能够表达的唯一约束、检查约束或条件写入；
+- 提高隔离强度，并对序列化失败或死锁进行有限、幂等的重试。
+
+## 10.8 锁定读取、NOWAIT 与 SKIP LOCKED
+
+普通 `FOR UPDATE` 在锁冲突时等待。支持相应语法时，还可以明确等待策略：
+
+```sql
+-- 无法立即获得锁就报错，适合快速失败
+SELECT *
+FROM inventory
+WHERE sku_id = ?
+FOR UPDATE NOWAIT;
+
+-- 跳过已被锁定的任务，适合多个消费者领取队列任务
+SELECT id
+FROM jobs
+WHERE status = 'ready'
+ORDER BY id
+LIMIT 10
+FOR UPDATE SKIP LOCKED;
+```
+
+`SKIP LOCKED` 返回的是可领取记录，不是完整一致的查询结果，不应拿它做余额、库存总量
+或审计统计。无论选择等待、快速失败还是跳过，都必须设置事务超时并设计重试边界。
+
 ---
 
 # 11. MVCC 与 Read View
@@ -1051,6 +1759,68 @@ checkpoint 用于推进可恢复边界，并控制 redo 空间循环使用。
 
 页写入可能发生部分写，导致一个数据页只有部分内容落盘。doublewrite 通过先写入连续缓冲区域，再写入最终位置，为页损坏恢复提供副本。
 
+## 14.9 刷盘策略与组提交
+
+事务返回成功时究竟持久化到了哪一层，取决于数据库和操作系统的刷盘策略。MySQL 中
+经常一起检查：
+
+- `innodb_flush_log_at_trx_commit`：控制 InnoDB redo 在事务提交时写入和刷盘的策略；
+- `sync_binlog`：控制 binlog 多久同步到持久化存储；
+- 存储设备是否正确兑现 `fsync`、缓存刷新和写入顺序语义。
+
+常见的强持久配置是 `innodb_flush_log_at_trx_commit = 1` 与 `sync_binlog = 1`。
+降低刷盘频率可以减少同步 I/O，但进程或机器故障时可能扩大数据丢失窗口。不能只看变量
+名称判断风险，还要结合虚拟化层、磁盘写缓存、文件系统和复制策略验证。
+
+组提交会把多个并发事务的一部分日志刷盘工作合并，分摊昂贵的同步 I/O：
+
+```mermaid
+flowchart LR
+    T1[事务 1] --> Q[提交批次]
+    T2[事务 2] --> Q
+    T3[事务 3] --> Q
+    Q --> B[写 binlog]
+    B --> R[协调 redo 提交]
+    R --> F[一次或少量 fsync]
+```
+
+组提交提高吞吐，但不意味着所有事务共用一个原子结果；每个事务仍有自己的提交状态。
+分析提交延迟时，应区分日志生成、等待批次、写系统调用和真正的设备同步耗时。
+
+## 14.10 备份、PITR 与恢复演练
+
+崩溃恢复、主从复制和备份解决的是不同问题：
+
+| 机制 | 主要解决的问题 | 不能替代的能力 |
+|---|---|---|
+| redo 崩溃恢复 | 实例异常退出后恢复已提交事务 | 无法恢复被误删且日志已覆盖的数据 |
+| 主从复制 | 高可用和读取扩展 | 错误删除也可能迅速复制到所有节点 |
+| 备份 | 保存独立历史副本 | 单独一份旧备份无法恢复到任意时间点 |
+
+逻辑备份保存可重放的 SQL 或逻辑记录，迁移和局部恢复方便，但大数据量恢复通常较慢。
+物理备份复制数据文件和相关元数据，吞吐高、恢复快，但与引擎和版本关系更紧密。
+全量备份保存一个完整基线，增量备份只保存之后的变化。
+
+时间点恢复（PITR）的基本链路是：
+
+```mermaid
+flowchart LR
+    A[恢复完整备份] --> B[定位备份对应的 binlog 或 GTID]
+    B --> C[按顺序重放后续日志]
+    C --> D[在目标时间或错误事件前停止]
+    D --> E[校验数据并切换服务]
+```
+
+一份可用的备份策略还必须回答：
+
+- 备份是否来自一致性快照，是否包含表结构、账号和必要配置；
+- binlog 保留时间是否覆盖最长发现窗口；
+- 备份是否加密、异地保存并限制访问；
+- 恢复到隔离环境需要多久，是否满足 RPO 和 RTO；
+- 是否实际执行过恢复、校验和应用启动，而不只是看到“备份任务成功”。
+
+只有恢复演练成功的备份，才是经过验证的恢复能力。
+
 ---
 
 # 15. Buffer Pool 与数据页
@@ -1127,7 +1897,106 @@ flowchart LR
 - 是否排序或使用临时表。
 - 估算每一步行数和成本。
 
-## 16.2 EXPLAIN 重点字段
+## 16.2 查询改写与 JOIN 顺序
+
+优化器接收到的是声明式 SQL。它可以在不改变语义的前提下做等价变换，例如：
+
+- 常量折叠和不可能条件消除；
+- 将过滤条件尽量下推到更早的扫描节点；
+- 删除没有被上层使用的投影列；
+- 把部分 `IN`、`EXISTS` 子查询转换为半连接；
+- 重新安排可交换的 INNER JOIN 顺序。
+
+条件下推越早，中间结果通常越小。但外连接、聚合、窗口函数、`NULL` 三值逻辑和有
+副作用的表达式会限制改写，不能把所有 `WHERE` 条件机械地移入子查询或 `ON`。
+
+三个表连接时，下面两棵执行树的中间结果可能相差很大：
+
+```mermaid
+flowchart TB
+    A1[先连接大表 A 与 B] --> M1[巨大中间结果]
+    M1 --> R1[再连接高选择性表 C]
+    A2[先用 C 过滤 B] --> M2[较小中间结果]
+    M2 --> R2[再连接 A]
+```
+
+优化器根据估算行数、索引、连接条件和排序需求选择顺序。INNER JOIN 在关系代数上
+通常可以重排，LEFT JOIN 等外连接则不能随意交换，因为交换后保留哪一侧的语义会改变。
+
+## 16.3 常见 JOIN 执行算法
+
+### Index Nested Loop Join
+
+外层每得到一行，就利用连接键查询内层索引：
+
+```text
+for each outer_row:
+    probe inner_index by outer_row.join_key
+```
+
+它适合外层结果较小、内层连接键有高效索引的场景。若外层返回 `N` 行，就可能触发
+约 `N` 次内层索引探测；外层估算错误或随机回表很多时，代价会迅速放大。Batched Key
+Access 会尝试批量组织部分内层查找以改善访问局部性，但是否采用取决于版本、配置和成本。
+
+### Hash Join
+
+通常选择一侧建立内存 Hash 表，再扫描另一侧进行探测：
+
+```mermaid
+flowchart LR
+    A[构建侧输入] --> H[内存 Hash 表]
+    B[探测侧输入] --> P[按连接键探测]
+    H --> P
+    P --> O[输出匹配行]
+```
+
+Hash Join 适合没有可用连接索引的大批量连接，尤其是等值连接。构建侧过大时会增加
+内存压力，必要时还可能分区或落盘。MySQL 8.0 的执行计划应以实际 `EXPLAIN` 输出为准，
+不能仅凭 SQL 写法断言一定使用 Hash Join。
+
+### Sort-Merge Join
+
+通用数据库系统还可能先按连接键排序两侧，再像归并排序一样线性推进。输入本身有序、
+需要范围连接或后续仍需该顺序时可能有优势；否则排序成本可能很高。它是重要的通用
+执行算法，但不应假设 MySQL 8.0 会把普通连接计划展示为 Sort-Merge Join。
+
+选择算法时应同时比较：输入行数、索引探测次数、内存预算、是否需要排序、中间结果大小
+以及数据是否倾斜，而不是只背诵理论复杂度。
+
+## 16.4 基数估计、统计信息与成本
+
+基数估计回答“每一步大约会产生多少行”。这个数字会影响 JOIN 顺序、访问索引、Hash
+表构建侧以及是否排序。常见信息来源包括：
+
+- 表和索引的行数、不同值数量等统计信息；
+- 索引前缀的基数；
+- 列值分布直方图；
+- 条件选择率和算子成本模型。
+
+估算容易在以下场景偏离真实值：
+
+- 数据高度倾斜，例如绝大多数订单都是同一状态；
+- 多列强相关，但优化器按相互独立近似；
+- 统计信息陈旧或采样没有捕获少数热点值；
+- 同一条参数化 SQL 的不同参数命中完全不同的数据规模；
+- 多层过滤和 JOIN 的误差逐层放大。
+
+执行计划中的 `cost` 是用于比较候选计划的估算单位，不等于毫秒。发现估算行数与实际
+行数明显不一致时，可以按下面的顺序处理：
+
+```text
+确认真实参数与数据分布
+→ 对比 EXPLAIN 和 EXPLAIN ANALYZE
+→ 检查索引基数与统计信息更新时间
+→ 必要时更新统计信息或为合适列建立直方图
+→ 重新评估索引和 SQL 结构
+→ 最后才考虑 Hint 或强制索引
+```
+
+Hint 能暂时固定选择，却可能在数据规模变化后成为负担。根因如果是统计信息、数据倾斜
+或相关列建模，优先修复根因并建立执行计划回归监控。
+
+## 16.5 EXPLAIN 重点字段
 
 | 字段 | 含义 |
 |---|---|
@@ -1140,7 +2009,7 @@ flowchart LR
 | `filtered` | 过滤后保留比例估计 |
 | `Extra` | 额外执行信息 |
 
-## 16.3 常见访问类型
+## 16.6 常见访问类型
 
 大致从更精确到更宽泛：
 
@@ -1162,7 +2031,7 @@ const
 - 单次执行频率。
 - 数据分布。
 
-## 16.4 Extra
+## 16.7 Extra
 
 - `Using index`：覆盖索引。
 - `Using index condition`：索引下推。
@@ -1170,7 +2039,7 @@ const
 - `Using filesort`：需要额外排序过程，不一定真的写文件。
 - `Using temporary`：使用临时表完成中间结果。
 
-## 16.5 EXPLAIN ANALYZE
+## 16.8 EXPLAIN ANALYZE
 
 `EXPLAIN` 主要给出估算，`EXPLAIN ANALYZE` 会实际执行并返回真实耗时、循环次数和行数。
 
@@ -1187,7 +2056,7 @@ const
 - 列之间存在相关性。
 - 参数分布差异。
 
-## 16.6 慢查询分析顺序
+## 16.9 慢查询分析顺序
 
 ```mermaid
 flowchart TD
@@ -1443,9 +2312,78 @@ flowchart TD
 - 单写入点租约。
 - 切换前确认旧主不可写。
 
+## 18.8 GTID 与自动定位
+
+传统复制使用 binlog 文件名和偏移量描述位置。GTID 为每个已提交复制事务分配全局事务
+标识，可以抽象为：
+
+```text
+source_uuid:transaction_sequence
+```
+
+实例维护自己已经执行的 GTID 集合。建立复制或故障切换时，可以比较集合并自动请求
+缺少的事务，不必手工换算不同服务器上的 binlog 文件位置。已经执行过的 GTID 不应再次
+执行，这也让重复传输和重新连接更容易处理。
+
+GTID 简化的是事务定位，不会自动解决：
+
+- 旧主仍接受写入造成的分叉；
+- 管理员在从库直接写入形成的额外事务；
+- 业务层重复请求；
+- 逻辑数据损坏已经复制到全部节点。
+
+切换前仍要比较 GTID 集合、确认候选节点已经应用目标事务，并隔离旧主。切换后还要
+检查是否存在只出现在旧主或某个从库上的事务集合。
+
+## 18.9 并行复制与延迟分解
+
+复制延迟至少可以拆成两个阶段：
+
+```mermaid
+flowchart LR
+    A[主库已提交] --> B[日志尚未传到从库]
+    B --> C[日志已进入 relay log]
+    C --> D[等待 Applier]
+    D --> E[事务正在执行]
+    E --> F[从库已应用]
+```
+
+网络接收很快但应用落后时，单纯扩容网络没有作用。并行复制可以让互不冲突的事务由
+多个 worker 重放，但仍受以下因素限制：
+
+- 一个超大事务本身难以拆开并行；
+- 大量事务更新同一热点行或同一依赖链；
+- 从库缺少索引、磁盘或 CPU 资源；
+- 为保持提交顺序而产生的等待；
+- DDL 阻塞后续事务；
+- 从库上的分析查询与复制线程争夺资源。
+
+不要只依赖一个“延迟秒数”。还应观察 relay log 积压、接收与执行 GTID 集合差异、
+各 worker 状态、最后错误、大事务大小和从库资源利用率。
+
+## 18.10 复制错误、数据校验与延迟副本
+
+复制因重复键、缺失行或 DDL 不一致而停止时，直接跳过错误可能让数据分歧继续扩大。
+应先保存现场并判断：
+
+1. 出错事务原本应该执行，还是从库已存在等价结果；
+2. 差异只涉及单行，还是已经扩散到关联表；
+3. 修复后 GTID、约束和业务聚合是否一致；
+4. 是否需要从可信备份重新构建从库。
+
+数据校验可以分层进行：
+
+- 比较库表结构、分区和索引定义；
+- 按主键范围计算行数与校验摘要；
+- 比较金额、库存、状态数量等业务聚合；
+- 对差异块回查明细，而不是直接全表逐行跨网络比较。
+
+延迟副本会故意晚于主库一段时间，可为误删除提供额外发现窗口。但它不是备份：磁盘
+损坏、账号误操作或延迟时间之外的问题仍可能影响它，而且启用恢复前必须及时停止重放。
+
 ---
 
-# 19. 分库分表与全局 ID
+# 19. 分区、分库分表与分布式一致性
 
 ## 19.1 为什么拆分
 
@@ -1460,7 +2398,54 @@ flowchart TD
 
 限制。
 
-## 19.2 垂直拆分
+## 19.2 分区表与分库分表的区别
+
+分区表仍是一个数据库实例中的一张逻辑表，只是存储被划分为多个分区。分库分表则把
+数据路由到多个独立物理表或数据库节点。
+
+| 维度 | 分区表 | 分库分表 |
+|---|---|---|
+| SQL 入口 | 通常仍访问一张逻辑表 | 应用或中间件负责路由 |
+| 事务 | 仍在单实例事务范围内 | 跨分片事务需要额外协调 |
+| 计算资源 | 主要受单实例资源限制 | 可以横向扩展到多个节点 |
+| 运维重点 | 分区裁剪、分区生命周期 | 路由、扩容、跨分片查询与一致性 |
+
+时间序列表可以按日期做 RANGE 分区：
+
+```sql
+CREATE TABLE event_log (
+    id         BIGINT NOT NULL,
+    created_at DATETIME NOT NULL,
+    payload    JSON NOT NULL,
+    PRIMARY KEY (id, created_at)
+)
+PARTITION BY RANGE COLUMNS(created_at) (
+    PARTITION p_before  VALUES LESS THAN ('2026-01-01'),
+    PARTITION p2026q1 VALUES LESS THAN ('2026-04-01'),
+    PARTITION p2026q2 VALUES LESS THAN ('2026-07-01'),
+    PARTITION p2026q3 VALUES LESS THAN ('2026-10-01'),
+    PARTITION p2026q4 VALUES LESS THAN ('2027-01-01'),
+    PARTITION pmax    VALUES LESS THAN (MAXVALUE)
+);
+```
+
+查询条件能约束分区键时，优化器可以执行分区裁剪，只扫描相关分区：
+
+```sql
+SELECT id, created_at, payload
+FROM event_log
+WHERE created_at >= '2026-04-01'
+  AND created_at <  '2026-07-01';
+```
+
+分区不是索引的替代品。进入某个分区后，仍需要合适索引定位记录；缺少分区键的查询
+可能扫描很多分区。分区过多还会增加元数据、优化和文件管理成本。
+
+MySQL 8.0 还存在需要在建表前确认的限制，例如所有唯一键通常必须包含分区表达式涉及的
+列，用户定义分区的 InnoDB 表不能使用外键。分区设计必须按实际版本验证，不能把其他
+数据库的分区能力直接套用过来。
+
+## 19.3 垂直拆分
 
 按业务域拆分：
 
@@ -1474,7 +2459,7 @@ flowchart LR
 
 优点是边界清晰，局限是跨域事务和查询更复杂。
 
-## 19.3 水平拆分
+## 19.4 水平拆分
 
 将同一张逻辑表按分片键分布到多个物理表或库。
 
@@ -1482,7 +2467,7 @@ flowchart LR
 shard = hash(user_id) % N
 ```
 
-## 19.4 分片键选择
+## 19.5 分片键选择
 
 分片键应考虑：
 
@@ -1494,7 +2479,7 @@ shard = hash(user_id) % N
 
 按用户 ID 分片适合用户中心型访问；按时间分片适合日志和归档，但最新分片可能成为写热点。
 
-## 19.5 跨分片问题
+## 19.6 跨分片问题
 
 分片后会增加：
 
@@ -1506,7 +2491,7 @@ shard = hash(user_id) % N
 - 分页归并。
 - 扩容迁移。
 
-## 19.6 全局 ID
+## 19.7 全局 ID
 
 雪花算法一般将 64 位整数划分为：
 
@@ -1524,7 +2509,7 @@ flowchart LR
 - 同毫秒序列耗尽。
 - 时间戳溢出。
 
-## 19.7 扩容与数据迁移
+## 19.8 扩容与数据迁移
 
 直接从 `N` 取模扩容到 `2N` 会导致大量数据重新映射。常见方案：
 
@@ -1546,6 +2531,90 @@ flowchart TD
     F --> G[停止旧分片同步]
     G --> H[下线旧路由]
 ```
+
+## 19.9 分布式事务模式
+
+第 14.5 节中的两阶段提交用于协调同一个 MySQL 实例内的 redo 与 binlog。跨数据库、
+消息系统或远程服务的事务是另一类问题，需要在一致性、可用性和复杂度之间选择。
+
+### XA / 两阶段提交
+
+协调者先要求每个参与者进入 `PREPARED`，全部成功后再统一提交：
+
+```mermaid
+sequenceDiagram
+    participant C as 协调者
+    participant A as 数据库 A
+    participant B as 数据库 B
+
+    C->>A: Prepare
+    C->>B: Prepare
+    A-->>C: Prepared
+    B-->>C: Prepared
+    C->>A: Commit
+    C->>B: Commit
+```
+
+它能提供较强原子性，但准备后的参与者需要保留锁和资源。协调者故障、网络分区或参与者
+长时间不可达时，事务可能阻塞，因此不适合长业务流程。
+
+### TCC
+
+- Try：检查并预留资源，例如冻结余额；
+- Confirm：确认成功并消耗预留资源；
+- Cancel：释放预留资源。
+
+Confirm 和 Cancel 都可能被重复调用，必须幂等；还要处理空回滚、悬挂和部分参与者
+超时。TCC 控制力强，但会侵入业务模型。
+
+### Saga
+
+Saga 把长流程拆成多个本地事务，每一步成功后触发下一步，失败时按相反方向执行补偿。
+补偿是新的业务操作，不是数据库回滚：退款不能让已经发送的邮件消失，取消订单也可能
+需要处理已经发出的物流请求。因此必须明确定义不可逆步骤、补偿失败重试和人工介入路径。
+
+| 模式 | 一致性特征 | 主要代价 | 更适合的场景 |
+|---|---|---|---|
+| XA / 2PC | 较强原子性 | 锁持有、协调和阻塞风险 | 参与者少、事务短且都支持协议 |
+| TCC | 业务资源预留 | 业务侵入和状态分支多 | 余额、库存等可冻结资源 |
+| Saga | 最终一致 | 补偿设计复杂 | 跨服务长流程 |
+
+## 19.10 Transactional Outbox 与可靠事件
+
+“提交数据库后再发消息”存在进程崩溃窗口；“先发消息再提交数据库”又可能让消费者看到
+尚未成立的业务状态。Outbox 把业务修改和待发送事件写进同一个本地事务：
+
+```sql
+START TRANSACTION;
+
+UPDATE orders
+SET status = 'paid'
+WHERE id = ?
+  AND status = 'pending';
+
+INSERT INTO outbox_events(event_id, aggregate_id, event_type, payload)
+VALUES (?, ?, 'OrderPaid', ?);
+
+COMMIT;
+```
+
+随后由轮询发布器或 CDC 读取 Outbox 并发送消息：
+
+```mermaid
+flowchart LR
+    A[本地事务] --> B[业务表]
+    A --> C[Outbox 表]
+    C --> D[轮询或 CDC]
+    D --> E[消息系统]
+    E --> F[幂等消费者]
+```
+
+发布器可能在“消息已经发送、Outbox 尚未标记完成”时崩溃，因此消息仍可能重复。
+消费者应以 `event_id` 或业务唯一键去重，并把去重记录与业务修改放在同一个本地事务。
+还要明确同一聚合根的事件顺序、重试退避、死信处理、积压监控和数据对账。
+
+工程上通常追求“至少一次投递 + 幂等消费 + 可校验结果”，不要把某个组件宣称的
+Exactly Once 直接推导成跨数据库、消息系统和外部副作用的端到端恰好一次。
 
 ---
 
@@ -1652,6 +2721,107 @@ Stream 支持：
 - 消费者故障转移。
 
 适合轻量消息流，但仍需评估持久化、积压、重放和跨机房能力。
+
+## 20.9 执行模型与渐进式 rehash
+
+Redis 常被简化成“单线程数据库”，更准确的理解是：核心命令通常由事件循环按顺序执行，
+但网络 I/O、持久化、释放内存和其他后台工作可以由额外线程或进程承担，具体能力取决于
+版本和配置。
+
+```mermaid
+flowchart LR
+    A[Socket 事件] --> B[读取与解析命令]
+    B --> C[主执行路径]
+    C --> D[修改内存数据]
+    D --> E[生成响应]
+    C -.-> F[持久化或后台任务]
+```
+
+顺序执行让单条命令天然避免与其他命令交错，但也意味着一个耗时很长的命令会拖慢同一
+实例上的其他请求。复杂度为 $O(N)$ 的命令是否危险，取决于真实的 `N`、元素大小、返回
+数据量和执行频率，不能只看渐进复杂度。
+
+Redis 的字典扩容通常使用两张 Hash 表渐进式 rehash：
+
+```text
+ht[0]：旧表，尚有未迁移 bucket
+ht[1]：新表，接收新位置
+普通读写或定时任务顺带迁移少量 bucket
+迁移完成后释放旧表
+```
+
+渐进迁移把一次大搬迁拆散，但扩容期间可能同时持有两张表，增加临时内存占用。
+List、Hash、Set、ZSet 等对象也可能根据元素数量和大小使用紧凑编码或通用结构；结构
+转换的具体阈值会随版本和配置变化，设计时应关注量级与操作复杂度，而不是死记常量。
+
+## 20.10 原子性、事务、Lua 与 Pipeline
+
+这些机制解决的问题不同：
+
+| 机制 | 是否避免命令交错 | 主要目的 | 关键边界 |
+|---|---:|---|---|
+| 单条命令 | 是 | 原子读写一个操作 | 故障切换和持久性是另一层问题 |
+| `MULTI/EXEC` | 执行阶段不被其他客户端命令插入 | 批量顺序执行 | 不提供传统数据库式自动回滚 |
+| `WATCH` | 通过版本变化决定是否执行 | 乐观并发控制 | 冲突后由客户端重读并重试 |
+| Lua 脚本 | 脚本执行期间不与其他命令交错 | 组合读、判断和写 | 长脚本会阻塞主执行路径 |
+| Pipeline | 否 | 减少网络往返 | 不是事务，也不保证整批原子性 |
+
+使用 `WATCH` 实现余额条件更新的抽象流程：
+
+```text
+WATCH balance_key
+→ 读取并计算新值
+→ MULTI
+→ 写入新值
+→ EXEC
+→ 若监视期间 key 已变化，EXEC 失败并重新读取
+```
+
+如果逻辑能够完全在 Redis 内完成，Lua 往往比客户端“读—判断—写”更可靠。但脚本应
+保持短小、执行时间有界，并避免扫描大集合。Pipeline 应限制单批命令数和返回数据量，
+否则会把 RTT 优化变成客户端缓冲、服务端输出缓冲和网络突发压力。
+
+在 Redis Cluster 中，多 Key 原子操作通常要求相关 Key 位于同一槽，可通过 Hash Tag
+显式控制。跨槽事务不能依靠普通 `MULTI/EXEC` 自动协调。
+
+## 20.11 分布式锁与 Fencing Token
+
+单实例锁的基本获取方式是同时设置唯一所有者令牌和过期时间：
+
+```text
+SET lock:order:1001 random-owner-token NX PX 30000
+```
+
+释放时必须原子地“比较令牌再删除”，不能直接 `DEL`，否则持有者暂停超过租约后，可能
+误删另一个客户端新获得的锁：
+
+```lua
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+```
+
+还要处理：
+
+- 任务执行时间超过租约，需要受控续期或主动失败；
+- 客户端长时间暂停后恢复，可能继续执行过期持有者的操作；
+- 主从异步复制下，主节点写入锁后立即故障，新主可能没有这把锁；
+- 解锁、续期超时的结果未知，不能盲目假设操作没有发生。
+
+租约只能说明“某段时间内协调服务认为谁持有锁”，不能撤销已经开始执行的旧客户端。
+对写存储、调用设备等需要严格排除旧持有者的操作，应使用单调递增的 Fencing Token：
+
+```text
+持有者 A 获得 token 41
+持有者 A 暂停，租约过期
+持有者 B 获得 token 42 并完成写入
+持有者 A 恢复后携带 token 41
+下游拒绝小于已见最大值 42 的请求
+```
+
+如果唯一约束、条件更新或单数据库事务已经能保证正确性，应优先使用这些更靠近数据的
+机制。分布式锁适合协调，不能替代幂等、状态机和下游约束。
 
 ---
 
@@ -1939,6 +3109,32 @@ order:{1001}:items
 - 禁止写入。
 
 淘汰策略应结合数据访问模式选择。
+
+## 23.8 内存碎片、后台释放与 fork 抖动
+
+Redis 统计的逻辑数据量和进程 RSS 不一定相同。内存分配器碎片、已经释放但尚未归还
+操作系统的页、复制缓冲区和客户端输出缓冲区，都可能让 RSS 明显高于数据集大小。
+
+删除 Big Key 时，直接同步释放大量对象也可能阻塞主执行路径。可根据版本和场景采用
+异步释放能力，但异步只把工作移到后台，不能消除 CPU 与内存回收成本。
+
+生成 RDB 或执行 AOF 重写通常需要创建子进程。父子进程初始共享内存页，写入会触发
+Copy-On-Write：
+
+```text
+数据集很大 + 后台保存期间写入频繁
+→ 大量共享页被复制
+→ RSS 突增
+→ 内存压力、延迟甚至 OOM
+```
+
+容量规划应预留 fork 和 Copy-On-Write 峰值，并监控：
+
+- `used_memory` 与进程 RSS 的差值；
+- 内存碎片率；
+- fork 耗时；
+- RDB/AOF 后台任务状态；
+- 客户端缓冲区、复制积压和 Key 大小分布。
 
 ---
 
@@ -2335,16 +3531,60 @@ flowchart LR
 
 错误。拆分会引入路由、跨分片查询、事务和迁移成本。应在单库优化和容量评估后再实施。
 
+## 27.11 “Online DDL 全程不会阻塞业务”
+
+错误。即使使用 `INSTANT` 或 `INPLACE`，准备或切换阶段仍可能获取排他 MDL；长事务、
+资源竞争和复制延迟也会放大影响。必须预先确认实际算法并观察等待链路。
+
+## 27.12 “有从库就不需要备份”
+
+错误。误删除、错误 DDL 和逻辑损坏会被复制；主从也可能同时受权限泄漏或存储故障影响。
+需要独立备份、binlog 保留和定期恢复演练。
+
+## 27.13 “分区越多，查询越快”
+
+错误。只有条件能够触发分区裁剪时，才可能减少扫描范围；分区内仍需要索引。过多分区
+反而增加元数据、优化、文件管理和维护成本。
+
+## 27.14 “Pipeline 等同于 Redis 事务”
+
+错误。Pipeline 的目标是减少网络往返，命令仍可能和其他客户端命令交错；`MULTI/EXEC`
+解决的是批量执行期间不被插入，但也不提供关系数据库式自动回滚。
+
+## 27.15 “Redis 锁设置了过期时间就绝对安全”
+
+错误。客户端暂停、续期失败、异步复制和故障切换都可能产生旧持有者。应使用唯一所有者
+令牌原子解锁；下游需要严格排除旧请求时，还要验证单调递增的 Fencing Token。
+
+## 27.16 “消息系统承诺 Exactly Once，业务就不会重复”
+
+错误。数据库提交、消息投递、消费者写入和外部副作用跨越多个系统。工程上仍要使用
+业务唯一键、Outbox、幂等消费、重试记录和结果对账建立端到端保证。
+
+## 27.17 “Hash Join 一定比 Nested Loop 快”
+
+错误。小外表配合高选择性内层索引时，Index Nested Loop 可能更合适；Hash Join 还会
+受到构建侧大小、内存、倾斜和落盘影响。最终应比较真实执行计划和运行数据。
+
 ---
 
 # 28. 学习检查清单
 
 ## 28.1 SQL 与表设计
 
-- 能解释 `WHERE`、`GROUP BY`、`HAVING` 的执行阶段。
-- 能正确使用 JOIN、子查询、窗口函数。
+- 能解释 `FROM/JOIN`、`WHERE`、聚合、窗口、排序和分页的逻辑阶段。
+- 能为复杂条件正确添加括号，并使用左闭右开的时间范围。
+- 能解释一对多 JOIN 为什么扩展结果行，以及 `ON` 与 `WHERE` 的语义差异。
+- 能区分 `COUNT(*)`、`COUNT(column)`、`WHERE` 和 `HAVING`。
+- 能正确使用子查询、`EXISTS`、`UNION ALL`、CTE 和窗口函数。
+- 能说明 View、临时表、存储过程和触发器的作用域与维护边界。
+- 能解释 `NULL`、三值逻辑与 `NOT IN` 的风险。
+- 能在修改数据前核对目标集合，并检查实际影响行数。
 - 能设计主键、唯一键、金额、时间和状态字段。
+- 能区分候选键、主键、唯一约束、检查约束和外键职责。
+- 能说明 `DATETIME`、`TIMESTAMP`、字符集、Collation 和 JSON 字段的边界。
 - 能说明范式化和反范式化的权衡。
+- 能评估 Online DDL 算法、MDL、回填和兼容性发布顺序。
 
 ## 28.2 索引
 
@@ -2354,6 +3594,8 @@ flowchart LR
 - 能根据查询设计联合索引。
 - 能分析范围条件、排序和索引下推。
 - 能识别隐式转换、函数、前导模糊等问题。
+- 能比较 B+ 树与 LSM Tree 的读写、空间和后台整理代价。
+- 能根据 OLTP、OLAP 的访问模式解释行存与列存选择。
 
 ## 28.3 事务与锁
 
@@ -2363,6 +3605,8 @@ flowchart LR
 - 能区分快照读和当前读。
 - 能解释记录锁、间隙锁、Next-Key Lock、意向锁和 MDL。
 - 能构造死锁并给出治理方案。
+- 能识别丢失更新和写偏差，并选择原子更新、约束、锁或序列化策略。
+- 能说明 `NOWAIT`、`SKIP LOCKED` 的适用范围和一致性边界。
 
 ## 28.4 日志与恢复
 
@@ -2370,10 +3614,14 @@ flowchart LR
 - 能解释 WAL、checkpoint、doublewrite。
 - 能说明两阶段提交的目的。
 - 能描述一条 UPDATE 的完整执行过程。
+- 能解释 redo 与 binlog 刷盘策略、组提交和持久性窗口。
+- 能设计完整备份、增量日志、PITR 和恢复演练流程。
 
 ## 28.5 性能分析
 
 - 能使用 `EXPLAIN` 和 `EXPLAIN ANALYZE`。
+- 能比较 Index Nested Loop、Hash Join 和 Sort-Merge Join 的适用条件。
+- 能从基数估计、统计信息、直方图和数据倾斜解释计划选择。
 - 能分析扫描行数、回表、排序、临时表和锁等待。
 - 能处理深分页、大批量删除、N+1、热点行等问题。
 - 能结合连接池、I/O、CPU、日志和复制观察系统瓶颈。
@@ -2381,18 +3629,25 @@ flowchart LR
 ## 28.6 高可用与分布式
 
 - 能解释主从复制和主从延迟。
+- 能使用 GTID 集合分析复制位置，并拆分接收延迟与应用延迟。
 - 能设计写后读一致性策略。
 - 能说明 RPO、RTO 和脑裂治理。
+- 能区分分区表与分库分表，并判断分区裁剪是否生效。
 - 能选择分片键并说明跨分片代价。
 - 能比较自增 ID、UUID、雪花 ID 和号段模式。
+- 能比较 XA、TCC、Saga 与 Outbox，并设计幂等消费和数据对账。
 
 ## 28.7 Redis
 
 - 能说明常见数据结构和内部实现。
+- 能解释事件循环、渐进式 rehash 和长命令阻塞。
+- 能区分单命令原子性、`MULTI/EXEC`、`WATCH`、Lua 和 Pipeline。
 - 能区分缓存穿透、击穿和雪崩。
 - 能分析 Big Key 与 Hot Key。
+- 能设计带唯一令牌、原子解锁和 Fencing Token 的锁协议。
 - 能设计 Cache Aside 和可靠失效流程。
 - 能说明 RDB、AOF、Sentinel 和 Cluster。
+- 能分析内存碎片、fork、Copy-On-Write 和后台持久化抖动。
 
 ---
 
