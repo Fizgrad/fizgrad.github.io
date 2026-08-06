@@ -2032,9 +2032,6 @@ mmap 将文件或匿名内存映射到地址空间。优势：
 
 # 17. Linux 驱动与设备接口
 
-这一章先建立设备发现、驱动绑定和用户空间接口的基本路径；下一章再说明这些驱动
-如何通过 GKI/KMI 边界进入具体 Android 产品。
-
 ## 17.1 驱动模型
 
 典型驱动流程：
@@ -2782,8 +2779,8 @@ flowchart TB
 
 # 28. 功耗分析与优化
 
-功耗问题本质上是硬件资源在多长时间内处于什么状态。本章先建立 Android 策略到
-内核机制的完整链路，再分别讨论功耗来源、唤醒、调频、空闲状态和热反馈。
+功耗问题本质上是硬件资源在多长时间内处于什么状态，需要同时分析 Android 策略、
+内核调度、唤醒、调频、空闲状态和热反馈。
 
 ## 28.1 整体能效链路：Power HAL 与性能提示
 
@@ -3149,154 +3146,6 @@ flowchart LR
 6. 对照数据。
 7. 副作用评估。
 8. 回归检测方式。
-
-# 31. 思考问题
-
-## 31.1 架构与启动
-
-1. Android 从 Bootloader 到 Launcher 可交互经历哪些阶段？
-2. `init` 为什么必须是 PID 1？
-3. Zygote 预加载为什么能降低内存和启动成本？
-4. `system_server` 和普通应用进程有什么不同？
-5. 应用冷启动和热启动的主要路径差异是什么？
-6. `ActivityThread` 为什么不是线程类？
-7. `BOOT_COMPLETED` 是否代表系统所有后台初始化都结束？
-8. 如何区分开机慢发生在 Bootloader、内核、init 还是 Framework？
-
-## 31.2 Framework
-
-9. `ActivityManager` 与 `ActivityManagerService` 是什么关系？
-10. AMS 和 ATMS 的职责如何区分？
-11. WMS 和 SurfaceFlinger 的职责如何区分？
-12. PMS 在应用启动前提供哪些信息？
-13. 为什么系统服务常使用 Handler 串行修改状态？
-14. 为什么不能在持有系统服务锁时随意调用外部 Binder？
-15. ContentProvider 为什么可能影响应用启动时间？
-16. 应用进程重要性如何影响内存回收？
-
-## 31.3 Handler 与线程
-
-17. Handler、Looper、MessageQueue 的关系是什么？
-18. MessageQueue 没有消息时为什么不持续占 CPU？
-19. 同步屏障解决什么问题？
-20. 为什么主线程同步 Binder 调用有风险？
-21. Handler 泄漏的完整引用链是什么？
-22. Runnable 时间长和 Running 时间长分别说明什么？
-
-## 31.4 Binder
-
-23. Binder Client、Server、Proxy、Stub、Driver 分别是什么？
-24. 同步事务和 `oneway` 的区别是什么？
-25. 为什么 Binder 不能简单称为完全零拷贝？
-26. Binder 线程池饥饿如何形成？
-27. Binder 嵌套调用为什么容易造成死锁？
-28. 为什么服务端需要校验 Binder 调用 UID？
-29. `DeadObjectException` 表示什么？
-30. 大块数据为什么不适合放在 Parcel？
-31. DeathRecipient 的作用是什么？
-32. Binder 优先级继承解决什么问题？
-
-## 31.5 HAL
-
-33. HAL 的核心价值是什么？
-34. Binderized HAL 相比进程内 HAL 有何取舍？
-35. 稳定 AIDL HAL 与普通应用 AIDL 的约束有何不同？
-36. HIDL 为什么仍需要了解？
-37. Treble 解决了什么耦合问题？
-38. VINTF manifest 和 compatibility matrix 分别表达什么？
-39. Camera 请求如何从 Framework 走到驱动？
-
-## 31.6 图形
-
-40. 一帧从输入到显示经历哪些组件？
-41. Choreographer 的作用是什么？
-42. ViewRootImpl 负责什么？
-43. RenderThread 忙时主线程是否可能看起来正常？
-44. BufferQueue 的生产者和消费者分别可能是谁？
-45. SurfaceFlinger 与 HWC 如何分工？
-46. Fence 为什么必要？
-47. 60/90/120 Hz 的帧周期分别是多少？
-48. 关键线程 Runnable 但未运行时应查什么？
-
-## 31.7 ART 与编译
-
-49. ART 的职责是否只有 GC？
-50. DEX 校验检查哪些内容？
-51. 类加载、链接和初始化有什么区别？
-52. 为什么相同类名由不同 ClassLoader 加载后可能不是同一类型？
-53. `ArtMethod` 大致保存什么信息？
-54. 解释、JIT、AOT 各有什么优缺点？
-55. 现代 ART 为什么采用混合执行模式？
-56. Profile 引导编译解决什么问题？
-57. JIT Code Cache 包含哪些内容？
-58. 什么是 OSR？
-59. 什么是去优化？
-60. `speed-profile` 和 `speed` 的目标差异是什么？
-61. OTA 为什么可能使旧编译产物失效？
-
-## 31.8 GC
-
-62. GC Root 有哪些？
-63. Mark-Sweep、Mark-Compact、Copying 的区别是什么？
-64. 为什么分代 GC 有效？
-65. Concurrent Copying 为什么需要读屏障？
-66. 写屏障和 Card Table 解决什么问题？
-67. TLAB 为什么能提高对象分配速度？
-68. Large Object Space 有什么风险？
-69. 并发 GC 是否完全没有 Stop-The-World？
-70. time-to-suspend 过长说明什么？
-71. 如何区分 GC 根因与伴随现象？
-72. Java Heap 正常时还可能有哪些内存增长？
-
-## 31.9 JNI
-
-73. `JavaVM*` 和 `JNIEnv*` 的生命周期有何区别？
-74. 为什么 `JNIEnv*` 不能跨线程使用？
-75. LocalRef、GlobalRef、WeakGlobalRef 的区别是什么？
-76. 为什么不能直接用 `==` 比较 `jobject`？
-77. Native 自建线程如何进入 JNI？
-78. 为什么 Native 线程中的 `FindClass` 容易失败？
-79. `jmethodID` 是否需要 GlobalRef？
-80. JNI 数组接口是否一定零拷贝？
-81. Critical 数组区域为什么必须尽快释放？
-82. JNI pending exception 为什么必须及时处理？
-83. 如何降低 JNI 边界调用开销？
-
-## 31.10 Linux 与性能
-
-84. Android 线程在 Linux 内核中如何表示？
-85. nice、cgroup、cpuset、uclamp 分别影响什么？
-86. 什么是优先级反转？
-87. futex 的快路径和慢路径有何区别？
-88. minor fault 与 major fault 的区别是什么？
-89. RSS、PSS、USS 的区别是什么？
-90. Page cache 增长为什么不一定是泄漏？
-91. PSI 比单看 free memory 多提供了什么信息？
-92. lmkd 如何选择回收对象？
-93. zram 的收益和成本是什么？
-94. 直接回收为什么可能造成卡顿？
-95. `fsync` 为什么可能很慢？
-
-## 31.11 GKI 与内核模块
-
-96. GKI 把哪些能力放在公共内核，哪些能力留给厂商模块？
-97. KMI 为什么只在特定 Android 版本与 LTS 分支内稳定？
-98. `system_dlkm`、`vendor_boot` 和 `vendor_dlkm` 中的模块加载时机有什么区别？
-
-## 31.12 调度与能效
-
-99. PELT、uclamp、EAS 和 `schedutil` 分别解决什么问题？
-100. CPUFreq 与 CPUIdle 的 governor 为什么不是同一种策略？
-101. target residency 和 exit latency 如何影响 idle state 选择？
-102. Thermal 限频为什么可能让短时优化降低长时间性能？
-
-## 31.13 工具与优化
-
-103. Perfetto、Simpleperf 和 heap dump 分别解决什么问题？
-104. Systrace、atrace、ftrace 之间是什么关系？
-105. 分析卡顿时如何区分主线程、RenderThread、GPU 和 SurfaceFlinger？
-106. 为什么优化结果要看 P95/P99 而不只看平均值？
-107. 一个可验证的系统优化结论应包含哪些证据？
 
 # 参考资料
 

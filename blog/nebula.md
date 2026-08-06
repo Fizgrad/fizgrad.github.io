@@ -38,11 +38,16 @@ flowchart LR
     MySQL[("MySQL")]
     Redis[("Redis")]
     Kafka[("Kafka")]
+    Outbox["MessageService 内 OutboxWorker"]
     Observe["Prometheus / Grafana / Jaeger"]
 
     Browser -->|"HTTPS"| Bridge
     Browser <-->|"WSS 二进制帧"| Bridge
-    Bridge -->|"gRPC"| Services
+    Bridge -->|"gRPC"| User
+    Bridge -->|"gRPC"| Message
+    Bridge -->|"gRPC"| Relation
+    Bridge -->|"gRPC"| Conversation
+    Bridge -->|"gRPC"| Device
     Bridge <-->|"TCP 透明转发"| Gateway
     Native <-->|"TCP 二进制包"| Gateway
 
@@ -53,11 +58,16 @@ flowchart LR
 
     Services --> MySQL
     Services --> Redis
-    Message --> Kafka
+    MySQL -->|"claim outbox_events"| Outbox
+    Outbox -->|"delivery callback 确认"| Kafka
     Kafka --> Push
     Gateway -.-> Observe
     Services -.-> Observe
 ```
+
+Web Bridge 和浏览器客户端位于独立项目；NebulaIM 后端仓库负责二进制 Packet、
+Protobuf Schema、Gateway 和内部 gRPC 服务。Bridge 的 WebSocket 路径只做字节转发，
+HTTP 路径再调用相应业务服务。
 
 ### 1.3 同步链路与异步链路
 
@@ -90,7 +100,8 @@ MessageService -> MySQL messages + outbox_events
 - Kafka 和 Push 链路提供 **at-least-once** 语义；
 - 依靠稳定 `message_id`、数据库唯一键和幂等更新吸收重复；
 - Kafka 以 `conversation_id` 为 key，保证同一分区内有序；
-- 在线推送失败会重试，最终进入 DLQ 或离线存储；
+- 在线推送失败会先进入 retry topic，超过次数后尝试写 DLQ 和离线记录；
+- 多设备场景当前以至少一台设备投递成功作为该用户的处理成功；
 - “已发出”“已送达”“已读”是不同状态，不能混为一谈；
 - 系统没有宣称端到端 exactly-once，也没有端到端加密。
 
@@ -168,6 +179,37 @@ Gateway 的核心资源是 I/O 线程。若它直接执行密码哈希、SQL、�
 - 标记单条消息或会话已读；
 - 查询已读状态；
 - 撤回消息。
+
+**ConversationService**
+
+- `ListConversations`
+- `DeleteConversation`
+- `PinConversation`
+- `MuteConversation`
+
+**DeviceService**
+
+- `ListDevices`
+- `KickDevice`
+- `KickAllDevices`
+
+**GatewayService**
+
+- `DeliverToConnection`
+- `KickUser`
+- `KickConnection`
+- `GetOnlineStatus`
+
+**PushService**
+
+- `PushToUser`
+- `PushToGroup`
+
+**AdminService**
+
+- 健康检查、系统与 Outbox 统计、Kafka lag；
+- 配置校验、服务概览和进程内审计事件查询；
+- 有批量上限和 dry-run 模式的清理操作。
 
 ---
 
@@ -650,6 +692,10 @@ stateDiagram-v2
 
 服务端不能因为端口只绑定内网就完全取消鉴权。内网不是安全边界，尤其在容器、代理和多主机场景中。
 
+内部 Token 证明的是“调用来自受信服务”，不是最终用户身份。Gateway 和 Web Bridge
+仍必须把会话中的 user_id 与请求字段绑定或比对；Relation、Conversation、Device 等
+服务接收的 user_id 参数依赖这一可信调用边界，不能直接暴露给公网客户端。
+
 AdminService 使用独立的：
 
 - `x-nebula-admin-token`
@@ -749,6 +795,10 @@ deploy/mysql/migration/
 
 `schema_migrations` 记录已经执行的版本。一键部署不应每次重复执行不确定的手工 SQL。
 
+迁移脚本按文件名顺序执行，并使用 MySQL named lock 防止多个部署进程同时改 Schema。
+生产模式或显式启用 `NEBULA_MIGRATE_BACKUP` 时会先备份；任何一版失败都会立即停止，
+回滚依赖恢复备份或单独编写的回滚 SQL，而不是假设 DDL 可以自动撤销。
+
 ### 10.2 核心表
 
 | 表 | 作用 |
@@ -838,6 +888,19 @@ acquire(timeout)
 
 连接池不是越大越好。过多连接会让数据库线程、内存和锁竞争上升，应按并发和数据库容量配置。
 
+### 10.7 存储配置优先级
+
+业务服务统一通过 `StorageConfig` 读取 MySQL 和 Redis 配置，优先级为：
+
+```text
+NEBULA_TEST_MYSQL_* / NEBULA_TEST_REDIS_*
+> NEBULA_MYSQL_* / NEBULA_REDIS_*
+> nebula.conf
+```
+
+测试专用变量优先级最高，因此不能把它们导出到生产 systemd unit。统一加载器可以避免
+不同服务悄悄使用不同数据库、密码或 Redis 实例。
+
 ---
 
 ## 11. 认证、Token 与多设备在线
@@ -917,13 +980,19 @@ nebula:user:conn:{uid}:{device_id}
 
 ### 11.5 心跳和 TTL
 
-登录和心跳刷新 TTL；正常断开主动删除；进程崩溃时依靠 TTL 最终过期。
+登录或恢复会话会创建设备集合、Gateway 定位和 connection_id 三类状态；心跳只在
+当前 connection_id 仍匹配时延长已有 Key 的 TTL。正常断开主动删除，进程崩溃时
+依靠 TTL 最终过期。
 
 这是一种最终一致设计：
 
 - Redis 短时间显示在线，但连接已断：推送 RPC 失败后重试或离线；
-- 连接存在但状态临时过期：后续心跳恢复；
+- 连接仍在但任一定位 Key 已过期：当前心跳不会重建映射，PushService 会把设备视为
+  离线，直到客户端重新登录或恢复会话；
 - 不追求跨网络故障瞬间的绝对一致在线状态。
+
+心跳响应当前不会同步返回异步 Redis 刷新结果。这避免阻塞 EventLoop，但也意味着
+在线状态刷新失败只能从日志和后续投递行为中发现。
 
 ### 11.6 DeviceService
 
@@ -934,6 +1003,9 @@ nebula:user:conn:{uid}:{device_id}
 - 撤销全部设备。
 
 撤销时不仅更新数据库和 Token，还会根据 Redis 中的 Gateway/connection_id 调用 GatewayService 踢掉活连接。
+
+若 Redis 指向不可达 Gateway，DeviceService 仍会删除 Token、在线 Key 和设备行中的
+`token_hash`，但返回 `SERVICE_UNAVAILABLE`，因为它无法确认旧连接已经实时关闭。
 
 ---
 
@@ -946,10 +1018,14 @@ MessageService 会检查：
 - 发送者和接收者 ID 有效且不同；
 - 用户存在；
 - 两个方向的好友关系都存在；
-- 内容合法；
+- 内容非空且不超过 `message.max_content_length`，默认 `4096` 字节；
 - `client_sequence_id` 是否已经处理。
 
 双向好友检查可以防止关系表只写入一侧时越权发送。
+
+Proto 定义了文本、图片、文件、音频和视频等 `content_type`。当前 MessageService 会把
+类型与 `content` 原样写入 MySQL 和 Kafka，但不会验证图片 URL、媒体格式或文件元数据；
+图片上传并把 URL 作为内容是 Web Bridge 的约定，不是后端已经完成的媒体安全检查。
 
 ### 12.2 单聊事务
 
@@ -1050,15 +1126,17 @@ outbox_events(status=PENDING)
 
 ```mermaid
 stateDiagram-v2
-    Pending --> Claimed: worker claim + lease
-    Claimed --> Published: Kafka delivery callback 成功
-    Claimed --> Failed: 发布失败
-    Failed --> Claimed: 到达 next_retry_at
-    Claimed --> Dead: 超过重试且 DLQ 发布成功
-    Claimed --> Pending: 租约过期后重新认领
+    Pending --> Publishing: FOR UPDATE SKIP LOCKED + claim token
+    Failed --> Publishing: 到达 next_retry_at
+    Publishing --> Published: Kafka delivery callback 成功
+    Publishing --> Failed: 发布或 DLQ 失败
+    Publishing --> Dead: 超过重试且 DLQ delivery callback 成功
+    Publishing --> Publishing: 租约过期后用新 claim token 重新认领
 ```
 
-更新状态时会带 claim token 条件，防止租约已经失效的旧 Worker 覆盖新 Worker 的结果。
+数据库中的真实状态是 `PENDING / PUBLISHED / FAILED / DEAD / PUBLISHING`。更新终态时
+必须同时匹配 `event_id`、`PUBLISHING` 和 claim token，防止租约已经失效的旧 Worker
+覆盖新 Worker 的结果。
 
 ### 13.4 为什么要等 Kafka delivery callback
 
@@ -1108,6 +1186,10 @@ seek 回原 offset
 
 如果 offset commit 失败，也会尝试 seek。不能只说“不 commit 就会在下一次 poll 自动拿到同一条”，因为消费者本地 position 可能已经前移。
 
+`push_service.worker_num` 可以创建多个 KafkaConsumer；它们使用同一个 consumer group、
+不同 client ID。Kafka 仍让一个 partition 同时只属于组内一个 consumer，因此扩 Worker
+受 topic 分区数限制，单分区内部顺序不会因增加 Worker 而并行化。
+
 ### 13.7 在线投递与失败处理
 
 ```mermaid
@@ -1123,6 +1205,13 @@ flowchart TD
     Max -->|否| RT["写 retry topic"]
     Max -->|是| DLQ["写 DLQ + 离线存储"]
 ```
+
+`PushDispatcher` 会尝试用户的每个在线设备，但当前只要任意一台设备投递成功，就把
+该用户视为处理成功并清除重试计数；其他设备的失败不会单独进入重试队列。因此当前
+保证针对“用户”的投递处理，不保证每台设备都独立达到相同投递状态。
+
+达到最大重试次数后会尝试写 DLQ 和离线副本，但当前返回值只以 DLQ 发布结果为准，
+没有把离线写入失败继续向上返回。这是 offset 提交前仍需继续收紧的故障边界。
 
 ### 13.8 为什么 exactly-once 很难
 
@@ -1245,6 +1334,11 @@ stateDiagram-v2
 - 插入 B -> A。
 
 双向两行让“列出我的好友”查询简单，但写入必须保持原子。
+
+待处理申请还使用 `LEAST(from_user_id, to_user_id)` 和
+`GREATEST(from_user_id, to_user_id)` 生成的无方向键做唯一约束。因此 A 向 B 申请后，
+B 不能再并发创建一条反向 Pending 申请；接受或拒绝后，该约束中的生成列变为 `NULL`，
+后续仍可按业务规则发起新申请。
 
 ### 15.2 为什么根据 username 添加仍要转换为 user_id
 
@@ -1381,6 +1475,10 @@ flowchart LR
 
 Prometheus 负责“整体是否异常”，Tracing 负责“某一次请求慢在哪里”，日志负责“具体发生了什么”。
 
+当前 span 覆盖 Gateway 请求入口、MessageService 发送路径和 PushService Kafka 消费。
+导出器只支持 OTLP/HTTP JSON：没有完整 SDK 的自动插桩、baggage、采样策略，也没有
+导出链路自身的 TLS 支持，因此不能把“兼容 OTLP”描述成完整 OpenTelemetry 集成。
+
 ### 16.6 管理服务
 
 AdminService 可查询：
@@ -1395,6 +1493,10 @@ AdminService 可查询：
 - 配置检查。
 
 Admin 审计当前是进程内存数据，不是持久化审计数据库。这是必须如实说明的边界。
+
+仓库中的开发配置默认不提供 Admin Token，因此 Admin RPC 会拒绝请求，直到本地或
+生产配置写入带 scope 的 Token 哈希。原始 Token 只通过 `x-nebula-admin-token` metadata
+发送，不写入配置文件。
 
 ---
 
@@ -1418,13 +1520,33 @@ ctest --test-dir build --output-on-failure
 
 - 单元测试：Codec、Buffer、ID、工具类；
 - 集成测试：MySQL、Redis、Kafka、DAO 和服务交互；
-- E2E：注册、登录、好友、发送、推送、ACK、历史；
+- E2E：跨服务验证完整消息闭环；
 - 健康检查：部署后端口和依赖可用；
 - 压测：连接数、QPS、P50/P90/P99。
 
 “编译通过”不等于消息链路正确。“接口 200”也不等于 ACK、离线和重复消费正确。
 
-### 17.3 Docker Compose 的职责
+当前 GitHub Actions 会启动 MySQL、Redis 和 Kafka，执行迁移与 topic 初始化，构建后
+先跑 unit label，再启动全部服务运行 integration label 和完整 E2E。CI 还会检查 JUnit
+结果，集成用例被跳过也会判为失败。E2E 覆盖注册、登录、好友申请、消息事务、
+Outbox、Push、ACK、已读、撤回和会话视图。
+
+### 17.3 真实协议基准程序
+
+`benchmark/` 中的程序不是只测空函数，而是生成真实 Gateway 流量：
+
+| 程序 | 路径 |
+|---|---|
+| `bench_tcp_connections` | TCP 建连与保持 |
+| `bench_gateway_login` | WebSocket 握手、注册准备和登录响应 |
+| `bench_single_message` | 登录后发送单聊并等待发送响应 |
+| `bench_group_message` | 建群/入群准备后发送群消息 |
+| `bench_push_e2e` | 单聊发送到接收方收到 `PUSH_MSG` |
+
+输出包含成功/失败数、QPS、平均值、P50、P90、P99 和最大延迟。发布容量结论前必须记录
+CPU、内存、内核、编译模式和中间件配置，并在同一构建上通过健康检查与 E2E。
+
+### 17.4 Docker Compose 的职责
 
 Docker 运行依赖：
 
@@ -1437,7 +1559,10 @@ Docker 运行依赖：
 
 后端 C++ 服务在生产主机由 systemd 管理。这样可分别控制依赖容器和服务进程。
 
-### 17.4 systemd
+Prometheus 和 Grafana 使用 host network，以便抓取只监听 `127.0.0.1:9100..9107` 的
+C++ metrics endpoint；这些监控端口不需要为了容器抓取而发布到公网。
+
+### 17.5 systemd
 
 典型生产目录：
 
@@ -1459,13 +1584,16 @@ systemd 负责：
 
 `LimitNOFILE=1048576` 只是提高 fd 上限，不代表系统已经能承载一百万连接。实际容量还受内存、每连接 Buffer、内核参数和业务负载影响。
 
-### 17.5 就绪检查
+### 17.6 就绪检查
 
 只检查 TCP 端口开放不够。例如 MySQL 端口打开但查询失败，服务仍不可用。
 
 当前 `wait_ready.sh` 在客户端可用时执行真实 `SELECT 1`，比仅测试端口更接近 readiness。
 
-### 17.6 优雅停止
+完整 `health_check.sh` 还会检查 Redis PING、Kafka metadata、Outbox pending/dead、服务端口
+以及可用时的 systemd 状态。服务启动顺序不能替代依赖就绪。
+
+### 17.7 优雅停止
 
 服务处理 `SIGTERM/SIGINT`：
 
@@ -1482,7 +1610,7 @@ systemd 负责：
 - 未 flush 的 producer；
 - 悬空连接和资源泄漏。
 
-### 17.7 观测组件端口
+### 17.8 观测组件端口
 
 | 组件 | 默认端口 |
 |---|---:|
@@ -1499,9 +1627,11 @@ systemd 负责：
 
 ### 18.1 当前合理但有上限的设计
 
-**单 Redis 连接加互斥锁**
+**单 Redis 连接和单在线状态 Worker**
 
-实现简单且线程安全，但高并发下所有 Redis 请求被串行化。可演进为连接池或每 Worker 独立连接。
+`RedisClient` 用互斥锁保护一条 hiredis 连接，心跳/下线更新还经过一个有界单线程
+Worker。实现简单且线程安全，但高并发时会串行化；在线 Key 已过期后，心跳也不会
+自动重建映射。
 
 **群聊写扩散**
 
@@ -1515,132 +1645,31 @@ systemd 负责：
 
 当前有 resolver 抽象，但生产仍主要依赖配置。多实例自动发现、健康摘除和负载均衡可继续完善。
 
-**轻量 tracing**
+**多设备投递完成条件**
 
-已经有上下文传播和 OTLP 钩子，但不是完整 OpenTelemetry SDK 集成。
+当前会尝试所有在线设备，但一台成功就认为该用户处理成功。若产品需要每台设备都有
+独立送达保证，还需要设备级重试、receipt 和离线状态。
 
 ### 18.2 当前没有实现的能力
 
 - 端到端消息加密；
 - 多地域复制和故障切换；
 - Kubernetes Operator；
-- 分布式持久化 Admin 审计；
+- 分布式服务发现后端；
+- 身份提供方支持的 Admin RBAC 和持久化审计；
 - 超大群专用消息扩散；
+- 原生 gRPC async completion queue 客户端；
+- 完整 OpenTelemetry SDK 语义；
+- 全文消息搜索和高级数据保留治理；
 - 自动分库分表。
-
-准确说明边界比声称“生产级所以什么都有”更可信。
 
 ### 18.3 可执行的演进顺序
 
 1. 先用指标确认瓶颈，而不是先做复杂架构；
-2. 为 Redis 和 DAO 增加连接池与批量接口；
+2. 把 Redis 改为连接池或每 Worker 独立连接，并为用户资料补全增加批量 DAO 接口；
 3. 完善服务发现和多实例路由；
-4. 按群规模拆分 fanout 策略；
-5. 接入完整 OpenTelemetry；
-6. 增加故障注入和恢复测试；
-7. 评估数据分片、多地域和合规需求。
-
----
-
-## 19. 常见项目问题与回答框架
-
-### 19.1 为什么使用 C++ 和 Reactor
-
-回答结构：
-
-1. IM Gateway 维护大量长连接；
-2. 连接多数时间空闲，适合事件驱动；
-3. C++ 可以直接控制 epoll、Buffer、对象生命周期和线程归属；
-4. 主从 Reactor 利用多核，连接固定在线程中减少锁；
-5. 阻塞业务通过 RpcExecutor 移出 I/O 线程。
-
-### 19.2 一条消息如何到达接收方
-
-```text
-客户端
--> Gateway/Bridge
--> MessageService
--> MySQL messages + outbox
--> OutboxWorker
--> Kafka
--> PushService
--> Redis 在线定位
--> GatewayService
--> PUSH_MSG
--> 客户端 ACK
-```
-
-随后补充：发送响应只表示持久化成功；ACK 和 read 是后续状态。
-
-### 19.3 如何解决粘包和半包
-
-关键点：
-
-- TCP 是字节流；
-- 16 字节固定头包含 body_length；
-- Buffer 不够完整包时不消费；
-- 完整后按长度提取；
-- while 循环处理粘包；
-- 最大 Body 限制防止恶意长度。
-
-### 19.4 如何保证消息不丢
-
-不要回答“Kafka 不会丢”。
-
-正确层次：
-
-- 消息和 Outbox 同事务，避免数据库/Kafka 双写窗口；
-- Worker 等 delivery callback；
-- Kafka 消费成功后手动 commit；
-- 在线失败进入 retry、DLQ 或离线；
-- 客户端 ACK；
-- 仍是 at-least-once，因此依靠幂等去重。
-
-### 19.5 如何处理重复消息
-
-- 客户端每次发送带稳定 `client_sequence_id`；
-- Redis 先查快速去重；
-- MySQL 唯一键 `(from_user_id, client_sequence_id)` 最终兜底；
-- Kafka 可能重复投递；
-- 客户端按 `message_id` 合并；
-- ACK、已读和离线状态更新都是幂等。
-
-### 19.6 如何保证顺序
-
-- 同一会话 Kafka key 为 conversation_id；
-- 同 key 进入同一 partition；
-- partition 内有序；
-- 历史按 `(created_at, message_id)` 排序；
-- 不声称跨会话全局有序；
-- 重试和多分区场景仍需稳定 ID 与客户端排序。
-
-### 19.7 为什么未读数不能直接清零
-
-打开会话与新消息可能并发。请求带最后可见 `up_to_message_id`，只标记游标之前消息，然后重新计算游标之后未读，避免误清新消息。
-
-### 19.8 Redis 在线状态为什么需要 TTL
-
-Gateway 可能崩溃，无法主动清理。TTL 让陈旧状态最终消失。心跳续期，正常断开主动删，TTL 负责故障兜底。
-
-### 19.9 为什么浏览器端 ID 用字符串
-
-C++ `uint64_t` 精确，但 JavaScript number 只有 53 位整数精度。Snowflake ID 必须在 Protobuf 和 JSON 两条路径都保持字符串，并配置 long.js，否则实时消息和历史消息无法按 ID 去重。
-
-### 19.10 如果 Kafka 已发布但 Outbox 状态没更新怎么办
-
-Worker 会再次发布，所以产生重复事件。这正是 at-least-once。下游用稳定 message_id 保持幂等，不能把 Outbox 误称为 exactly-once。
-
-### 19.11 如果 PushService 写给客户端后 commit offset 失败怎么办
-
-消息可能再次消费并推送。客户端按 message_id 去重并重复 ACK，服务端 ACK upsert 保持幂等。
-
-### 19.12 系统当前最值得优化哪里
-
-应结合指标回答，而不是泛泛说“上 Kubernetes”：
-
-- Redis 单连接串行化；
-- 好友/成员资料 N+1；
-- 大群写扩散；
-- 静态服务发现；
-- Admin 审计持久化；
-- 更完整的分布式追踪和故障注入。
+4. 让设备级投递和离线落库失败能够独立重试并向 Kafka 处理结果传播；
+5. 按群规模拆分 fanout 策略；
+6. 评估原生异步 gRPC 与完整 OpenTelemetry SDK；
+7. 增加故障注入和恢复测试；
+8. 评估数据分片、多地域和合规需求。

@@ -89,12 +89,5 @@
     "slug": "jvm_notes",
     "description": "JVM复习笔记",
     "descriptionEn": "JVM review notes."
-  },
-  {
-    "title": "Hello World",
-    "titleEn": "Hello World",
-    "slug": "hello-world",
-    "description": "我的第一篇博客文章。",
-    "descriptionEn": "My first blog post."
   }
 ]
