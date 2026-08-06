@@ -1,6 +1,8 @@
 # 数据库
 
-# 1. Mindmap
+# 1. MySQL / InnoDB 全链路总览
+
+## 1.1 一条 SQL 的主路径
 
 ```mermaid
 flowchart LR
@@ -16,6 +18,53 @@ flowchart LR
     J --> K[缓存更新或失效]
     K --> L[返回结果]
 ```
+
+## 1.2 Server 层与 InnoDB 架构
+
+```mermaid
+flowchart TB
+    CLIENT["客户端 / 应用"] --> CONNECTOR["连接器<br/>认证 · 权限 · 会话"]
+
+    subgraph SERVER["MySQL Server 层"]
+        direction LR
+        CONNECTOR --> PARSER["解析器"]
+        PARSER --> OPTIMIZER["优化器<br/>选择索引与执行计划"]
+        OPTIMIZER --> EXECUTOR["执行器"]
+        EXECUTOR --> COMMIT["提交协调<br/>redo prepare → binlog → redo commit"]
+        EXECUTOR -.-> BINCACHE["binlog cache<br/>记录逻辑变更事件"]
+    end
+
+    subgraph ENGINE["InnoDB 存储引擎"]
+        direction LR
+        EXECUTOR --> HANDLER["Handler 接口"]
+        HANDLER --> INDEX["B+ 树索引访问<br/>聚簇索引 · 二级索引"]
+        INDEX --> BP["Buffer Pool<br/>索引页 · 数据页 · undo 页"]
+        HANDLER --> TRX["事务系统<br/>MVCC · 锁"]
+        TRX --> UNDO["undo log<br/>回滚 · 历史版本"]
+        TRX --> REDOBUF["redo log buffer<br/>记录页修改"]
+        UNDO --> BP
+    end
+
+    subgraph STORAGE["持久化存储"]
+        direction LR
+        DATA["表空间文件<br/>B+ 树页与行数据"]
+        UNDOFILE["undo 表空间"]
+        REDOFILE["redo 日志文件"]
+        BINLOGFILE["binlog 文件"]
+    end
+
+    DATA -->|"缺页读取"| BP
+    BP -->|"后台刷脏页 / checkpoint"| DATA
+    BP <-->|"undo 页读写"| UNDOFILE
+    REDOBUF -->|"write / fsync"| REDOFILE
+    BINCACHE -->|"write / fsync"| BINLOGFILE
+    COMMIT -.-> REDOBUF
+    COMMIT --> BINCACHE
+```
+
+- 读取路径：执行器通过 Handler 按 B+ 树查找索引页；页命中 Buffer Pool 时直接读取，否则从表空间载入。
+- 更新路径：事务系统生成 undo 以支持回滚和 MVCC，修改 Buffer Pool 中的页，同时把页修改写入 redo log buffer。
+- 提交路径：Server 层以两阶段提交协调 InnoDB redo 与 binlog；事务提交不要求数据页立即刷盘，脏页可由后台线程稍后写回。
 
 # 2. SQL 与关系模型：从 CRUD 到组合查询
 
@@ -1526,10 +1575,10 @@ Next-Key Lock 可视为：
 
 ```mermaid
 flowchart LR
-    A[10] --> B[(10,20] 被锁定]
-    B --> C[20]
-    C --> D[(20,30]]
-    D --> E[30]
+    K10["记录 10"] --> G1["锁定的间隙 (10, 20)"]
+    G1 --> K20["锁定的记录 20"]
+    K20 --> G2["未锁定的间隙 (20, 30)"]
+    G2 --> K30["记录 30"]
 ```
 
 实际加锁范围会受到：
