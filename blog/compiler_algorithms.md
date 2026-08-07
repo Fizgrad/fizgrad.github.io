@@ -15,6 +15,9 @@
 | 张量布局 | 多维索引映射 | Affine Map、Stride、整数约束 |
 | 算子融合 | 依赖图与成本权衡 | DAG Partition、Cost Model |
 | Buffer 复用 | 生命周期冲突 | Interval Allocation、Coloring |
+| GPU Kernel 映射 | 层次化并行索引空间 | Tiling、Grid/Workgroup Mapping、Predication |
+| GPU Memory Promotion | 跨存储层的数据复用 | Cooperative Copy、Barrier、Double Buffering |
+| 矩阵指令选择 | Tile、Layout 与数据类型约束 | MMA Matching、Layout Conversion、Fallback |
 | 并行归约 | 结合运算 | Tree Reduction、Scan |
 | 自动调优 | 离散搜索空间 | 枚举、剪枝、贝叶斯或学习模型 |
 
@@ -1513,9 +1516,295 @@ Occupancy 受每 block 线程数、寄存器、shared memory 和硬件上限共�
 
 ---
 
-# 13. Fusion、内存规划与 Buffer Reuse
+# 13. GPU 编译：从循环到 Kernel
 
-## 13.1 为什么做算子融合
+GPU 编译器的核心任务不是把一个函数换成 GPU 指令，而是逐步回答以下问题：
+
+1. 哪些迭代可以并行；
+2. 每层并行工作映射到哪个硬件层级；
+3. 数据放在哪个 memory space，何时搬运和复用；
+4. 哪些线程需要同步；
+5. 是否使用向量指令、MMA 或库函数；
+6. 资源用量是否允许足够多的 workgroup 同时驻留；
+7. 动态 shape 和边界 tile 如何保持正确。
+
+这些选择互相耦合：更大的 tile 可能增加数据复用，却也会消耗更多 shared memory 和寄存器；更深的软件流水可能隐藏访存延迟，却可能降低 occupancy。
+
+## 13.1 从高层算子到设备代码
+
+`matmul`、`softmax` 之类的高层算子没有直接规定线程数、内存层级或目标指令。一个典型的逐层降低过程是：
+
+```mermaid
+flowchart LR
+    GRAPH["Graph / Tensor IR<br/>matmul · softmax"] --> LOOP["Structured Loops<br/>shape · dependence"]
+    LOOP --> MAP["GPU Mapping<br/>grid · workgroup · subgroup"]
+    MAP --> MEMORY["Memory + Schedule<br/>promotion · barrier · pipeline"]
+    MEMORY --> TARGET["Target IR<br/>NVVM · ROCDL · SPIR-V"]
+    TARGET --> BINARY["Device Code<br/>PTX / cubin · AMD code object"]
+```
+
+这不是所有系统都必须照搬的固定 Pass 列表，而是信息逐渐具体化的方向：高层保留 shape、layout 和算子语义，低层逐渐固定线程映射、地址空间、同步和目标指令。
+
+[MLIR GPU dialect][mlir-gpu] 提供 `gpu.module`、`gpu.func`、线程/块 ID、barrier 和 GPU address space 等中层抽象，再根据目标降低到不同后端。常见路径可以概括为：
+
+| 目标 | 可能的中间路径 | 最终交给什么处理 |
+|---|---|---|
+| NVIDIA GPU | GPU/Vector → NVGPU → NVVM | LLVM NVPTX、PTX 工具链和驱动 |
+| AMD GPU | GPU/AMDGPU → ROCDL/LLVM | LLVM [AMDGPU 后端][llvm-amdgpu]和对应运行时 |
+| Khronos 生态 | 高层 IR → SPIR-V | Vulkan、OpenCL 等执行环境的驱动 |
+
+[NVGPU dialect][mlir-nvgpu] 位于较高层 GPU/Vector IR 与 NVVM 之间，可表达异步拷贝、MMA 和部分 NVIDIA 特定布局；[NVVM dialect][mlir-nvvm] 与 [ROCDL dialect][mlir-rocdl] 则更接近 LLVM intrinsic 和目标后端。[SPIR-V][spirv-spec] 是面向图形着色器和计算 Kernel 的标准二进制中间语言。框架名字会演进，但“逐步降低并保留每层需要的语义”这一设计不会改变。
+
+## 13.2 把循环映射到并行层级
+
+矩阵乘法最初可以表示为三层循环：
+
+```text
+for m in [0, M)
+  for n in [0, N)
+    for k in [0, K)
+      C[m, n] += A[m, k] * B[k, n]
+```
+
+GPU 映射通常先把输出空间分块，再继续划分每块内部的工作：
+
+```text
+Grid
+└── Workgroup / Thread Block：负责一个 BM × BN 的 C tile
+    └── Subgroup / Warp：负责一个 WM × WN 的子 tile
+        └── Thread / Lane：持有若干 A、B fragment 和 C accumulator
+```
+
+不同生态的术语可以这样对齐：
+
+| 通用层级 | CUDA | AMD/HIP | SPIR-V / MLIR GPU |
+|---|---|---|---|
+| 一次并行派发 | Grid / Kernel Launch | Grid / Kernel Launch | Dispatch / Grid |
+| 可协作线程组 | Thread Block / CTA | Workgroup | Workgroup |
+| 锁步或近似锁步的子组 | Warp | Wavefront | Subgroup |
+| 单个逻辑执行实例 | Thread | Work-item / Thread | Invocation / Thread |
+
+[CUDA Programming Guide][cuda-guide] 将 Kernel、thread block 和 device memory 放在异构 host/device 模型中定义；其他目标的准确 subgroup 大小和同步能力必须从目标信息取得，不能在通用 Pass 中把 warp 固定写成 32。
+
+编译器需要建立从逻辑下标到硬件 ID 的映射，例如：
+
+```text
+block_m = block_id.y * BM
+block_n = block_id.x * BN
+
+local_m = thread_id.y * TM
+local_n = thread_id.x * TN
+
+global_m = block_m + local_m
+global_n = block_n + local_n
+```
+
+一个合法映射至少满足：
+
+- 不同 workgroup 写入的输出区域不发生未定义竞争；
+- workgroup 内共享数据的生产者和消费者能用该层级支持的 barrier 同步；
+- subgroup 操作的参与线程和 mask 定义明确；
+- Grid 覆盖完整输出空间，边界线程不会越界；
+- 线程数、维度和动态 shared memory 不超过目标限制。
+
+映射不是简单的“并行化所有循环”。Reduction 轴通常需要线程协作或在每线程局部累加，带 loop-carried dependence 的轴则不能直接映射成互相独立的线程。
+
+## 13.3 Address Space 与 Memory Promotion
+
+不同平台名称不完全相同，但可先用目标无关的层次理解：
+
+| 语义 | CUDA 常见称呼 | AMD 常见称呼 | SPIR-V Storage Class |
+|---|---|---|---|
+| 设备范围、容量较大的存储 | Global Memory | Global Memory | `CrossWorkgroup` |
+| 一个 workgroup 内共享 | Shared Memory | LDS | `Workgroup` |
+| 单线程私有值 | Register / Local Memory | VGPR / Scratch | `Private` / `Function` |
+| 只读且执行期间不变 | Constant | Constant/只读全局区 | `UniformConstant` 等 |
+
+“私有”是可见性语义，不保证最终一定保存在物理寄存器里。寄存器压力过高时，数组或临时值可能 spill 到更慢的存储。
+
+Memory Promotion 把会被重复访问的 global-memory tile 暂存到 workgroup memory：
+
+```mermaid
+flowchart LR
+    GLOBAL["Global Memory<br/>A / B tiles"] -->|"协作、合并读取"| SHARED["Workgroup Memory<br/>Shared / LDS"]
+    SHARED -->|"每线程装载 fragment"| REGISTER["Registers"]
+    REGISTER --> COMPUTE["FMA / MMA"]
+    COMPUTE --> OUTPUT["Global Memory<br/>C tile"]
+```
+
+它不是把 `load` 换个地址空间就结束，而是一组保持依赖关系的变换：
+
+1. 为 tile 分配 workgroup memory；
+2. 让线程协作完成尽量连续、对齐的读取；
+3. 对越界位置填充 reduction 的单位元或使用 mask；
+4. 等待所有生产者完成；
+5. 从 workgroup memory 读取并计算；
+6. 下一轮覆盖同一缓冲区前，确认上一轮消费者已经完成。
+
+Tile layout 还要兼顾 global-memory coalescing、shared-memory bank 映射和 MMA fragment 要求。为了减少 bank conflict 加入的 padding 或 swizzle 会改变地址公式，因此必须作为显式 layout 传播，不能只保存在某个 Pass 的局部假设中。
+
+## 13.4 Barrier、Atomic 与 Convergent 语义
+
+GPU 同步至少要分清三个概念：
+
+| 机制 | 解决的问题 | 不自动提供什么 |
+|---|---|---|
+| Control barrier | 等待某个 scope 内的参与线程到达同步点 | 设备上所有 workgroup 的全局同步 |
+| Memory barrier / fence | 约束指定 scope 和 memory space 的可见性与重排 | 多线程同时写同一位置的原子性 |
+| Atomic operation | 对单个位置执行不可分割的读改写 | 任意其他内存访问的完整顺序 |
+
+这张表区分的是语义，不代表每种 API 只承担一项职责。例如 CUDA `__syncthreads()` 同时包含 block 级控制同步和相应的内存可见性保证；编译器降低时仍要分别保留参与线程、scope 和 memory-order 约束。
+
+下面的模式可能让部分线程跳过 block barrier：
+
+```cpp
+if (global_index < size) {
+    shared[threadIdx.x] = input[global_index];
+    __syncthreads();  // condition 在整个 block 内不一致时不安全
+    consume(shared);
+}
+```
+
+更稳妥的结构是让所有线程到达 barrier，只对访存和结果提交使用 predicate：
+
+```cpp
+const bool active = global_index < size;
+shared[threadIdx.x] = active ? input[global_index] : 0.0F;
+__syncthreads();
+
+if (active) consume(shared);
+```
+
+实际合法性仍取决于后续是否还有 barrier、哪些线程读取哪些位置，以及所用 API 的精确定义。workgroup barrier 通常不能同步不同 workgroup；需要全设备依赖时，应使用 Kernel 边界、受约束的 cooperative launch，或把依赖交给运行时事件图表达。
+
+编译器也不能把普通 CPU 优化规则直接套到 barrier 和 subgroup 操作上。它必须保留参与线程集合和动态同步实例。[LLVM convergent semantics][llvm-convergence] 正是为了约束这类可能在线程之间通信的操作，防止不合法的复制、推测执行或控制流移动。
+
+## 13.5 MMA 与 Tensor Core Lowering
+
+矩阵指令通常一次计算固定形状的乘加：
+
+```text
+D[m, n] = A[m, k] × B[k, n] + C[m, n]
+```
+
+这里用 MMA 统称矩阵乘加能力；具体目标可能提供 NVIDIA MMA/WGMMA、AMD MFMA/WMMA 或其他矩阵指令，它们支持的 shape、lane 分布和同步规则并不相同。
+
+能否选成 MMA，不只取决于源码里出现了矩阵乘法。编译器需要同时匹配：
+
+- A、B、Accumulator 和结果的数据类型；
+- 指令支持的 `m × n × k` shape；
+- 行主序、列主序、转置和 leading dimension；
+- operand 在各 lane 中的 fragment 分布；
+- 地址对齐和允许的 memory space；
+- reduction K 是否满足分块要求；
+- 尾块能否 padding、mask 或回退；
+- mixed precision、舍入、饱和和 fast-math 语义。
+
+一个常见层级是：
+
+```text
+Block Tile
+  └── Subgroup / Warp MMA Tile
+       └── 每个 Lane 持有分布式 A/B fragment 与部分 accumulator
+```
+
+Fragment 的寄存器布局通常是目标相关的，不应作为跨目标稳定 ABI。高层 IR 可以保留抽象 tile 和 layout，接近后端时再选择具体 MMA 形式；条件不满足时回退到向量 FMA、标量代码或经过验证的库 Kernel。强行使用矩阵指令可能因 layout conversion、padding 或低利用率而更慢。
+
+## 13.6 Async Copy 与 Software Pipeline
+
+普通 tiled Kernel 的每轮 K tile 可能按“读取完成后再计算”的顺序执行。双缓冲把下一 tile 的搬运和当前 tile 的计算重叠：
+
+```text
+Prologue:
+    async_copy(tile 0 → buffer 0)
+
+Steady State:
+    wait(buffer current)
+    async_copy(tile next → buffer next)
+    compute(buffer current)
+    release(buffer current)
+    swap(current, next)
+
+Epilogue:
+    等待并消费剩余 stage
+```
+
+这和指令调度中的 software pipelining 是同一种思想：把不同迭代的 load、compute 和 store 交错，使延迟被其他工作覆盖。[CUDA pipelines][cuda-pipelines] 用有限 stage 协调 producer/consumer；MLIR NVGPU 也提供 async copy、group 和 wait 等操作，但其他目标可以采用不同指令与同步机制。
+
+流水级数不是越深越好：
+
+```text
+workgroup memory ≈ stages × bytes_per_tile
+```
+
+更多 stage 会占用更多 shared memory，延长部分值的 live range，并可能增加寄存器压力、降低 resident workgroup 数量。编译器必须正确生成 prologue、steady state 和 epilogue，保证缓冲区在异步写完成前不被读取、在消费完成前不被覆盖。
+
+## 13.7 尾块、Predicate 与动态 Shape
+
+当 `M`、`N` 或 `K` 不是 tile 大小的整数倍时，最后一个 workgroup 只覆盖部分有效元素。常见策略包括：
+
+- masked load：越界 lane 读取零或 reduction 单位元；
+- masked store：只写有效输出；
+- padding：调用前把维度补齐，换取更简单的 Kernel；
+- loop remainder：主循环走完整 tile，尾部走单独路径；
+- versioning：对常见对齐 shape 生成 fast path，其余走通用版本。
+
+Predicate 必须覆盖地址计算和实际访存，不能先形成越界指针或执行越界 vector load，再指望结果不被使用。对于协作式 tile，inactive 线程通常仍要参与 barrier，只是不提交无效数据。
+
+动态 shape 还会影响：
+
+- Grid 和 workgroup 数量计算；
+- shared-memory 大小；
+- vector width 与对齐证明；
+- MMA shape 可用性；
+- autotuning cache key；
+- 是否需要 runtime guard 和重新编译。
+
+## 13.8 先判断可行，再比较收益
+
+一个候选配置首先必须满足目标资源约束。Resident workgroup 数量的粗略上界可写成：
+
+```text
+resident_workgroups <= min(
+    thread_budget / threads_per_workgroup,
+    register_budget / registers_per_workgroup,
+    workgroup_memory_budget / bytes_per_workgroup,
+    architectural_workgroup_limit
+)
+```
+
+真实硬件还存在分配粒度、subgroup 整数倍、保留资源和架构特定限制，不能把这个式子当作精确 occupancy 计算器。编译器或 autotuner 通常按以下顺序处理：
+
+1. 删除线程数、地址空间、同步或指令 shape 不合法的候选；
+2. 估计寄存器、workgroup memory 和驻留数量；
+3. 结合 Roofline、指令吞吐和数据复用估计收益；
+4. 对少量候选生成代码并在目标硬件测量。
+
+这也解释了为什么上一章强调 occupancy 不是最终目标：降低 occupancy 的大 tile 可能因显著增加数据复用而更快，高 occupancy 的小 tile 也可能一直受内存带宽限制。
+
+## 13.9 一个 GEMM 的完整变换清单
+
+把前面的内容串起来，一个由编译器生成的 GEMM Kernel 可以依次经历：
+
+| 阶段 | 主要决策 | 必须验证 |
+|---|---|---|
+| Shape 与 Layout 推导 | `M/N/K`、stride、transpose | 维度兼容、地址计算不溢出 |
+| Tiling | `BM/BN/BK`、warp/thread tile | 依赖合法、边界策略存在 |
+| 并行映射 | block、subgroup、lane 分工 | 无跨 block 未同步依赖 |
+| Memory Promotion | A/B tile 进入 shared/LDS | 容量、alignment、barrier 正确 |
+| Layout 变换 | padding、swizzle、fragment 分布 | coalescing、bank 与 MMA 约束 |
+| Pipeline | stage 数、async copy、wait | buffer 生命周期和尾部 drain |
+| 指令选择 | vector FMA、MMA 或库 Kernel | dtype、shape、数值语义匹配 |
+| Target Lowering | NVVM、ROCDL 或 SPIR-V | address space、ABI、metadata 正确 |
+| 验证与调优 | 差分测试、profile、搜索 | 正确性阈值和测量口径稳定 |
+
+高质量 GPU 编译器并不是靠某一个神奇 Pass 获得性能，而是让这些选择在同一套依赖、布局、资源和数值语义约束下保持一致。
+
+---
+
+# 14. Fusion、内存规划与 Buffer Reuse
+
+## 14.1 为什么做算子融合
 
 假设：
 
@@ -1531,7 +1820,7 @@ Y = T * C
 - 中间 buffer 容量；
 - producer/consumer 之间的同步。
 
-## 13.2 Fusion 不是越多越好
+## 14.2 Fusion 不是越多越好
 
 过度融合可能导致：
 
@@ -1546,7 +1835,7 @@ Y = T * C
 
 因此 fusion 同时是 legality 与 profitability 问题。
 
-## 13.3 Fusion Legality
+## 14.3 Fusion Legality
 
 至少检查：
 
@@ -1559,7 +1848,7 @@ Y = T * C
 - device/stream/collective 边界；
 - 浮点重排是否被语义允许。
 
-## 13.4 张量生命周期
+## 14.4 张量生命周期
 
 对按执行顺序线性化的算子图，可以估计每个中间 buffer：
 
@@ -1579,7 +1868,7 @@ size  = shape * element_size（考虑 padding/alignment）
 - 容量不同使问题变成 variable-size allocation；
 - dynamic shape 使 size 可能只能运行时确定。
 
-## 13.5 Greedy Memory Planning
+## 14.5 Greedy Memory Planning
 
 一种简单策略：
 
@@ -1599,7 +1888,7 @@ size  = shape * element_size（考虑 padding/alignment）
 
 这些目标并不总是一致。
 
-## 13.6 In-place 与 Alias
+## 14.6 In-place 与 Alias
 
 `relu(x)` 看起来可以原地覆盖 x，但必须证明：
 
@@ -1612,7 +1901,7 @@ size  = shape * element_size（考虑 padding/alignment）
 
 引用计数为 1 只是一个线索，不是完整的 alias 和时序证明。
 
-## 13.7 静态与动态内存规划
+## 14.7 静态与动态内存规划
 
 - 完全静态 shape：编译期可给每个 buffer 固定 offset；
 - 有上界的动态 shape：按上界预留，简单但可能浪费；
@@ -1622,9 +1911,9 @@ size  = shape * element_size（考虑 padding/alignment）
 
 ---
 
-# 14. CPU 缓存、SIMD 与数据布局
+# 15. CPU 缓存、SIMD 与数据布局
 
-## 14.1 Big O 之外的成本
+## 15.1 Big O 之外的成本
 
 对相同的 `O(n)` 扫描，主要差异可能来自：
 
@@ -1639,7 +1928,7 @@ size  = shape * element_size（考虑 padding/alignment）
 
 优化顺序应是：先测量瓶颈，再判断是算法、数据布局、指令还是并行问题。
 
-## 14.2 AoS 与 SoA
+## 15.2 AoS 与 SoA
 
 ```cpp
 struct ParticleAoS {
@@ -1657,7 +1946,7 @@ struct ParticlesSoA {
 
 AoSoA 按 SIMD 宽度分块，可以兼顾对象分组与向量化。
 
-## 14.3 Cache Blocking
+## 15.3 Cache Blocking
 
 矩阵 tiling 是 cache blocking 的典型案例。类似思想也用于：
 
@@ -1669,7 +1958,7 @@ AoSoA 按 SIMD 宽度分块，可以兼顾对象分组与向量化。
 
 目标是让工作集在被驱逐前尽可能多次复用，而不是简单“循环层数越多越快”。
 
-## 14.4 SIMD 的前提
+## 15.4 SIMD 的前提
 
 自动向量化需要编译器证明：
 
@@ -1682,7 +1971,7 @@ AoSoA 按 SIMD 宽度分块，可以兼顾对象分组与向量化。
 
 C 中的 `restrict` 或 C++ 的别名分析信息可以帮助，但错误承诺无别名会导致未定义行为。
 
-## 14.5 Alignment
+## 15.5 Alignment
 
 对齐可能影响：
 
@@ -1693,7 +1982,7 @@ C 中的 `restrict` 或 C++ 的别名分析信息可以帮助，但错误承诺�
 
 不能为了对齐直接把任意指针向下取整后解引用；必须保证分配范围、对象生命周期和类型别名规则均合法。
 
-## 14.6 False Sharing
+## 15.6 False Sharing
 
 不同线程写不同变量，如果变量落在同一 cache line，缓存一致性仍会让该行来回迁移。
 
@@ -1706,7 +1995,7 @@ C 中的 `restrict` 或 C++ 的别名分析信息可以帮助，但错误承诺�
 
 Padding 会增加内存占用和 cache footprint，只应对测量确认的热点使用。
 
-## 14.7 NUMA
+## 15.7 NUMA
 
 多 socket 系统中，访问本地 NUMA node 内存通常比远端更低延迟、更高带宽。需要考虑：
 
@@ -1718,7 +2007,7 @@ Padding 会增加内存占用和 cache footprint，只应对测量确认的热�
 
 只增加线程数可能让性能下降，因为瓶颈从计算变成远端访存或带宽竞争。
 
-## 14.8 分支与 Branchless
+## 15.8 分支与 Branchless
 
 Branchless 写法不是天然更快：
 
@@ -1731,9 +2020,9 @@ Branchless 写法不是天然更快：
 
 ---
 
-# 15. 搜索、Cost Model 与自动调优
+# 16. 搜索、Cost Model 与自动调优
 
-## 15.1 为什么需要 Cost Model
+## 16.1 为什么需要 Cost Model
 
 同一个合法变换可能有很多参数：
 
@@ -1756,7 +2045,7 @@ fusion boundary
 - autotuner 搜索剩余空间；
 - cache 编译结果与测量结果。
 
-## 15.2 Matrix Chain DP
+## 16.2 Matrix Chain DP
 
 矩阵连乘的结合顺序会改变运算量：
 
@@ -1829,7 +2118,7 @@ matrix_chain_cost(const std::vector<unsigned long long>& dimensions) {
 
 真实 AI Compiler 不能只看 FLOPs：中间张量大小、layout conversion、并行度、library kernel、fusion 和数值语义都会改变最优顺序。
 
-## 15.3 搜索策略
+## 16.3 搜索策略
 
 | 策略 | 优点 | 风险 |
 |---|---|---|
@@ -1841,7 +2130,7 @@ matrix_chain_cost(const std::vector<unsigned long long>& dimensions) {
 | Bayesian Optimization | 少量昂贵测量时有效 | 高维离散约束较难 |
 | Learned Cost Model | 推理快、可泛化 | 分布漂移和训练数据偏差 |
 
-## 15.4 剪枝
+## 16.4 剪枝
 
 静态剪枝示例：
 
@@ -1854,7 +2143,7 @@ matrix_chain_cost(const std::vector<unsigned long long>& dimensions) {
 
 剪枝规则必须保守：错误删除合法优质配置会永久限制搜索上限。
 
-## 15.5 Cost Model 的误差
+## 16.5 Cost Model 的误差
 
 静态模型通常无法完整预测：
 
@@ -1868,7 +2157,7 @@ matrix_chain_cost(const std::vector<unsigned long long>& dimensions) {
 
 因此高质量系统通常结合静态分析与真实测量，并记录模型预测误差。
 
-## 15.6 Rewrite 与 E-graph
+## 16.6 Rewrite 与 E-graph
 
 局部 peephole rewrite 按固定顺序应用容易遇到 phase ordering：先做 A 可能错过 B，先做 B 又可能错过 A。
 
@@ -1887,9 +2176,9 @@ E-graph / equality saturation 的思路：
 
 ---
 
-# 16. 正确性验证与性能实验
+# 17. 正确性验证与性能实验
 
-## 16.1 先验证 Legality
+## 17.1 先验证 Legality
 
 每个优化 Pass 都应明确：
 
@@ -1901,7 +2190,7 @@ E-graph / equality saturation 的思路：
 
 “在测试样例上结果相同”不是语义证明。
 
-## 16.2 常见语义陷阱
+## 17.2 常见语义陷阱
 
 ### Integer
 
@@ -1937,7 +2226,7 @@ E-graph / equality saturation 的思路：
 - PHI incoming edge；
 - musttail、convergent、barrier 等特殊约束。
 
-## 16.3 测试层次
+## 17.3 测试层次
 
 - Unit test：单个算法和边界；
 - IR regression：输入 IR 与期望 pattern；
@@ -1950,7 +2239,7 @@ E-graph / equality saturation 的思路：
 
 LLVM 场景还应熟练最小复现、`FileCheck`、`llvm-lit`、`opt -verify-each` 和 pass pipeline 二分。详细工具背景可回到[LLVM 笔记的调试部分](post.html?slug=llvm_review#15-调试-llvm-pass)。
 
-## 16.4 差分测试的边界
+## 17.4 差分测试的边界
 
 随机输入比较优化前后结果很有用，但要避免：
 
@@ -1960,7 +2249,7 @@ LLVM 场景还应熟练最小复现、`FileCheck`、`llvm-lit`、`opt -verify-ea
 - 只覆盖很小值域，错过溢出；
 - reference implementation 与被测实现共享同一 bug。
 
-## 16.5 Benchmark 方法
+## 17.5 Benchmark 方法
 
 至少记录：
 
@@ -1975,7 +2264,7 @@ LLVM 场景还应熟练最小复现、`FileCheck`、`llvm-lit`、`opt -verify-ea
 
 只报告最快一次容易把噪声当成优化收益。
 
-## 16.6 GPU 计时陷阱
+## 17.6 GPU 计时陷阱
 
 Kernel launch 通常异步。Host 侧调用返回不代表 kernel 完成：
 
@@ -1985,7 +2274,7 @@ Kernel launch 通常异步。Host 侧调用返回不代表 kernel 完成：
 - 多 stream 时要明确 event 依赖；
 - 端到端延迟和单 kernel 延迟都应按目标分别报告。
 
-## 16.7 性能归因
+## 17.7 性能归因
 
 发现变快或变慢后继续回答：
 
@@ -1999,3 +2288,13 @@ Kernel launch 通常异步。Host 侧调用返回不代表 kernel 完成：
 - 负载是否从 compute-bound 变为 memory-bound？
 
 没有归因的 benchmark 很难指导下一次优化。
+
+[mlir-gpu]: https://mlir.llvm.org/docs/Dialects/GPU/
+[mlir-nvgpu]: https://mlir.llvm.org/docs/Dialects/NVGPU/
+[mlir-nvvm]: https://mlir.llvm.org/docs/Dialects/NVVMDialect/
+[mlir-rocdl]: https://mlir.llvm.org/docs/Dialects/ROCDLDialect/
+[llvm-amdgpu]: https://llvm.org/docs/AMDGPUUsage.html
+[spirv-spec]: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html
+[llvm-convergence]: https://llvm.org/docs/ConvergentOperations.html
+[cuda-guide]: https://docs.nvidia.com/cuda/cuda-programming-guide/
+[cuda-pipelines]: https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/pipelines.html
