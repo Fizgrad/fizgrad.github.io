@@ -35,11 +35,11 @@
     "descriptionEn": "Miscellaneous notes on computer networking fundamentals."
   },
   {
-    "title": "C++后端全景",
-    "titleEn": "C++ Backend Panorama",
+    "title": "C++ 后端服务开发教程",
+    "titleEn": "Building Production C++ Backend Services",
     "slug": "cpp_backend",
-    "description": "C++后端开发全景",
-    "descriptionEn": "A comprehensive overview of C++ backend development."
+    "description": "从一次 HTTP 请求出发，串联 CMake、异步 I/O、RPC、数据访问、测试、诊断和部署",
+    "descriptionEn": "From one HTTP request to CMake, async I/O, RPC, data access, testing, diagnostics, and deployment."
   },
   {
     "title": "LLVM而不是LLM",

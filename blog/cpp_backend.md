@@ -1,2513 +1,1627 @@
-# 1. C++ 后端技术栈全景
+# C++ 后端服务开发：从工程骨架到上线
 
-C++ 后端开发并不等于“会写 C++ 和 Socket”。完整的生产系统通常覆盖以下层次：
+一个可上线的 C++ 服务不只是 Socket、线程池和若干中间件名称。它必须把构建、依赖、接口、并发、数据一致性、超时、观测、测试和发布连成一条可验证的路径。
 
-```mermaid
-flowchart TB
-    A["业务与领域层<br/>订单 / 游戏逻辑 / 推荐 / 存储 / 风控"] --> B["服务框架层<br/>HTTP / RPC / 长连接 / 定时任务"]
-    B --> C["通信与协议层<br/>TCP / UDP / HTTP / HTTP2 / WebSocket / gRPC"]
-    C --> D["并发与运行时层<br/>线程池 / 协程 / Reactor / Future"]
-    D --> E["系统层<br/>Linux / epoll / 文件系统 / 内存 / 进程"]
-
-    A --> F["数据层<br/>MySQL / PostgreSQL / Redis / MongoDB"]
-    A --> G["消息层<br/>Kafka / RabbitMQ / Pulsar / RocketMQ"]
-    B --> H["服务治理<br/>注册发现 / 配置中心 / 限流 / 熔断"]
-
-    H --> I["基础设施<br/>Docker / Kubernetes / Service Mesh"]
-    F --> I
-    G --> I
-
-    I --> J["可观测性<br/>日志 / Metrics / Trace / Profiling"]
-    J --> K["运维与交付<br/>CI/CD / 灰度 / 回滚 / 告警"]
-```
-
-可以把它概括为六个核心能力：
-
-| 能力 | 需要解决的问题 |
-|---|---|
-| 编程语言能力 | 正确管理对象生命周期、资源、并发和错误 |
-| 系统能力 | 理解进程、线程、虚拟内存、文件与网络 I/O |
-| 网络服务能力 | 实现连接管理、协议解析、请求调度和超时处理 |
-| 分布式能力 | 处理服务发现、重试、幂等、一致性和故障 |
-| 工程能力 | 构建、测试、发布、监控、定位和回滚 |
-| 性能能力 | 找到 CPU、内存、锁、I/O 和网络瓶颈 |
-
----
-
-# 2. C++ 后端主要应用场景
-
-C++ 并不是所有后端业务的默认语言，但在以下场景中具有明显优势。
-
-## 2.1 高性能基础设施
-
-典型系统包括：
-
-- 数据库、缓存、搜索引擎与存储引擎
-- RPC 框架、代理、网关和负载均衡器
-- 消息系统、流处理引擎
-- 编译服务、模型推理服务
-- 操作系统、中间件和云基础设施组件
-
-这些系统通常重视：
-
-- 可预测的延迟
-- 内存布局和缓存局部性
-- 高并发网络 I/O
-- 对系统调用和硬件能力的直接控制
-- 较低的运行时开销
-
-## 2.2 游戏服务器与实时通信
-
-常见特征：
-
-- TCP、UDP、KCP、QUIC 或 WebSocket 长连接
-- 网关服、登录服、逻辑服、场景服、匹配服
-- 状态同步、帧同步、Tick 循环
-- AOI、房间、战斗实例和跨服通信
-- 对延迟、抖动、吞吐量和内存分配高度敏感
-
-## 2.3 微服务中的性能敏感服务
-
-一个大型系统可能同时使用 Java、Go、Python 和 C++。C++ 常被用于：
-
-- 高 QPS 核心链路
-- 算法与业务融合服务
-- 多媒体处理
-- 实时推荐与广告
-- 高频风控
-- 低延迟交易
-- CPU 密集型计算
-
-## 2.4 单体服务和传统行业系统
-
-C++ 也常出现在：
-
-- 通信设备后台
-- 工业控制后台
-- 金融柜台与行情系统
-- 音视频服务
-- 车联网与边缘计算
-- 嵌入式设备管理平台
-
----
-
-# 3. 语言与现代 C++ 基础
-
-当前 ISO C++ 标准是 C++23，但生产项目的实际基线通常取决于编译器、三方库、操作系统和历史代码。新项目常见 C++17 或 C++20，部分项目开始使用 C++23 特性。[ISO 标准页][cpp-standard]
-
-## 3.1 必须掌握的语言主题
-
-### 对象生命周期
-
-需要理解：
-
-- 自动存储期、静态存储期、动态存储期
-- 构造、析构、拷贝、移动
-- 临时对象与生命周期延长
-- RAII
-- Rule of Zero / Five
-- `std::move` 只是类型转换，不直接执行移动
-- 悬空引用、悬空指针和对象失效
-
-```cpp
-class File {
-public:
-    explicit File(const char* path)
-        : fp_(std::fopen(path, "rb")) {
-        if (!fp_) {
-            throw std::runtime_error("open failed");
-        }
-    }
-
-    ~File() {
-        if (fp_) {
-            std::fclose(fp_);
-        }
-    }
-
-    File(const File&) = delete;
-    File& operator=(const File&) = delete;
-
-private:
-    std::FILE* fp_;
-};
-```
-
-RAII 的核心不是“智能指针”，而是把资源释放绑定到对象析构，使异常路径和早退路径同样安全。
-
-## 3.2 智能指针
-
-| 类型 | 含义 | 常见用途 |
-|---|---|---|
-| `std::unique_ptr` | 独占所有权 | 默认动态对象所有权模型 |
-| `std::shared_ptr` | 共享所有权 | 确实存在共享生命周期时 |
-| `std::weak_ptr` | 非拥有观察者 | 打破 `shared_ptr` 循环引用 |
-| 裸指针 | 通常不表达所有权 | 观察、借用、与 C API 交互 |
-
-工程原则：
-
-- 默认使用值语义或 `unique_ptr`
-- 不要为了“省事”到处使用 `shared_ptr`
-- 明确区分 owning pointer 和 non-owning pointer
-- 注意跨线程对象生命周期
-- 注意异步回调捕获 `this` 的失效问题
-
-## 3.3 STL 与常用容器
-
-必须掌握：
-
-- `vector`、`deque`、`list`
-- `map`、`unordered_map`
-- `set`、`unordered_set`
-- `string`、`string_view`
-- `span`
-- `optional`、`variant`
-- `function`
-- 算法库与 ranges
-- 迭代器失效规则
-- 容器复杂度与内存特征
-
-后端开发中尤其需要关注：
-
-- `unordered_map` 的 rehash
-- `vector` 扩容导致的引用和指针失效
-- `string_view` 不拥有底层字符串
-- `std::function` 可能发生类型擦除和堆分配
-- 容器节点分配对性能和碎片的影响
-
-## 3.4 错误处理
-
-常见策略：
-
-| 策略 | 适用场景 |
-|---|---|
-| 异常 | 构造失败、不可局部恢复错误、库接口 |
-| 返回码 | 系统级接口、性能敏感路径、跨 ABI |
-| `std::optional` | 只有“有值/无值”两种结果 |
-| `std::expected` | 同时表达结果和结构化错误 |
-| 状态对象 | RPC、数据库、协议解析等复杂错误 |
-
-不要混淆：
-
-- 业务失败
-- 可重试错误
-- 参数错误
-- 资源不足
-- 数据损坏
-- 编程错误
-
-这些错误通常需要不同处理策略。
-
-## 3.5 模板与泛型编程
-
-后端工程中常见用途：
-
-- 序列化适配
-- 容器和算法抽象
-- 编译期注册
-- 类型安全接口
-- traits
-- CRTP
-- Concepts 与约束
-- 零开销抽象
-
-模板不应被用来制造无必要的复杂度。大型项目还要关注：
-
-- 编译时间
-- 二进制膨胀
-- 错误信息可读性
-- ABI 稳定性
-- 显式实例化
-
-## 3.6 ABI 与二进制兼容
-
-C++ 后端经常涉及动态库和跨模块调用，需要理解：
-
-- Name Mangling
-- vtable
-- RTTI
-- exception ABI
-- 标准库 ABI
-- 编译器版本兼容
-- Debug/Release 运行库差异
-- `-fvisibility`
-- PImpl
-- C ABI 边界
-
-跨团队公共 SDK 若要求稳定 ABI，通常会：
-
-- 暴露 C API
-- 使用 PImpl 隐藏实现
-- 避免跨边界传递 STL 类型
-- 固定编译器和运行库
-- 使用 RPC 代替进程内 ABI
-
----
-
-# 4. Linux 与系统编程
-
-Linux 是 C++ 后端最常见的运行环境。需要掌握的不只是命令，而是内核向用户态暴露的基本抽象。
-
-## 4.1 进程与线程
-
-核心知识：
-
-- `fork`、`exec`、`wait`
-- 进程地址空间
-- 线程共享资源
-- 上下文切换
-- 线程局部存储 TLS
-- 守护进程
-- 信号
-- 进程退出与僵尸进程
-- CPU affinity
-- 调度策略
-
-## 4.2 虚拟内存
-
-需要理解：
-
-- 虚拟地址与物理页
-- 页表和 TLB
-- 缺页异常
-- `mmap`
-- Copy-on-Write
-- RSS、VSS、PSS
-- 内存映射文件
-- 大页与透明大页
-- NUMA
-- swap
-- OOM Killer
-
-服务内存上涨不一定等于泄漏，可能来自：
-
-- allocator 缓存
-- 碎片
-- page cache
-- mmap 区域
-- 线程栈
-- 对象缓存
-- 内存池
-- 尚未归还操作系统的空闲页
-
-## 4.3 文件与 I/O
-
-核心接口：
-
-- `open`、`read`、`write`、`close`
-- `pread`、`pwrite`
-- `readv`、`writev`
-- `sendfile`
-- `mmap`
-- `fsync`、`fdatasync`
-- 文件锁
-- 非阻塞 I/O
-- direct I/O
-- page cache
-
-## 4.4 IPC
-
-常见进程间通信方式：
-
-| IPC | 特点 |
-|---|---|
-| Pipe | 简单、单机、父子进程常用 |
-| Unix Domain Socket | 本机 RPC，保留 Socket 编程模型 |
-| Shared Memory | 吞吐高，但同步和生命周期复杂 |
-| Message Queue | 内核或中间件管理消息 |
-| Signal | 轻量通知，不适合承载复杂数据 |
-| TCP Loopback | 跨语言、隔离好，但开销相对更高 |
-
-## 4.5 Linux 服务管理
-
-工程中常用：
-
-- systemd
-- cgroup
-- namespace
-- ulimit
-- core dump
-- `/proc`
-- `/sys`
-- journald
-- logrotate
-- cron / systemd timer
-
----
-
-# 5. 编译器、构建系统与依赖管理
-
-## 5.1 编译器
-
-主流选择：
-
-- GCC
-- Clang/LLVM
-- MSVC
-- Apple Clang
-
-需要理解：
-
-- 预处理、编译、汇编、链接
-- 静态库与动态库
-- 符号表与重定位
-- ELF
-- DWARF
-- LTO
-- PGO
-- Debug/Release
-- 优化等级
-- `rpath`、`RUNPATH`
-- `LD_LIBRARY_PATH`
-
-典型编译选项：
-
-```bash
--Wall -Wextra -Wpedantic
--Wconversion -Wshadow
--O2 -g
--fno-omit-frame-pointer
-```
-
-调试构建中常加入：
-
-```bash
--fsanitize=address,undefined
-```
-
-## 5.2 CMake
-
-CMake 是当前 C++ 工程中最常见的跨平台构建系统之一，可生成 Ninja、Makefile、Visual Studio 和 Xcode 工程。[CMake 文档][cmake]
-
-推荐使用现代 Target 模式：
-
-```cmake
-cmake_minimum_required(VERSION 3.25)
-project(order_service LANGUAGES CXX)
-
-add_executable(order_service
-    src/main.cpp
-    src/order_service.cpp
-)
-
-target_compile_features(order_service PRIVATE cxx_std_20)
-
-target_include_directories(order_service
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_link_libraries(order_service
-    PRIVATE
-        protobuf::libprotobuf
-        gRPC::grpc++
-)
-```
-
-避免：
-
-- 全局 `include_directories`
-- 全局 `link_directories`
-- 大量修改全局编译参数
-- 把依赖传递关系写成隐式状态
-- 在源码目录内构建
-
-## 5.3 Ninja 与 Make
-
-- **Ninja**：执行构建图，追求快速增量构建
-- **Make**：传统通用构建工具
-- **CMake**：生成构建系统，不直接等同于编译器
-
-常见组合：
-
-```text
-CMake + Ninja + GCC/Clang
-```
-
-## 5.4 Bazel
-
-Bazel 常用于：
-
-- 超大仓库
-- 多语言 Monorepo
-- 强调可重复构建
-- 需要远程缓存和远程执行
-- 生成代码较多的项目
-
-Bazel 官方为 C++ 提供专门的规则和教程。[Bazel C++ 文档][bazel]
-
-示例：
-
-```python
-cc_binary(
-    name = "server",
-    srcs = ["server.cc"],
-    deps = [
-        ":core",
-        "@com_google_protobuf//:protobuf",
-    ],
-)
-```
-
-## 5.5 依赖管理
-
-### Conan 2
-
-Conan 是跨平台 C/C++ 包管理器，可与 CMake 等构建系统集成。[Conan 文档][conan]
-
-适合：
-
-- 自建企业二进制仓库
-- 多编译器、多配置包管理
-- 管理库版本、编译选项和 ABI 组合
-- 发布内部 C++ SDK
-
-### vcpkg
-
-vcpkg 是 Microsoft 与社区维护的跨平台 C/C++ 包管理器。[vcpkg 文档][vcpkg]
-
-适合：
-
-- 快速获取开源依赖
-- CMake 工程
-- Windows/Linux/macOS 跨平台开发
-- Manifest 模式管理依赖
-
-### 其他方式
-
-- Git submodule
-- FetchContent
-- CPM.cmake
-- 系统包管理器：apt、dnf、yum
-- 源码 vendoring
-- 内部源码镜像
-
-## 5.6 常见工程目录
-
-```text
-project/
-├── CMakeLists.txt
-├── cmake/
-├── include/
-│   └── project/
-├── src/
-├── proto/
-├── tests/
-├── benchmarks/
-├── tools/
-├── configs/
-├── scripts/
-├── third_party/
-├── Dockerfile
-└── README.md
-```
-
----
-
-# 6. 网络编程与 I/O 模型
-
-## 6.1 TCP
-
-必须掌握：
-
-- 三次握手与四次挥手
-- 全双工字节流
-- 粘包与拆包
-- 半关闭
-- backlog
-- 滑动窗口
-- 拥塞控制
-- 重传
-- Nagle 算法
-- `TIME_WAIT`
-- `CLOSE_WAIT`
-- Keepalive
-- `SO_REUSEADDR`
-- `SO_REUSEPORT`
-- `TCP_NODELAY`
-
-TCP 没有消息边界。应用层必须自行定义：
-
-```text
-固定长度
-分隔符
-长度字段 + Payload
-TLV
-自描述序列化格式
-```
-
-典型长度前缀协议：
-
-```text
-+----------------+---------------------+
-| uint32 length  | payload             |
-+----------------+---------------------+
-```
-
-## 6.2 UDP
-
-特点：
-
-- 无连接
-- 保留报文边界
-- 不保证可靠、顺序或不重复
-- 延迟和协议控制空间较大
-
-常用于：
-
-- 游戏实时同步
-- 音视频
-- DNS
-- QUIC 底层传输
-- 监控数据
-- 局域网广播
-
-可靠 UDP 需要自行处理：
-
-- 序列号
-- ACK
-- 重传
-- 拥塞控制
-- 分片
-- 顺序
-- 去重
-
-## 6.3 HTTP
-
-需要掌握：
-
-- HTTP/1.1 Keep-Alive
-- 请求行、Header、Body
-- Chunked Encoding
-- 状态码
-- 幂等方法
-- Cookie
-- Cache-Control
-- 代理语义
-- HTTP/2 多路复用
-- HTTP/3 与 QUIC
-- TLS
-
-## 6.4 WebSocket
-
-适合：
-
-- 浏览器长连接
-- 即时消息
-- 在线协作
-- 推送
-- 游戏大厅与轻量实时交互
-
-WebSocket 建立在 HTTP Upgrade 之上，建立后使用帧协议进行双向通信。
-
-## 6.5 I/O 多路复用
-
-Linux 中常见：
-
-- `select`
-- `poll`
-- `epoll`
-- `io_uring`
-
-高并发网络服务常使用 `epoll` 或封装它的网络库。
-
-## 6.6 Reactor 模型
+本文用一个 `order-service` 贯穿这些环节：先把它当作一个接收 HTTP 请求的普通 C++ 网络程序，再逐步加入库存调用、数据持久化、异步消息和运行观测。示例采用 C++23、CMake、Ninja、Drogon、gRPC、Protocol Buffers、GoogleTest 和 OpenTelemetry；换用公司内部框架时，边界和排错方法仍然成立。
 
 ```mermaid
 flowchart LR
-    A["Socket 事件"] --> B["epoll_wait"]
-    B --> C["Event Loop"]
-    C --> D{"事件类型"}
-    D -->|Accept| E["建立连接"]
-    D -->|Readable| F["读取与协议解析"]
-    D -->|Writable| G["发送缓冲区"]
-    D -->|Timeout| H["定时器处理"]
-
-    F --> I["业务任务"]
-    I --> J["线程池 / 协程调度器"]
-    J --> K["生成响应"]
-    K --> G
+    CLIENT["客户端"] -->|"POST /v1/orders"| HTTP["HTTP Adapter<br/>Drogon"]
+    HTTP --> APP["OrderService<br/>校验与用例编排"]
+    APP -->|"Reserve"| GRPC["Inventory gRPC Client"]
+    APP --> REPO["OrderRepository"]
+    REPO --> DB["MySQL<br/>orders + outbox"]
+    DB --> PUB["Outbox Publisher"]
+    PUB --> MQ["Kafka / 消息系统"]
+    APP -.-> CACHE["Redis<br/>幂等与热点数据"]
+    HTTP -.-> OBS["Logs · Metrics · Traces"]
+    APP -.-> OBS
+    GRPC -.-> OBS
+    REPO -.-> OBS
 ```
 
-Reactor 的核心思想：
+语言、内核和数据库原理不在这里重复展开。需要补齐细节时可直接转到：
 
-1. 一个或多个事件循环等待 I/O 就绪。
-2. 事件到达后分派给对应处理器。
-3. 耗时业务不得长时间阻塞 I/O 线程。
-4. 写操作通常经发送缓冲区异步完成。
+- [C++ 语言与工程基础](post.html?slug=cpp_review)
+- [Linux 系统基础](post.html?slug=os_review)
+- [计算机网络](post.html?slug=Network)
+- [数据库与缓存](post.html?slug=database)
+- [NebulaIM 后端实现](post.html?slug=nebula)
 
-## 6.7 Proactor 与 io_uring
+# 阅读起点：把陌生概念放进一次请求
 
-Reactor 通常处理“操作已就绪”；Proactor 更接近“操作已完成”。
+先不用记框架名称。对熟悉 C++、操作系统和计算机网络的读者，一个后端服务仍然是监听端口、收发字节、调度任务和管理资源的进程。框架只是在这些能力上增加 HTTP 解析、路由、序列化和生命周期管理。
 
-`io_uring` 可以用于：
+例如客户端发送：
 
-- 异步文件 I/O
-- 网络 I/O
-- 批量提交
-- 减少部分系统调用和上下文切换
+```bash
+curl -X POST http://127.0.0.1:8080/v1/orders \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: request-7f2' \
+  -d '{"user_id":"user-1","sku_ids":["sku-8"]}'
+```
 
-但是否采用 `io_uring` 应由压测和实际场景决定。它不是对 `epoll` 的无条件替代。
+服务返回：
 
----
+```json
+{
+  "order_id": "order-1001",
+  "status": "confirmed"
+}
+```
 
-# 7. 网络库、HTTP 框架与 RPC 框架
+这次请求在服务内部依次经过：
 
-## 7.1 Boost.Asio / Standalone Asio
+```text
+HTTP Handler
+    ↓ 解析 JSON、校验参数
+OrderService
+    ├── InventoryClient ──gRPC──> 库存服务
+    └── OrderRepository ────────> MySQL
+                                      ├── orders
+                                      └── outbox_events
+```
 
-Asio 提供跨平台网络与低层 I/O 抽象，并支持同步、异步和现代 C++ 异步模型。[Asio 文档][asio]
+下面的概念都能在这条路径中找到具体位置。
 
-适合：
+## HTTP Handler 与 Drogon
 
-- 自研网络框架
-- TCP/UDP 客户端与服务端
-- 定时器
-- TLS
-- C++20 协程
-- 跨平台 I/O
+Handler 是某个路由对应的请求处理函数。Drogon 是 C++ Web 框架，它在事件循环、Socket 和 HTTP 协议之上提供路由、请求对象与响应对象：
 
-核心对象：
+```cpp
+drogon::app().registerHandler(
+    "/health",
+    [](const drogon::HttpRequestPtr&,
+       std::function<void(const drogon::HttpResponsePtr&)>&& reply) {
+        auto response = drogon::HttpResponse::newHttpResponse();
+        response->setBody("ok");
+        reply(response);
+    });
+```
 
-- `io_context`
-- socket
-- acceptor
-- timer
-- executor
-- completion handler
-- strand
+可以把它理解为已经实现了以下通用工作的网络程序骨架：
 
-## 7.2 muduo
+```text
+epoll / 事件循环
+        ↓
+TCP 连接与缓冲区管理
+        ↓
+HTTP 报文解析
+        ↓
+按 Method + Path 查找 Handler
+        ↓
+业务处理并生成 HTTP 响应
+```
 
-muduo 是经典 Linux C++ 网络库，常用于学习：
+Handler 只应处理协议边界，例如读取 Header、解析 JSON、校验字段并把业务错误转换成 HTTP 状态码。它不应直接拼 SQL 或实现库存规则。
 
-- Reactor
-- one loop per thread
-- EventLoop
-- Channel
-- TcpConnection
-- Buffer
-- 线程池
+## OrderService、Domain、Repository 与 Adapter
 
-它对理解服务端网络框架内部机制仍有价值，但新项目是否直接采用，需要评估维护状态、协议需求和团队经验。
+`OrderService` 是应用服务，负责按照业务顺序编排一次“创建订单”操作。Domain 是不依赖网络和数据库的业务类型与规则，例如 `Order`、`Money`、订单状态转换。它们都不是第三方框架。
 
-## 7.3 libevent / libev / libuv
+Repository 是持久化接口。它隐藏 SQL 和数据库驱动，使业务层只表达“保存订单”或“按幂等键查询”：
 
-| 库 | 侧重点 |
+```cpp
+class OrderRepository {
+public:
+    virtual ~OrderRepository() = default;
+    virtual Result<Order> Save(const Order& order) = 0;
+    virtual Result<std::optional<Order>> FindByIdempotencyKey(
+        std::string_view key) = 0;
+};
+```
+
+同一个接口可以有不同实现：
+
+```text
+OrderRepository
+├── InMemoryOrderRepository   先保存在容器中，便于学习和单元测试
+└── MysqlOrderRepository      使用 SQL 写入 MySQL
+```
+
+Adapter 是翻译层。比如业务层只认识 `InventoryClient::Reserve()`，`GrpcInventoryClient` 则负责把 C++ 业务类型转换成 Protobuf 消息、发起 RPC，再把 gRPC 状态码转换成业务错误：
+
+```text
+业务类型                    外部协议类型
+ProductId / Reservation
+           │
+           ▼
+GrpcInventoryClient
+           │
+           ▼
+Protobuf Request / Response / gRPC Status
+```
+
+Repository 主要隔离数据保存方式，Adapter 是更通用的外部系统适配方式。二者的共同目的不是增加目录，而是避免业务逻辑依赖 MySQL、Drogon 或 gRPC 的具体 API。
+
+## gRPC、Protobuf 与远程调用
+
+gRPC 根据 Protobuf 中定义的服务和消息生成 C++ Stub。调用 Stub 的写法接近函数调用，但它本质上仍然经过序列化、HTTP/2 和网络传输：
+
+```proto
+service InventoryService {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+```
+
+```text
+订单服务                                        库存服务
+Reserve(request) ── 序列化 / HTTP/2 / 网络 ──> Reserve(...)
+```
+
+因此 RPC 可能遇到连接失败、响应超时、服务端崩溃，甚至“服务端已经完成操作，但响应在网络中丢失”。不能因为代码看起来像本地函数，就忽略 Deadline、取消、幂等和重试条件。
+
+## Deadline、重试、幂等与背压
+
+这四项用来约束网络和下游服务的不确定性。
+
+- **Deadline**：这次操作最晚必须在什么时候结束。它比单层 Timeout 多表达了一个关键约束：请求经过多层服务时只能继续使用剩余时间，不能在每一层重新获得完整超时。
+- **重试**：暂时性失败后再次尝试。只有确认操作未执行，或操作已经具备幂等性时才能自动重试；参数错误、权限错误和持续过载不应重试。
+- **幂等**：同一个业务请求重复到达，最终效果仍和执行一次相同。创建订单时用 `Idempotency-Key` 加数据库唯一约束，重复请求返回第一次创建的订单，而不是再创建一份。
+- **背压**：处理能力不足时限制上游继续提交任务。连接数、在途请求、线程池队列和连接池都必须有上限；容量耗尽时应等待到 Deadline 或快速拒绝，不能用无界队列把过载拖成高延迟和 OOM。
+
+它们之间存在直接关系：
+
+```mermaid
+flowchart LR
+    REQUEST["请求携带幂等键"] --> DEADLINE["建立总 Deadline"]
+    DEADLINE --> CALL["调用数据库或 RPC"]
+    CALL -->|"临时失败且仍有预算"| RETRY["有限重试"]
+    CALL -->|"容量已满"| BACKPRESSURE["排队、拒绝或降级"]
+    RETRY --> IDEMPOTENCY["唯一约束避免重复副作用"]
+```
+
+重试不是越多越可靠。没有 Deadline 的重试可能无限拖延，没有幂等的重试可能重复扣款，没有背压的重试可能进一步压垮下游。
+
+## 连接池、Redis 与 Outbox
+
+`MySqlPool` 表示 MySQL 连接池。建立数据库连接涉及 TCP 连接和认证，服务通常复用一组已经建立的连接：
+
+```text
+请求任务 ──借用──> 连接池：连接 1 | 连接 2 | 连接 3 ──> MySQL
+                    <────────归还────────────
+```
+
+连接池限制数据库会话数量；数据库 Worker 线程池则隔离同步数据库调用，二者不是同一个池。连接在事务期间不能归还，获取连接也必须有等待上限。
+
+Redis 是内存数据存储，在本例中可以保存有过期时间的缓存、幂等处理状态或限流计数。订单的权威状态仍在 MySQL；缓存失效后应该能够从权威数据重建。
+
+Outbox 解决“业务数据写成功，但消息发送失败”的双写问题。以下做法存在不一致窗口：
+
+```text
+写入 orders 成功
+        ↓
+进程在发送消息前崩溃
+        ↓
+订单存在，但其他服务永远收不到事件
+```
+
+Outbox 把订单和待发布事件放进同一个本地事务：
+
+```sql
+BEGIN;
+INSERT INTO orders (...);
+INSERT INTO outbox_events (...);
+COMMIT;
+```
+
+后台 Publisher 再读取 `outbox_events` 并发送到 Kafka 或其他消息系统。它保证业务数据与“需要发送事件”同时提交，但不自动保证消息只出现一次；发布和消费端仍需用事件 ID 处理重复消息。
+
+## `Task`、`Reservation`、`Telemetry` 与 Composition Root
+
+这些名字用于表达示例结构，不属于 C++ 标准库，也不是必须采用的框架类型：
+
+| 名称 | 在示例中的含义 |
 |---|---|
-| libevent | 事件通知、定时器、网络 |
-| libev | 轻量事件循环 |
-| libuv | 跨平台异步 I/O，Node.js 底层组件之一 |
+| `Task<T>` | 尚未完成、以后产生 `T` 的异步操作；可以映射到 Asio `awaitable<T>`、框架协程或内部 Future |
+| `Reservation` | 库存预留结果，包含预留 ID、商品、数量和过期时间等业务信息，而不是一个含义模糊的 `bool` |
+| `Telemetry` | 日志、Metrics 和 Trace 的统一初始化与关闭封装 |
+| `MySqlPool` | 管理 MySQL 连接借出、归还、上限和健康状态的连接池封装 |
 
-C++ 项目通常会再封装一层 RAII、对象生命周期和回调模型。
+Telemetry 的三类数据分别回答不同问题：
 
-## 7.4 Drogon
+```text
+Logs      某次具体请求发生了什么
+Metrics   错误率、吞吐和延迟是否正在变化
+Traces    一次请求在哪个服务或数据库步骤耗时
+```
 
-Drogon 是基于现代 C++ 的异步 HTTP 应用框架，支持 C++17/20、协程和跨平台开发。[Drogon 项目][drogon]
+Composition Root 通常就是 `main()` 附近负责创建并连接这些对象的位置：
 
-适合：
+```cpp
+MySqlPool mysql(database_config);
+MysqlOrderRepository orders(mysql);
+GrpcInventoryClient inventory(inventory_config);
+OrderService service(orders, inventory);
+```
 
-- REST API
-- 内部管理后台
-- 中小型 HTTP 服务
-- 希望减少手写网络基础设施的 C++ 项目
+业务代码通过构造参数获得依赖，而不是从全局单例中寻找数据库和 RPC 客户端。这样测试可以换成内存 Repository 或 Fake Client，对象的创建与销毁顺序也集中可见。
 
-## 7.5 Crow、Oat++ 等轻量 HTTP 框架
+可以先用下面的分类记住它们之间的区别：
 
-常用于：
+| 类别 | 内容 |
+|---|---|
+| 具体工具 | Drogon、gRPC、Protobuf、MySQL、Redis、Kafka、OpenTelemetry |
+| 代码边界 | Handler、OrderService、Domain、Repository、Adapter、Composition Root |
+| 可靠性机制 | Deadline、取消、重试、幂等、背压、Outbox |
+| 示例类型 | `Task`、`Reservation`、`Telemetry`、`MySqlPool` |
 
-- 快速构建 REST API
-- 内部工具
-- 较轻量服务
-- 原型与中小规模系统
+# 1. 先确定服务边界
 
-选型时重点评估：
+## 1.1 请求从哪里来，到哪里结束
 
-- 活跃度
-- HTTP/2 支持
-- TLS
-- 异步模型
-- 中间件
-- 可观测性
-- 依赖管理
-- 线上案例
-- 安全更新
+`POST /v1/orders` 的同步路径只做创建订单必须完成的工作：
 
-## 7.6 gRPC
+1. 解析和验证请求。
+2. 检查幂等键。
+3. 调用库存服务预留库存。
+4. 在一个本地事务内写订单和 Outbox 事件。
+5. 返回订单 ID。
 
-gRPC 是高性能跨语言 RPC 框架，通常使用 Protocol Buffers 作为 IDL 和消息格式，并提供同步、异步、流式 RPC 等模型。[gRPC C++ 文档][grpc]
+通知、统计和搜索索引更新不应延长同步路径，由 Outbox 事件异步驱动。先画清边界，才能决定哪些失败返回给客户端，哪些任务可以重试，哪些状态必须放进同一事务。
+
+## 1.2 分层不是为了增加目录
+
+```mermaid
+flowchart TB
+    TRANSPORT["Transport<br/>HTTP / gRPC 参数与状态码"] --> APPLICATION["Application<br/>用例编排、Deadline、幂等"]
+    APPLICATION --> DOMAIN["Domain<br/>订单状态与业务约束"]
+    APPLICATION --> PORTS["Ports<br/>Repository / RPC / Clock"]
+    ADAPTERS["Adapters<br/>MySQL / Redis / gRPC Client"] --> PORTS
+```
+
+依赖方向由外向内：领域对象不知道 Drogon、gRPC 或 MySQL。HTTP Controller 只负责协议转换；`OrderService` 负责用例；Repository 负责持久化细节。这样单元测试可以替换外部依赖，迁移框架也不会迫使业务对象一起重写。
+
+不要为每个结构体机械创建五层包装。判断一个边界是否有价值，只看它是否隔离了变化：协议会变、数据库会变、业务规则也会变，但变化速度不同。
+
+## 1.3 目录从依赖方向表达结构
+
+```text
+order-service/
+├── CMakeLists.txt
+├── CMakePresets.json
+├── vcpkg.json
+├── app/
+│   └── main.cpp
+├── include/order/
+│   ├── domain/
+│   ├── application/
+│   └── ports/
+├── src/
+│   ├── domain/
+│   └── application/
+├── adapters/
+│   ├── http/
+│   ├── grpc/
+│   ├── mysql/
+│   ├── redis/
+│   └── messaging/
+├── proto/
+├── migrations/
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── benchmarks/
+├── configs/
+├── deploy/
+└── cmake/
+```
+
+生成的 Protobuf 文件放在构建目录，不手工修改，也不和源文件混在一起。部署清单、迁移脚本和配置 Schema 都属于服务的一部分，应与代码一同审查。
+
+# 2. 建立可重复的构建
+
+## 2.1 CMake 只围绕 Target 传递属性
+
+顶层 `CMakeLists.txt` 先建立少量明确的 Target：
+
+```cmake
+cmake_minimum_required(VERSION 3.25)
+project(order_service VERSION 0.1.0 LANGUAGES CXX)
+
+option(ORDER_ENABLE_SANITIZERS "Enable ASan and UBSan" OFF)
+
+find_package(Threads REQUIRED)
+find_package(Drogon CONFIG REQUIRED)
+find_package(Protobuf CONFIG REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+
+add_subdirectory(proto)
+
+add_library(order_options INTERFACE)
+target_compile_features(order_options INTERFACE cxx_std_23)
+
+add_library(order_warnings INTERFACE)
+target_compile_options(order_warnings INTERFACE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:
+        -Wall;-Wextra;-Wpedantic;-Wconversion;-Wshadow>
+)
+
+if(ORDER_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(order_options INTERFACE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(order_options INTERFACE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+endif()
+
+add_library(order_core
+    src/domain/order.cpp
+    src/application/order_service.cpp
+)
+target_include_directories(order_core PUBLIC include)
+target_link_libraries(order_core
+    PUBLIC order_options
+    PRIVATE order_warnings Threads::Threads
+)
+
+add_executable(order_server
+    app/main.cpp
+    adapters/http/order_controller.cpp
+    adapters/grpc/grpc_inventory_client.cpp
+    adapters/mysql/mysql_order_repository.cpp
+)
+target_link_libraries(order_server PRIVATE
+    order_core
+    order_warnings
+    inventory_proto
+    Drogon::Drogon
+    spdlog::spdlog
+)
+
+install(TARGETS order_server RUNTIME DESTINATION bin)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+```
+
+`PUBLIC`、`PRIVATE` 和 `INTERFACE` 描述传播关系：例如调用者需要看到 `order_core` 的公开头文件，所以 include 目录是 `PUBLIC`；Drogon 只被最终服务使用，所以是 `PRIVATE`。不要用全局 `include_directories()`、`link_directories()` 或一串全局 flags 隐藏依赖。
+
+## 2.2 用 Preset 固化开发、测试和发布配置
+
+[CMake Presets][cmake-presets] 可以提交到仓库，个人路径放进不提交的 `CMakeUserPresets.json`：
+
+```json
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "ORDER_ENABLE_SANITIZERS": true
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ORDER_ENABLE_SANITIZERS": false
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
+```
+
+日常命令收敛为：
+
+```bash
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+./build/dev/order_server --config configs/dev.yaml
+```
+
+CI 使用同一套 Preset，避免“开发机的 Release”和“流水线的 Release”实际采用不同选项。
+
+## 2.3 依赖管理选择一种主路径
+
+### vcpkg Manifest
+
+[vcpkg Manifest][vcpkg] 模式把直接依赖写进项目根目录：
+
+```json
+{
+  "name": "order-service",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "drogon",
+    "grpc",
+    "protobuf",
+    "spdlog",
+    "gtest"
+  ]
+}
+```
+
+配置 CMake 时，vcpkg 根据 manifest 恢复依赖；需要严格复现时再固定 registry baseline 和版本约束。不要把开发机全局安装的包当成项目依赖声明。
+
+### Conan 2
+
+[Conan 2][conan] 与 CMake 的常见组合是 `CMakeDeps + CMakeToolchain`：
+
+```ini
+[requires]
+fmt/<locked-version>
+spdlog/<locked-version>
+protobuf/<locked-version>
+grpc/<locked-version>
+
+[generators]
+CMakeDeps
+CMakeToolchain
+```
+
+```bash
+conan profile detect
+conan install . --output-folder=build/conan --build=missing \
+  --settings=build_type=Debug
+cmake -S . -B build/dev -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=build/conan/conan_toolchain.cmake \
+  -DCMAKE_BUILD_TYPE=Debug
+```
+
+企业环境还应保存 profile、remote、recipe revision 和 lockfile，明确编译器、标准库、架构、Debug/Release 以及静态/动态链接组合。C++ 包是否兼容不能只由版本号判断，ABI 配置同样属于包 ID。
+
+### 什么时候用 Bazel
+
+[Bazel][bazel] 更适合多语言 Monorepo、远程缓存和远程执行已成为基础设施的场景。单个中小型 C++ 服务若没有对应平台支持，CMake 加包管理器通常更容易调试。不要在同一项目里同时让 CMake、手写 Makefile 和 shell 脚本分别维护三套依赖图。
+
+## 2.4 配置在监听端口前完成校验
+
+YAML、TOML 或 JSON 只是输入格式，业务代码应接收不可变的强类型配置：
+
+```cpp
+struct ServerConfig {
+    std::string listen_address;
+    std::uint16_t port;
+    std::size_t io_threads;
+    std::size_t max_in_flight;
+};
+
+struct DatabaseConfig {
+    std::string dsn;
+    std::size_t pool_size;
+    std::chrono::milliseconds acquire_timeout;
+};
+
+struct InventoryConfig {
+    std::string target;
+    std::chrono::milliseconds timeout;
+};
+
+struct TelemetryConfig {
+    std::string otlp_endpoint;
+    double trace_sample_ratio;
+};
+
+struct AppConfig {
+    ServerConfig server;
+    DatabaseConfig database;
+    InventoryConfig inventory;
+    TelemetryConfig telemetry;
+    std::chrono::milliseconds request_timeout;
+};
+
+Result<AppConfig> LoadAndValidateConfig(
+    std::filesystem::path file,
+    const Environment& environment);
+```
+
+加载时一次性检查端口范围、线程数、池大小、Deadline 关系和必填项。启动日志输出去除 Secret 后的生效配置及配置版本，失败就退出，不要带着半有效配置接流量。
+
+静态配置适合文件和环境变量；需要动态更新的限流、开关和路由可由配置中心推送为新的不可变快照，再原子替换。回调线程只做解析和发布，不在其中执行耗时任务。
+
+## 2.5 `main` 只负责组装和生命周期
+
+```cpp
+int main(int argc, char** argv) {
+    auto config = LoadAndValidateConfig(config_path(argc, argv), process_env());
+    if (!config) {
+        print_startup_error(config.error());
+        return 2;
+    }
+
+    Telemetry telemetry(config->telemetry);
+    MySqlPool mysql(config->database);
+    MysqlOrderRepository repository(mysql);
+    GrpcInventoryClient inventory(config->inventory);
+    OrderService orders(repository, inventory);
+
+    register_health_routes();
+    register_order_routes(orders);
+    install_shutdown_handler();
+
+    drogon::app()
+        .addListener(config->server.listen_address, config->server.port)
+        .setThreadNum(config->server.io_threads)
+        .run();
+    return 0;
+}
+```
+
+这处是 Composition Root：依赖在这里创建，业务代码不通过全局单例偷偷寻找数据库、Logger 或配置。对象按依赖逆序析构；如果框架关闭需要异步 drain，就在退出 `run()` 前显式完成，而不是依赖静态对象析构顺序。
+
+# 3. 用类型固定业务和错误边界
+
+## 3.1 金额、标识和状态不要退化成任意字符串
+
+```cpp
+#include <cstdint>
+#include <expected>
+#include <string>
+#include <vector>
+
+struct UserId {
+    std::string value;
+};
+
+struct Money {
+    std::int64_t cents{};
+};
+
+enum class OrderStatus {
+    Pending,
+    Confirmed,
+    Cancelled,
+};
+
+struct CreateOrderCommand {
+    UserId user_id;
+    std::vector<std::string> sku_ids;
+    std::string idempotency_key;
+};
+
+enum class ErrorCode {
+    InvalidArgument,
+    Conflict,
+    DeadlineExceeded,
+    Unavailable,
+    Internal,
+};
+
+struct Error {
+    ErrorCode code;
+    std::string message;
+    bool retryable{};
+};
+
+template <class T>
+using Result = std::expected<T, Error>;
+```
+
+金额使用最小货币单位，避免浮点误差；错误类型同时服务于 HTTP、gRPC、日志和重试判断。业务失败不应在最外层才通过字符串匹配识别。
+
+## 3.2 端口接口只表达应用真正需要的能力
+
+```cpp
+class OrderRepository {
+public:
+    virtual ~OrderRepository() = default;
+
+    virtual Result<Order> CreateWithOutbox(
+        const CreateOrderCommand& command,
+        const Reservation& reservation) = 0;
+
+    virtual Result<std::optional<Order>> FindByIdempotencyKey(
+        std::string_view key) = 0;
+};
+
+class InventoryClient {
+public:
+    virtual ~InventoryClient() = default;
+
+    virtual Task<Result<Reservation>> Reserve(
+        const std::vector<std::string>& sku_ids,
+        Deadline deadline) = 0;
+};
+```
+
+接口没有暴露 SQL、gRPC Stub 或连接池。`Task<T>` 表示项目采用的异步任务类型，可以映射到 Asio `awaitable`、框架协程或内部 Future。领域层仍保持普通值类型。
+
+## 3.3 异步代码首先是生命周期设计
+
+一次异步操作发起后，以下对象必须活到完成回调：
+
+- Socket 和连接状态。
+- 读写缓冲区。
+- Handler 捕获的数据。
+- 取消源、计时器和请求上下文。
+
+会话对象通常由 `shared_ptr` 在未完成操作之间保持生命期；不参与共享所有权的依赖仍优先用值或 `unique_ptr`。捕获裸 `this` 前必须能证明对象不会先析构，`string_view` 和 `span` 也不能跨越底层存储的生命期。
+
+# 4. 理解事件循环，再选择 HTTP 框架
+
+## 4.1 Asio 的执行模型
+
+[Boost.Asio][asio] 不是 Web 框架。它提供 I/O 对象、异步操作、Executor、计时器和组合操作；底层在 Linux 上可使用 epoll 等机制。其 C++20 协程接口由 `awaitable`、`use_awaitable` 和 `co_spawn` 等组件构成。[协程说明][asio-coroutines]
+
+```mermaid
+flowchart LR
+    SOCKET["Socket / Timer"] --> OP["发起 async_* 操作"]
+    OP --> KERNEL["内核等待 I/O"]
+    KERNEL --> READY["完成事件"]
+    READY --> EXECUTOR["Executor 调度 Handler"]
+    EXECUTOR --> STATE["更新连接状态并发起下一步"]
+```
+
+`io_context::run()` 执行就绪 Handler，不等于“一个连接一个线程”。多个线程可以共同运行同一个 `io_context`；`strand` 保证经它调度的 Handler 不并发执行，但不会自动保护绕过 strand 的访问。
+
+## 4.2 一个协程 Echo 会话
+
+```cpp
+#include <array>
+#include <boost/asio.hpp>
+
+namespace asio = boost::asio;
+using asio::ip::tcp;
+
+asio::awaitable<void> session(tcp::socket socket) {
+    std::array<char, 4096> buffer{};
+
+    for (;;) {
+        boost::system::error_code ec;
+        const auto n = co_await socket.async_read_some(
+            asio::buffer(buffer),
+            asio::redirect_error(asio::use_awaitable, ec));
+
+        if (ec == asio::error::eof) {
+            co_return;
+        }
+        if (ec) {
+            throw boost::system::system_error(ec);
+        }
+
+        co_await asio::async_write(
+            socket,
+            asio::buffer(buffer.data(), n),
+            asio::use_awaitable);
+    }
+}
+
+asio::awaitable<void> listen(std::uint16_t port) {
+    auto executor = co_await asio::this_coro::executor;
+    tcp::acceptor acceptor(executor, {tcp::v4(), port});
+
+    for (;;) {
+        auto socket = co_await acceptor.async_accept(asio::use_awaitable);
+        asio::co_spawn(
+            executor,
+            session(std::move(socket)),
+            [](std::exception_ptr error) {
+                if (!error) return;
+                try {
+                    std::rethrow_exception(error);
+                } catch (const std::exception& e) {
+                    log_connection_error(e.what());
+                }
+            });
+    }
+}
+```
+
+这段代码展示了 `awaitable`、`use_awaitable` 和 `co_spawn` 的关系，但离生产协议还有距离：缺少包长限制、读写 Deadline、TLS、半关闭处理、背压、优雅退出和观测。不要把一个 Echo Demo 直接扩写成公共 HTTP 服务器。
+
+## 4.3 低层网络库和应用框架的边界
+
+| 层次 | 代表方案 | 已提供 | 仍需自己负责 |
+|---|---|---|---|
+| I/O 原语 | Asio、libevent、libuv | Socket、事件循环、Timer | HTTP 语义、路由、鉴权、业务结构 |
+| 协议库 | Boost.Beast | HTTP/1、WebSocket 读写 | 服务生命周期、中间件、限流、观测 |
+| HTTP 框架 | Drogon、Oat++、Crow | 路由、请求响应、中间件等 | 领域边界、可靠性和生产配置 |
+| RPC 框架 | gRPC、bRPC、tRPC-Cpp、Tars | IDL、Stub、服务调用模型 | 业务幂等、Deadline 预算、数据一致性 |
+
+如果需求只是 REST、鉴权和数据库访问，优先使用维护活跃的 HTTP 框架；只有协议、延迟或连接模型确实特殊时，才从 Asio/Beast 组装自己的服务层。
+
+## 4.4 用 Drogon 接入 HTTP
+
+[Drogon][drogon] 提供异步 HTTP、Controller、中间件和 WebSocket 等应用框架能力。下面的 Handler 只做四件事：限制输入、转换命令、调用应用服务、映射结果。
+
+```cpp
+using drogon::HttpRequestPtr;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+
+void register_order_routes(OrderService& service) {
+    drogon::app().registerHandler(
+        "/v1/orders",
+        [&service](const HttpRequestPtr& request,
+                   std::function<void(const HttpResponsePtr&)>&& done) {
+            const auto json = request->getJsonObject();
+            if (!json || !json->isMember("user_id") ||
+                !json->isMember("sku_ids")) {
+                done(error_response(400, "invalid_request"));
+                return;
+            }
+
+            CreateOrderCommand command = parse_create_order(*json);
+            command.idempotency_key =
+                request->getHeader("Idempotency-Key");
+
+            service.CreateAsync(
+                std::move(command),
+                request_deadline(request),
+                [done = std::move(done)](Result<Order> result) mutable {
+                    if (!result) {
+                        done(map_error_to_http(result.error()));
+                        return;
+                    }
+                    done(order_response(*result));
+                });
+        },
+        {drogon::Post});
+}
+```
+
+路由层还应统一处理：
+
+- Body、Header、数组长度和嵌套深度限制。
+- Request ID、Trace Context 和身份信息注入。
+- 错误码到 HTTP 状态码的稳定映射。
+- JSON Content-Type、字符编码和错误响应 Schema。
+- 访问日志、延迟指标和异常兜底。
+
+Drogon Controller 可能被多个 I/O 线程并发调用。Controller 成员若可变，要么不可变初始化后只读，要么显式同步；更好的做法是把请求状态放在请求上下文中。
+
+# 5. 用 Protobuf 和 gRPC 定义内部接口
+
+## 5.1 先写可演进的契约
+
+[Protocol Buffers][protobuf] 用 IDL 同时定义消息和服务输入输出；生成代码属于构建产物，不是手写模型。
 
 ```protobuf
 syntax = "proto3";
 
-package order;
+package inventory.v1;
 
-service OrderService {
-  rpc CreateOrder(CreateOrderRequest)
-      returns (CreateOrderResponse);
+service InventoryService {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
 }
 
-message CreateOrderRequest {
-  string user_id = 1;
-  repeated string item_ids = 2;
-}
-
-message CreateOrderResponse {
+message ReserveRequest {
   string order_id = 1;
+  repeated string sku_ids = 2;
+}
+
+message ReserveResponse {
+  string reservation_id = 1;
+  ReservationStatus status = 2;
+}
+
+enum ReservationStatus {
+  RESERVATION_STATUS_UNSPECIFIED = 0;
+  RESERVATION_STATUS_ACCEPTED = 1;
+  RESERVATION_STATUS_REJECTED = 2;
 }
 ```
 
-适合：
+删除字段时保留编号和名称；不要把原字段换成语义不同的新字段，也不要依赖未知枚举一定不会出现。新增字段应有合理默认语义，使新旧实例能够滚动升级。
 
-- 多语言微服务
-- 强接口契约
-- 自动生成客户端与服务端桩
-- HTTP/2
-- Unary、Client Streaming、Server Streaming、Bidirectional Streaming
+## 5.2 把代码生成纳入构建图
 
-需要额外处理：
+把生成规则放入 `proto/CMakeLists.txt`，顶层通过 `add_subdirectory(proto)` 引入：
 
-- Deadline
-- Cancellation
-- 重试
-- 负载均衡
-- 元数据
-- 限流
-- 链路追踪
-- 版本兼容
+```cmake
+set(PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(INVENTORY_PROTO "${PROTO_DIR}/inventory.proto")
 
-## 7.7 Apache bRPC
+file(MAKE_DIRECTORY "${GENERATED_DIR}")
 
-bRPC 是面向高性能服务的工业级 C++ RPC 框架，常见于搜索、存储、机器学习、广告和推荐等场景。[bRPC 项目][brpc]
+add_custom_command(
+    OUTPUT
+        "${GENERATED_DIR}/inventory.pb.cc"
+        "${GENERATED_DIR}/inventory.pb.h"
+        "${GENERATED_DIR}/inventory.grpc.pb.cc"
+        "${GENERATED_DIR}/inventory.grpc.pb.h"
+    COMMAND protobuf::protoc
+    ARGS
+        "--proto_path=${PROTO_DIR}"
+        "--cpp_out=${GENERATED_DIR}"
+        "--grpc_out=${GENERATED_DIR}"
+        "--plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>"
+        "${INVENTORY_PROTO}"
+    DEPENDS "${INVENTORY_PROTO}"
+    VERBATIM
+)
 
-特点通常包括：
-
-- C++ 高性能 RPC
-- 多协议支持
-- 服务端与客户端能力
-- 内置或可集成服务治理功能
-- 与 bthread 等并发模型结合
-
-## 7.8 tRPC-Cpp
-
-tRPC-Cpp 是 tRPC 的 C++ 实现，强调高性能、模块化和可插拔设计。[tRPC-Cpp 项目][trpc]
-
-适合：
-
-- 企业内部微服务体系
-- 需要框架统一接入日志、监控、配置、路由和插件
-- C++ 与其他语言服务互通
-
-## 7.9 Tars
-
-Tars 是完整的微服务/RPC 体系，包含 IDL、通信、注册、配置、监控和管理能力，并支持多种语言。[TarsCpp 项目][tars]
-
-适合：
-
-- 有统一服务治理平台的企业
-- 大量内部 RPC 服务
-- 希望框架和运维平台一体化的环境
-
-## 7.10 框架选型对比
-
-| 场景 | 可考虑方案 |
-|---|---|
-| 自研 TCP/UDP 长连接 | Asio、muduo、自研 Reactor |
-| REST API | Drogon、Oat++、Crow |
-| 标准跨语言 RPC | gRPC |
-| 国内高性能基础设施 | bRPC |
-| 企业统一微服务体系 | tRPC-Cpp、Tars、内部框架 |
-| 游戏服长连接 | Asio、自研网络层、公司内部框架 |
-| 边缘设备 | 轻量 HTTP/RPC、自定义二进制协议 |
-
----
-
-# 8. 协议、序列化与接口定义
-
-## 8.1 Protocol Buffers
-
-特点：
-
-- IDL 定义
-- 自动生成代码
-- 二进制格式
-- 支持字段演进
-- 多语言
-- 与 gRPC 紧密结合
-
-兼容性原则：
-
-- 不复用已删除字段编号
-- 新增字段优于修改字段类型
-- 谨慎使用 required 语义
-- 保留废弃字段号和名称
-- 服务端和客户端允许滚动升级
-
-## 8.2 JSON
-
-优点：
-
-- 可读
-- 调试方便
-- Web 生态成熟
-- 与 REST API 结合自然
-
-缺点：
-
-- 文本体积较大
-- 解析成本较高
-- 类型表达有限
-- Schema 约束需要额外机制
-
-常见 C++ 库：
-
-- nlohmann/json
-- RapidJSON
-- simdjson
-
-## 8.3 FlatBuffers 与 Cap'n Proto
-
-适用于：
-
-- 对反序列化成本敏感
-- 希望减少复制
-- 游戏、实时系统、存储格式
-- 跨进程高吞吐数据交换
-
-但需要权衡：
-
-- API 使用复杂度
-- 数据演进
-- 内存生命周期
-- 对齐
-- 生态成熟度
-
-## 8.4 MessagePack、CBOR
-
-适合：
-
-- 需要比 JSON 紧凑
-- 又希望保留动态数据模型
-- 多语言通信
-- IoT 和边缘设备
-
-## 8.5 自定义二进制协议
-
-常见结构：
-
-```text
-Magic | Version | Command | Sequence | Length | Payload | Checksum
+add_library(inventory_proto
+    "${GENERATED_DIR}/inventory.pb.cc"
+    "${GENERATED_DIR}/inventory.grpc.pb.cc"
+)
+target_include_directories(inventory_proto PUBLIC "${GENERATED_DIR}")
+target_link_libraries(inventory_proto PUBLIC
+    protobuf::libprotobuf
+    gRPC::grpc++
+)
 ```
 
-需要设计：
+`.proto` 改动会触发重新生成。生成器版本和运行库版本要成组固定，否则 CI 与开发机可能产生不同接口。
 
-- 字节序
-- 对齐
-- 长度校验
-- 最大包长
-- 版本升级
-- 压缩
-- 加密
-- 鉴权
-- 重放防护
-- 错误码
-- 流控
-
----
-
-# 9. 并发编程与异步编程
-
-## 9.1 线程基础
-
-需要掌握：
-
-- `std::thread`
-- `std::jthread`
-- mutex
-- shared_mutex
-- condition_variable
-- atomic
-- memory order
-- future / promise
-- thread_local
-- latch / barrier / semaphore
-
-## 9.2 数据竞争与竞态条件
-
-- **数据竞争**：多个线程无同步访问同一内存，至少一个写，行为未定义。
-- **竞态条件**：结果依赖时序，不一定构成语言层面的数据竞争。
-
-## 9.3 内存模型
-
-重点理解：
-
-- happens-before
-- sequenced-before
-- synchronizes-with
-- acquire / release
-- relaxed
-- sequential consistency
-- false sharing
-- cache coherence
-
-不要在没有明确证明和基准测试时过度使用 lock-free。
-
-## 9.4 线程池
-
-```mermaid
-flowchart LR
-    A["请求到达"] --> B["任务队列"]
-    B --> C1["Worker 1"]
-    B --> C2["Worker 2"]
-    B --> C3["Worker N"]
-    C1 --> D["业务处理"]
-    C2 --> D
-    C3 --> D
-    D --> E["响应 / 后续任务"]
-```
-
-线程池需要处理：
-
-- 队列是否有界
-- 拒绝策略
-- 优先级
-- 任务取消
-- 异常传播
-- 优雅退出
-- 线程数
-- CPU 密集与 I/O 密集任务隔离
-- 避免任务间死锁
-
-## 9.5 协程
-
-C++20 提供语言级协程机制，但标准本身主要提供底层构造，完整调度和 I/O 集成通常由库或框架实现。
-
-协程的价值：
-
-- 以顺序代码表达异步流程
-- 减少回调嵌套
-- 大量等待型任务可复用少量线程
-- 便于表达 RPC、超时和异步数据库访问
+## 5.3 客户端必须设置 Deadline
 
 ```cpp
-awaitable<void> handle_request(Socket socket) {
-    auto request = co_await async_read_request(socket);
-    auto result = co_await query_database(request);
-    co_await async_write_response(socket, result);
+Result<Reservation> GrpcInventoryClient::ReserveBlocking(
+    const ReserveCommand& command,
+    std::chrono::milliseconds budget) {
+    inventory::v1::ReserveRequest request;
+    request.set_order_id(command.order_id);
+    for (const auto& sku : command.sku_ids) {
+        request.add_sku_ids(sku);
+    }
+
+    inventory::v1::ReserveResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + budget);
+
+    const grpc::Status status = stub_->Reserve(&context, request, &response);
+    if (!status.ok()) {
+        return std::unexpected(map_grpc_error(status));
+    }
+    return to_domain(response);
 }
 ```
 
-协程不等于线程。协程仍然需要：
+这是同步 API，会阻塞调用线程；不要在 Drogon/Asio I/O 线程里直接调用。可将它放入有界阻塞线程池，或采用 gRPC Callback API。[gRPC C++ 官方实践][grpc-best-practices]倾向 Callback API；无论选择哪种 API，都要处理 Deadline、取消、状态码、Channel 复用和优雅关闭。
 
-- executor
-- scheduler
-- event loop
-- 生命周期管理
-- cancellation
-- backpressure
+服务端方法可能并发执行，因此实现类中的共享状态必须线程安全。流式 RPC 还需遵守同一方向最多一个 read 和一个 write 在途等 API 约束，并把流控映射到应用背压。
 
-## 9.6 Actor 模型
+## 5.4 协议选择看访问方式
 
-Actor 通过消息传递而不是共享内存进行并发。
+| 格式 | 合适场景 | 主要代价 |
+|---|---|---|
+| JSON | 公共 HTTP API、调试接口 | 体积和解析成本较高，Schema 需额外约束 |
+| Protobuf | 跨语言 RPC、持久消息 | 需要 IDL 与代码生成，字段演进要守规则 |
+| FlatBuffers / Cap'n Proto | 反序列化和复制成本敏感 | API、对齐和生命周期更复杂 |
+| MessagePack / CBOR | 动态模型且希望比 JSON 紧凑 | 契约约束和工具生态因项目而异 |
+| 自定义二进制协议 | 特殊设备、极致协议控制 | 安全审计、演进和工具全部自行承担 |
 
-适合：
+自定义协议至少需要 Magic、版本、消息类型、序列号、长度、Payload 和校验策略；任何长度都必须在分配内存前校验。
 
-- 游戏实体
-- 房间
-- 用户会话
-- 状态机
-- 分区服务
+# 6. 数据访问：把阻塞和事务边界画出来
 
-需要考虑：
-
-- Mailbox 堆积
-- 消息顺序
-- Actor 迁移
-- 故障恢复
-- 请求关联
-- 超时
-
-## 9.7 背压
-
-当下游处理速度低于上游生产速度时，必须控制流量：
+## 6.1 不要让同步数据库调用阻塞 I/O 线程
 
 ```mermaid
 flowchart LR
-    A["生产者"] --> B["有界队列"]
-    B --> C["消费者"]
-    B --> D{"队列已满"}
-    D --> E["阻塞"]
-    D --> F["拒绝"]
-    D --> G["丢弃"]
-    D --> H["降级"]
-    D --> I["上游减速"]
+    IO["I/O Event Loop"] -->|"提交数据库任务"| QUEUE["有界任务队列"]
+    QUEUE --> DBPOOL["数据库 Worker Pool"]
+    DBPOOL --> MYSQL["MySQL Connection Pool"]
+    MYSQL --> DB["MySQL"]
+    DBPOOL -->|"结果投递回原 Executor"| IO
 ```
 
-无界队列通常只是把延迟问题转化为内存问题。
+连接池和线程池不是同一个概念：连接池限制数据库会话数量，线程池隔离阻塞调用。队列必须有界；池满时等待到 Deadline 或尽快拒绝，不能持续堆积请求。
 
----
+若客户端提供真正异步且能与现有 Executor 协作的接口，可省去一部分阻塞线程；“函数返回 Future”不代表底层没有偷偷创建线程。
 
-# 10. 数据库与数据访问
+## 6.2 连接池必须定义失败语义
 
-## 10.1 MySQL
+连接池至少需要：
 
-常见用途：
+- `max_connections` 和获取超时。
+- 借出前或失败后的健康检查。
+- 连接最大寿命，避免永久保留失效连接。
+- 事务期间连接固定，不能在语句之间归还。
+- 服务停止时拒绝新借用，并等待或取消在途任务。
+- 指标：使用中、空闲、等待者、获取耗时、创建失败。
 
-- 业务主库
-- 交易数据
-- 账户、订单、配置
-- 中小规模关系数据
+池大小不是越大越好。它受数据库最大连接数、服务副本数、单查询耗时和目标并发共同约束：每个 Pod 100 条连接、100 个 Pod 就可能把数据库推到 10000 条连接。
 
-需要掌握：
+## 6.3 用 RAII 固定事务结束路径
 
-- 索引
-- B+ Tree
-- 联合索引最左前缀
-- 覆盖索引
-- 事务
-- 隔离级别
-- MVCC
-- 锁
-- redo/undo/binlog
-- 主从复制
-- 慢查询
-- 执行计划
-- 分库分表
+```cpp
+class Transaction {
+public:
+    explicit Transaction(DbConnection& connection)
+        : connection_(connection) {
+        connection_.Execute("BEGIN");
+    }
 
-C++ 访问方式：
+    ~Transaction() noexcept {
+        if (!finished_) {
+            connection_.RollbackNoThrow();
+        }
+    }
 
-- MySQL Connector/C++
-- MySQL C API
-- ORM 或内部数据访问层
+    void Commit() {
+        connection_.Execute("COMMIT");
+        finished_ = true;
+    }
 
-## 10.2 PostgreSQL
+    Transaction(const Transaction&) = delete;
+    Transaction& operator=(const Transaction&) = delete;
 
-优势场景：
-
-- 丰富 SQL 能力
-- 复杂查询
-- JSONB
-- 扩展机制
-- GIS
-- 强事务和数据类型
-
-C/C++ 常通过：
-
-- libpq
-- libpqxx
-- ORM 或内部封装
-
-## 10.3 SQLite
-
-适合：
-
-- 单机嵌入式数据
-- 本地缓存
-- 工具和客户端
-- 小型边缘服务
-- 测试
-
-不适合直接作为高并发分布式主数据库。
-
-## 10.4 MongoDB
-
-适合：
-
-- 文档模型
-- Schema 变化较多
-- 数据天然以聚合文档访问
-- 内容和配置类数据
-
-仍需认真设计：
-
-- 索引
-- 文档大小
-- 一致性
-- 事务边界
-- 分片键
-
-## 10.5 数据库连接池
-
-连接池通常维护：
-
-- 最小/最大连接数
-- 空闲连接
-- 获取超时
-- 连接健康检查
-- 失效重连
-- 事务绑定
-- 连接生命周期
-
-```mermaid
-sequenceDiagram
-    participant S as Service
-    participant P as Connection Pool
-    participant D as Database
-
-    S->>P: acquire(timeout)
-    P-->>S: connection
-    S->>D: BEGIN
-    S->>D: SQL
-    D-->>S: result
-    S->>D: COMMIT
-    S->>P: release
+private:
+    DbConnection& connection_;
+    bool finished_{};
+};
 ```
 
-## 10.6 ORM 与手写 SQL
+真实实现还要处理连接已断开、提交结果不确定和回滚失败。所有值通过参数绑定进入预编译语句，不拼接 SQL。隔离级别、索引和锁的细节放在[数据库专题](post.html?slug=database)中，这里只关心服务能否正确表达事务边界。
 
-ORM 优点：
+## 6.4 订单和 Outbox 必须同事务写入
 
-- 减少模板代码
-- 类型映射
-- 快速开发
+```sql
+BEGIN;
 
-风险：
+INSERT INTO orders(id, user_id, status, idempotency_key)
+VALUES (?, ?, 'confirmed', ?);
 
-- 隐式查询
-- N+1
-- 复杂 SQL 难表达
-- 性能不可控
-- 数据库特性利用不足
+INSERT INTO outbox_events(id, aggregate_id, event_type, payload)
+VALUES (?, ?, 'order.created', ?);
 
-高性能 C++ 服务中常见方式是：
-
-- 轻量数据访问层
-- 显式 SQL
-- 预编译语句
-- 批量操作
-- 统一事务封装
-
----
-
-# 11. 缓存系统
-
-## 11.1 Redis
-
-常见用途：
-
-- 热点缓存
-- Session
-- 分布式锁
-- 限流
-- 排行榜
-- 发布订阅
-- 延迟队列
-- 去重
-- 计数器
-
-C++ 常用客户端：
-
-- hiredis
-- redis-plus-plus
-- 企业内部 Redis Client
-
-## 11.2 缓存模式
-
-### Cache Aside
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Service
-    participant R as Redis
-    participant D as Database
-
-    C->>S: query
-    S->>R: GET key
-    alt cache hit
-        R-->>S: value
-    else cache miss
-        R-->>S: nil
-        S->>D: SELECT
-        D-->>S: value
-        S->>R: SETEX key value
-    end
-    S-->>C: response
+COMMIT;
 ```
 
-### 常见问题
+后台 Publisher 使用 `SELECT ... FOR UPDATE SKIP LOCKED` 或适合当前数据库的抢占方式读取待发布事件，成功发布后更新状态。消息系统通常提供至少一次链路，因此消费者仍须幂等；Outbox 解决的是“业务已提交但消息没发出”，不是自动提供全局 Exactly Once。
 
-- 缓存穿透
-- 缓存击穿
-- 缓存雪崩
-- 热 Key
-- 大 Key
-- 数据不一致
-- 过期策略
-- 内存淘汰
-- 分布式锁误用
+## 6.5 Redis 和消息客户端放在适当边界
 
-## 11.3 本地缓存
+| 组件 | 常见 C/C++ 客户端 | 服务内的职责 |
+|---|---|---|
+| MySQL | MySQL Connector/C++、C API、内部封装 | Repository、事务和预编译语句 |
+| PostgreSQL | libpq、libpqxx | Repository、事务和 COPY/扩展能力 |
+| Redis | hiredis、redis-plus-plus、Boost.Redis | 缓存、幂等状态、限流原语 |
+| Kafka | librdkafka | Outbox 发布、事件消费 |
+| RabbitMQ | rabbitmq-c 等 | 队列、确认、路由与消费 |
 
-可使用：
+客户端选择要检查线程安全规则、连接复用、异步模型、TLS、集群拓扑、取消、维护状态和指标接口。不要让 Repository 返回客户端库对象，也不要把 Redis 锁包装成“天然正确的分布式互斥”。
 
-- LRU
-- LFU
-- TinyLFU
-- 分片 Hash Map
-- 读写锁
-- RCU 风格结构
-- 不可变快照
+## 6.6 缓存只能优化读取，不能偷偷改变事实来源
 
-本地缓存延迟低，但需要解决多实例一致性和容量限制。
+Cache Aside 的读取顺序是：查缓存，未命中后查数据库，再用有限 TTL 写回。更新顺序通常是先提交数据库，再删除缓存；如果先删缓存而事务随后失败，其他请求可能把旧值重新填回。对刚写完必须立刻读到新值的路径，可直接读主库、携带版本，或在响应中返回完整资源。
 
----
+缓存实现还要固定：
 
-# 12. 消息队列与事件驱动
+- Key 包含业务命名空间和 Schema 版本。
+- TTL 带抖动，避免同一时刻集中失效。
+- 空结果只短暂缓存，防止穿透又避免掩盖新数据。
+- 热点重建使用 singleflight、租约或旧值兜底，不能让所有请求同时访问数据库。
+- Value 大小、连接池、命中率、错误率和延迟都有上限与指标。
 
-## 12.1 Kafka
+缓存故障时是否降级到数据库取决于数据库容量；“缓存挂了就全部回源”可能直接造成级联故障。
 
-适合：
+## 6.7 消费者以业务提交为确认边界
 
-- 高吞吐日志流
-- 事件总线
-- 数据管道
-- 异步解耦
-- 流处理
-- 行为埋点
+消息消费者按有界批次拉取，在业务事务成功后才提交 Offset/ACK。处理失败时区分可重试错误、永久业务错误和坏消息；重试超过预算后进入死信或人工处理通道，同时保留原始消息、错误和处理版本。
 
-C/C++ 常使用 librdkafka。
+消费者至少使用事件 ID 或业务唯一键保证幂等。重平衡和进程退出时停止拉取新消息，等待当前批次完成，再提交已完成进度；否则会扩大重复消费或延迟分区移交。
 
-需要理解：
+# 7. 把 Deadline、重试、幂等和背压连起来
 
-- Topic
-- Partition
-- Offset
-- Consumer Group
-- 副本
-- ISR
-- 顺序只在分区内保证
-- At-most-once / At-least-once / Exactly-once 语义边界
-
-## 12.2 RabbitMQ
-
-适合：
-
-- 路由灵活
-- 业务消息
-- Work Queue
-- 发布订阅
-- 延迟和重试体系
-
-重点概念：
-
-- Exchange
-- Queue
-- Binding
-- Routing Key
-- ACK
-- Dead Letter
-- Prefetch
-
-## 12.3 RocketMQ 与 Pulsar
-
-常见于：
-
-- 大规模业务消息
-- 延迟消息
-- 事务消息
-- 多租户消息系统
-- 云原生消息场景
-
-## 12.4 消息可靠性
-
-生产者侧：
-
-- 发送确认
-- 重试
-- 本地消息表
-- Outbox Pattern
-- 幂等键
-
-消费者侧：
-
-- 手动 ACK
-- 重试次数
-- 死信队列
-- 去重
-- 幂等处理
-- 顺序消费
-- 消费进度
-
-```mermaid
-flowchart LR
-    A["业务事务"] --> B["Outbox 表"]
-    B --> C["消息转发器"]
-    C --> D["消息队列"]
-    D --> E["消费者"]
-    E --> F["幂等检查"]
-    F --> G["业务处理"]
-```
-
-“消息队列不丢消息”不能只由 MQ 产品保证，还取决于生产、存储、确认和消费的完整链路。
-
----
-
-# 13. 服务治理与分布式系统
-
-## 13.1 服务注册与发现
-
-常见组件：
-
-- etcd
-- Consul
-- ZooKeeper
-- Nacos
-- Kubernetes Service
-- 企业内部名字服务
-
-基本流程：
-
-```mermaid
-sequenceDiagram
-    participant P as Provider
-    participant R as Registry
-    participant C as Consumer
-
-    P->>R: register + heartbeat
-    C->>R: subscribe service
-    R-->>C: endpoint list
-    C->>P: RPC request
-    P-->>C: RPC response
-```
-
-## 13.2 配置中心
-
-需要支持：
-
-- 配置版本
-- 灰度发布
-- 动态更新
-- 回滚
-- 环境隔离
-- 权限
-- 审计
-- 敏感配置加密
-- 本地兜底
-
-不要在配置回调线程中直接执行耗时操作。
-
-## 13.3 负载均衡
-
-常见策略：
-
-- Round Robin
-- Random
-- Weighted Round Robin
-- Least Connections
-- Consistent Hash
-- P2C
-- Locality-aware
-- 根据实时延迟和错误率
-
-客户端负载均衡适合 RPC；服务端负载均衡常通过代理或网关实现。
-
-## 13.4 超时
-
-所有跨进程调用都应有超时。
-
-超时需要分层：
+## 7.1 一个请求只有一个总预算
 
 ```text
-总请求 Deadline
-├── RPC A Timeout
-├── RPC B Timeout
-└── Database Timeout
+HTTP 总 Deadline：800 ms
+├── 排队与解析：50 ms
+├── 库存 RPC：200 ms
+├── 数据库获取连接与事务：350 ms
+└── 序列化与安全余量：200 ms
 ```
 
-子调用超时总和不能无约束地超过上层 Deadline。
+下游调用使用“剩余时间”而不是每层重新获得完整超时。内部统一采用单调时钟记录 Deadline，跨协议时再转换为框架要求的格式。
 
-## 13.5 重试
+```cpp
+struct RequestContext {
+    std::string request_id;
+    std::string trace_id;
+    std::chrono::steady_clock::time_point deadline;
+    std::stop_token stop;
 
-只对满足条件的错误重试：
-
-- 连接失败
-- 明确的临时不可用
-- 超时且操作幂等
-- 服务端返回可重试状态
-
-重试必须配合：
-
-- 最大次数
-- 指数退避
-- 抖动
-- Deadline
-- 熔断
-- 重试预算
-
-否则会形成重试风暴。
-
-## 13.6 幂等
-
-常见方法：
-
-- 幂等键
-- 唯一索引
-- 请求序列号
-- 状态机约束
-- 去重表
-- Compare-And-Swap
-- 业务版本号
-
-## 13.7 限流
-
-算法：
-
-- 固定窗口
-- 滑动窗口
-- 漏桶
-- 令牌桶
-- 并发数限制
-- 自适应限流
-
-限流维度：
-
-- 用户
-- IP
-- 接口
-- 服务
-- 租户
-- 机房
-- 全局
-
-## 13.8 熔断与降级
-
-```mermaid
-stateDiagram-v2
-    [*] --> Closed
-    Closed --> Open: failure rate exceeds threshold
-    Open --> HalfOpen: cooldown expires
-    HalfOpen --> Closed: probe succeeds
-    HalfOpen --> Open: probe fails
+    [[nodiscard]] std::chrono::milliseconds remaining() const {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) return std::chrono::milliseconds{0};
+        return std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    }
+};
 ```
 
-降级方式：
+超时不是取消的同义词。调用方超时返回后，应尽可能把取消传播到 RPC、数据库任务和排队任务；如果底层无法取消，就必须确保迟到结果不会再次提交业务状态。
 
-- 返回缓存
-- 返回默认值
-- 关闭非核心功能
-- 降低数据精度
-- 异步处理
-- 拒绝低优先级请求
+## 7.2 重试只针对可证明安全的失败
 
-## 13.9 一致性与共识
+| 问题 | 是否自动重试 |
+|---|---|
+| 建连失败且操作未发送 | 通常可以，仍受总 Deadline 限制 |
+| 明确返回临时不可用 | 可有限重试，使用指数退避和抖动 |
+| 写请求超时，服务端是否提交未知 | 不能盲重试，先依赖幂等键查询结果 |
+| 参数非法或权限不足 | 不重试 |
+| 下游持续过载 | 重试通常会恶化故障，应限流或熔断 |
 
-需要理解：
+重试次数不是可靠性指标。真正需要的是重试预算、最大并发、退避、抖动、熔断和可观测的最终结果。
 
-- CAP 的实际含义
-- 线性一致性
-- 最终一致性
-- Read-your-writes
-- Quorum
-- Leader/Follower
-- Raft
-- Paxos 基本思想
-- 脑裂
-- 租约
-- Fencing Token
+## 7.3 幂等键必须落到唯一约束
 
-业务开发通常不需要自己实现 Raft，但必须理解中间件的一致性边界。
+客户端为创建请求提供 `Idempotency-Key`，数据库建立唯一索引：
 
----
+```sql
+CREATE UNIQUE INDEX uk_orders_idempotency
+ON orders(idempotency_key);
+```
 
-# 14. 网关、代理与负载均衡
+重复请求若参数相同，返回第一次创建的资源；若相同键对应不同参数，返回冲突。只在进程内 Hash Map 记录请求无法覆盖重启、多副本和并发竞争。
 
-常见组件：
-
-- Nginx
-- Envoy
-- HAProxy
-- API Gateway
-- Ingress Controller
-- 自研接入层
-
-职责：
-
-- TLS 终止
-- 路由
-- 负载均衡
-- 限流
-- 鉴权
-- 协议转换
-- 灰度
-- 访问日志
-- 防护
-- 长连接管理
+## 7.4 背压从入口一直传到下游
 
 ```mermaid
 flowchart LR
-    U["客户端"] --> CDN["CDN / 边缘"]
-    CDN --> LB["四层负载均衡"]
-    LB --> GW["七层网关"]
-    GW --> A["Service A"]
-    GW --> B["Service B"]
-    GW --> C["WebSocket / 长连接服务"]
+    IN["入口流量"] --> LIMIT["并发限制"]
+    LIMIT --> QUEUE["有界队列"]
+    QUEUE --> WORKERS["Worker / Coroutine"]
+    WORKERS --> DOWNSTREAM["DB / RPC / MQ"]
+    QUEUE -->|"满"| REJECT["快速拒绝 / 降级"]
+    DOWNSTREAM -->|"变慢"| SIGNAL["延迟与饱和指标"]
+    SIGNAL --> LIMIT
 ```
 
-四层代理关注 TCP/UDP；七层代理理解 HTTP、gRPC 等应用协议。
+控制点包括连接数、在途请求、每租户配额、线程池队列、数据库连接和流式 RPC 窗口。无界队列会把短暂过载变成高延迟和 OOM。
 
----
+## 7.5 服务发现、负载均衡和熔断在调用端汇合
 
-# 15. 日志、指标与链路追踪
-
-现代后端可观测性通常由 Logs、Metrics 和 Traces 共同组成。
+一次 RPC 不应在请求路径里同步查询注册中心。Resolver 监听 Kubernetes Service/DNS、etcd、Consul、Nacos 或内部名字服务，把更新发布为不可变 Endpoint 快照；负载均衡器从快照中选节点，连接池复用 Channel，健康与熔断逻辑再根据实时结果调整可选集合。
 
 ```mermaid
-flowchart TB
-    S["C++ Service"] --> L["Logs<br/>事件与上下文"]
-    S --> M["Metrics<br/>趋势与告警"]
-    S --> T["Traces<br/>跨服务因果链"]
-
-    L --> P["日志平台"]
-    M --> PR["Prometheus"]
-    T --> OT["OpenTelemetry Collector"]
-
-    PR --> G["Grafana / Alerting"]
-    OT --> J["Jaeger / Tempo / Vendor"]
-    P --> G
-    J --> G
+flowchart LR
+    REGISTRY["Service Registry / DNS"] -->|"watch / refresh"| SNAPSHOT["Endpoint Snapshot"]
+    REQUEST["RPC Request"] --> LB["Load Balancer"]
+    SNAPSHOT --> LB
+    LB --> CHANNEL["Connection / Channel Pool"]
+    CHANNEL --> ENDPOINT["Selected Endpoint"]
+    ENDPOINT --> HEALTH["成功率 · 延迟 · 熔断状态"]
+    HEALTH --> LB
 ```
 
-OpenTelemetry C++ 可生成并导出 traces、metrics 和 logs。[OpenTelemetry C++ 文档][otel] Prometheus 适合记录数值时间序列和监控动态服务架构。[Prometheus 文档][prometheus]
+更新失败时保留最近一次有效快照并设置过期边界；空列表、节点下线和跨机房回退都要有明确策略。若 Envoy/Service Mesh 已负责发现和负载均衡，应用客户端不要再叠加一套相互竞争的节点剔除与重试逻辑。
 
-## 15.1 日志
+# 8. 可观测性必须围绕一次请求组织
 
-常用库：
+## 8.1 统一关联字段
 
-- spdlog
-- glog
-- Boost.Log
-- 自研日志库
-
-日志字段建议：
+日志、指标和 Trace 至少围绕以下上下文：
 
 ```json
 {
-  "timestamp": "2026-07-14T10:00:00.123Z",
+  "timestamp": "2026-08-07T01:00:00.123Z",
   "level": "ERROR",
   "service": "order-service",
-  "trace_id": "abc",
-  "request_id": "req-123",
-  "user_id": "u-42",
-  "error_code": "DB_TIMEOUT",
-  "message": "query timeout",
-  "cost_ms": 120
+  "request_id": "req-7f2",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "route": "POST /v1/orders",
+  "error_code": "inventory_unavailable",
+  "latency_ms": 237,
+  "message": "inventory reservation failed"
 }
 ```
 
-注意：
+日志中不写密码、Token、完整支付信息或无界请求体。异步日志队列同样需要容量和溢出策略；发生严重错误时不能因为队列已满而悄悄丢掉所有证据。
 
-- 异步日志队列必须有容量上限
-- 高并发路径不要构造无用日志字符串
-- 不记录密码、Token 和敏感个人数据
-- 日志采样要保留错误和关键链路
-- 日志级别应可动态调整
+## 8.2 指标回答趋势，日志回答事件，Trace 回答因果链
 
-## 15.2 Metrics
+```mermaid
+flowchart TB
+    REQUEST["HTTP Request"] --> HTTP_SPAN["HTTP Server Span"]
+    HTTP_SPAN --> RPC_SPAN["Inventory RPC Span"]
+    HTTP_SPAN --> DB_SPAN["MySQL Transaction Span"]
+    HTTP_SPAN --> LOG["结构化日志<br/>trace_id / request_id"]
+    HTTP_SPAN --> METRIC["请求数 · 错误率 · 延迟直方图"]
+    RPC_SPAN --> METRIC
+    DB_SPAN --> METRIC
+```
 
-四类黄金信号：
+核心指标包括：
 
-- Latency
-- Traffic
-- Errors
-- Saturation
+| 层次 | 指标 |
+|---|---|
+| 入口 | QPS、在途请求、响应码、请求大小、P50/P95/P99 |
+| Executor | 活跃线程、队列长度、排队耗时、拒绝数 |
+| RPC | 下游状态码、Deadline、重试次数、连接状态 |
+| 数据库 | 池使用率、获取耗时、查询耗时、事务回滚 |
+| 进程 | CPU、RSS、分配速率、FD、线程数、事件循环延迟 |
 
-服务常见指标：
+[Prometheus][prometheus] Label 不放 `user_id`、订单 ID 或原始 URL 这类高基数字段。路由模板 `POST /v1/orders` 可以作为 Label，具体订单号只进入受控日志或 Span 属性。
 
-- QPS
-- P50/P95/P99/P999
-- Error Rate
-- Active Connections
-- Queue Length
-- Thread Pool Utilization
-- CPU
-- RSS
-- Allocation Rate
-- Cache Hit Rate
-- DB Pool Usage
-- RPC Timeout Rate
+[OpenTelemetry C++][otel] 可统一生成 traces、metrics 和 logs，并通过 Collector 输出到后端。SDK 初始化、采样率、Exporter 队列和关闭时 flush 都应显式配置；不要在业务代码里绑定某个观测厂商的数据结构。
 
-不要使用高基数 Label，例如直接把 `user_id` 作为 Prometheus 标签。
+## 8.3 健康检查分清三种语义
 
-## 15.3 Trace
+- **Liveness**：进程是否陷入无法自行恢复的状态。
+- **Readiness**：是否愿意接收新流量，例如尚未加载配置或正在排空。
+- **Startup**：慢启动阶段是否仍在正常初始化。
 
-一个 Trace 由多个 Span 组成。
+下游数据库短暂故障通常不应让 Liveness 失败，否则所有副本可能同时重启。Readiness 是否依赖下游，要根据服务能否降级处理决定。
 
-应传递：
+# 9. 测试从纯业务一直覆盖到协议边界
 
-- trace id
-- span id
-- parent span
-- baggage
-- deadline
-- request id
-
-Trace 可用于定位：
-
-- 哪个下游耗时
-- 重试发生在哪里
-- 数据库查询是否过慢
-- 队列等待时间
-- 跨机房延迟
-
-## 15.4 Profiling
-
-持续剖析可关注：
-
-- CPU Profile
-- Heap Profile
-- Allocation Profile
-- Lock Contention
-- Off-CPU
-- Wall Time
-
----
-
-# 16. 测试、静态分析与代码质量
-
-## 16.1 GoogleTest / GoogleMock
-
-GoogleTest 是常用 C++ 测试框架，GoogleMock 用于替换外部依赖和验证交互。[GoogleTest 文档][gtest]
+## 9.1 单元测试不启动网络和数据库
 
 ```cpp
-TEST(OrderServiceTest, RejectsEmptyUserId) {
-    FakeRepository repo;
-    OrderService service(repo);
+class FakeOrderRepository final : public OrderRepository {
+public:
+    Result<Order> CreateWithOutbox(
+        const CreateOrderCommand& command,
+        const Reservation&) override {
+        created = command;
+        return Order{.id = "order-1", .status = OrderStatus::Confirmed};
+    }
 
-    auto result = service.CreateOrder({.user_id = ""});
+    std::optional<CreateOrderCommand> created;
+};
 
-    EXPECT_FALSE(result.has_value());
+TEST(OrderServiceTest, RejectsEmptySkuListBeforeCallingDependencies) {
+    FakeOrderRepository repository;
+    FakeInventoryClient inventory;
+    OrderService service(repository, inventory);
+
+    CreateOrderCommand command{
+        .user_id = UserId{"user-1"},
+        .sku_ids = {},
+        .idempotency_key = "idem-1",
+    };
+
+    const auto result = service.CreateForTest(command);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+    EXPECT_FALSE(repository.created.has_value());
 }
 ```
 
-测试类型：
+Mock 适合验证“是否调用一次取消接口”等交互；业务结果测试优先使用小型 Fake，减少测试与调用顺序耦合。
 
-- 单元测试
-- 组件测试
-- 集成测试
-- 接口测试
-- 端到端测试
-- 回归测试
-- 性能测试
-- 混沌测试
+## 9.2 让 CTest 自动发现 GoogleTest
 
-## 16.2 Benchmark
+[GoogleTest][gtest] 通过 CMake 的 `gtest_discover_tests()` 接入 CTest：
 
-常见工具：
+```cmake
+find_package(GTest CONFIG REQUIRED)
 
-- Google Benchmark
-- 自研压测工具
-- wrk
-- wrk2
-- hey
-- ghz
-- vegeta
-- iperf
-- redis-benchmark
+add_executable(order_unit_tests
+    unit/order_service_test.cpp
+)
+target_link_libraries(order_unit_tests PRIVATE
+    order_core
+    order_warnings
+    GTest::gtest_main
+)
 
-性能测试必须明确：
+include(GoogleTest)
+gtest_discover_tests(order_unit_tests)
+```
 
-- 并发模型
-- 请求分布
-- 预热
-- CPU 绑定
-- 数据集
-- 网络拓扑
-- 延迟统计方法
-- 失败率
-- 环境噪声
+测试二进制也链接 warnings 和 sanitizer 选项。CTest 统一执行后，IDE、本地和 CI 不需要维护三套测试命令。
 
-## 16.3 Sanitizers
+## 9.3 集成测试验证真正边界
 
-常用：
+集成测试启动与生产主版本一致的 MySQL、Redis 和消息组件，执行真实 migration，然后验证：
 
-| 工具 | 目标 |
+- 参数绑定和字符集。
+- 唯一约束下的并发幂等。
+- 事务回滚和连接失效恢复。
+- Outbox 抢占与重复发布。
+- Proto 新旧版本互通。
+- SIGTERM 期间在途请求行为。
+
+测试数据每例隔离，失败时保留容器日志和服务日志。不要用 SQLite 替代 MySQL 来验证锁、隔离级别或方言相关逻辑。
+
+## 9.4 静态分析、Sanitizer 和 Fuzz 各自发现不同问题
+
+| 工具 | 主要目标 | 运行位置 |
+|---|---|---|
+| clang-format | 稳定格式，减少无意义 diff | 提交前和 CI |
+| [clang-tidy][clang-tidy] | API 误用、生命周期、现代化和规则检查 | 增量检查与定期全量 |
+| ASan + UBSan | 越界、Use-after-free、未定义行为 | 单元和集成测试 |
+| TSan | 数据竞争 | 单独构建；不要与 ASan 混跑 |
+| [libFuzzer][libfuzzer] | 协议解析、JSON 转换、压缩与解码 | 持续语料库回归 |
+| llvm-cov / gcov | 未覆盖路径 | 辅助判断，不把覆盖率当质量本身 |
+
+[AddressSanitizer][asan] 构建同时在编译和链接阶段加入 `-fsanitize=address`，并保留 `-fno-omit-frame-pointer` 以改善栈信息。Sanitizer 二进制不是生产发布物，但它应运行真实的集成路径。
+
+## 9.5 基准分成微基准和服务压测
+
+[Google Benchmark][benchmark] 适合序列化、路由匹配、内存池等进程内热点；`wrk`、`ghz` 或自研工具用于端到端 HTTP/RPC 压测。结果至少记录：
+
+- 机器、CPU 频率策略、编译器和完整 flags。
+- 数据集、预热、连接模型和并发数。
+- 吞吐、错误率、P50/P95/P99/P999。
+- CPU、RSS、分配速率、上下文切换和下游饱和度。
+
+只报告平均延迟会掩盖排队、锁竞争和周期性暂停。
+
+# 10. 故障定位按证据逐层收窄
+
+## 10.1 四种构建各有用途
+
+| 构建 | 用途 |
 |---|---|
-| ASan | 越界、Use-after-free 等内存错误 |
-| UBSan | 未定义行为 |
-| TSan | 数据竞争 |
-| MSan | 未初始化内存读取 |
-| LSan | 泄漏 |
+| Debug | 本地单步、断言、快速修改 |
+| ASan/UBSan | 内存与未定义行为检查 |
+| TSan | 并发竞态检查 |
+| RelWithDebInfo | 接近生产优化，同时保留符号用于 perf/core |
 
-AddressSanitizer 由编译器插桩和运行时组成，可检测堆、栈和全局对象越界及 Use-after-free 等问题。[Clang ASan 文档][asan]
+发布制品记录 Git Commit、Build ID、编译器、依赖 lock、CMake cache 摘要和 SBOM。调试符号可拆分保存，但必须能按 Build ID 找回。
 
-## 16.4 静态分析
-
-常用：
-
-- clang-tidy
-- Clang Static Analyzer
-- cppcheck
-- Coverity
-- SonarQube
-- PVS-Studio
-
-检查内容：
-
-- 空指针
-- 未初始化
-- 生命周期
-- API 误用
-- 锁问题
-- 越界
-- 资源泄漏
-- 风格和现代化建议
-
-## 16.5 格式与规范
-
-常见工具：
-
-- clang-format
-- clang-tidy
-- include-what-you-use
-- pre-commit
-
-规范应覆盖：
-
-- 命名
-- 所有权
-- 错误处理
-- 并发模型
-- 日志
-- 接口兼容
-- 禁用特性
-- 代码审查要求
-
----
-
-# 17. 调试、性能分析与故障定位
-
-## 17.1 调试器
-
-常用：
-
-- GDB
-- LLDB
-- Visual Studio Debugger
-
-应掌握：
-
-- breakpoint
-- watchpoint
-- backtrace
-- core dump
-- 多线程切换
-- 条件断点
-- 反汇编
-- 寄存器
-- 内存检查
-- pretty printer
-- attach 到进程
-
-## 17.2 Core Dump
-
-典型流程：
+## 10.2 Crash 先保护现场
 
 ```bash
 ulimit -c unlimited
-gdb ./server core
-(gdb) bt
-(gdb) thread apply all bt
+gdb ./order_server core.order_server
 ```
 
-线上二进制必须保留与构建对应的：
+```gdb
+info threads
+thread apply all bt full
+frame 3
+info locals
+x/32gx address
+```
 
-- Build ID
-- Debug symbols
-- Source revision
-- Compiler flags
-- 依赖版本
+检查二进制和 core 是否匹配，随后查看崩溃线程、其他线程是否死锁、对象生命期和最近日志。没有符号的地址列表通常不足以定位模板化 C++ 代码。
 
-## 17.3 perf
-
-Linux `perf` 可使用硬件性能计数器、tracepoint、kprobe 和 uprobe 进行性能分析。[perf Wiki][perf]
-
-常用命令：
+## 10.3 慢请求先判断在 CPU 上还是在等待
 
 ```bash
-perf stat ./server
-perf record -g -p <pid>
+perf stat -p <pid>
+perf record -F 99 -g -p <pid> -- sleep 30
 perf report
 ```
 
-## 17.4 火焰图
+- 高 CPU：看热点函数、分支失误、Cache Miss、分配和序列化。
+- 低 CPU 高延迟：看 off-CPU、锁、futex、磁盘、网络和下游 Span。
+- RSS 增长：区分真实存活对象、allocator cache、碎片、线程栈和 mmap。
+- 周期性尖峰：对照定时任务、日志 flush、连接重建和后台 compaction。
 
-火焰图用于展示采样栈聚合结果。
+`perf`、eBPF、调度、内存和 I/O 的底层机制在 [Linux 系统专题](post.html?slug=os_review) 中展开。这里的关键是先用指标和 Trace 选择工具，而不是看到“服务慢”就直接生成 CPU 火焰图。
 
-- 宽度表示采样占比
-- 垂直方向表示调用栈
-- 顶部宽函数通常是热点
-- 需要同时分析 on-CPU 和 off-CPU
+## 10.4 常见现象的第一组证据
 
-## 17.5 内存工具
+| 现象 | 第一组证据 |
+|---|---|
+| P99 上升但 QPS 不变 | 队列长度、下游延迟、锁等待、事件循环延迟 |
+| CPU 满且吞吐不升 | perf stat、热点栈、分配速率、上下文切换 |
+| 内存缓慢上涨 | heap profile、smaps、存活对象、池和缓存容量 |
+| 连接数上涨 | 状态分布、超时、半关闭、FD 限制、客户端重连 |
+| 数据库连接池耗尽 | 获取耗时、慢 SQL、事务时长、池大小与副本数 |
+| 发布后错误率上升 | 按版本切分指标、配置 diff、依赖和 Schema 兼容 |
 
-常见：
+# 11. 安全是协议和资源边界的一部分
 
-- heaptrack
-- Valgrind
-- Massif
-- gperftools
-- jemalloc profiling
-- tcmalloc profiling
-- ASan/LSan
-- `/proc/<pid>/smaps`
+## 11.1 入口限制比事后过滤可靠
 
-## 17.6 eBPF
+每个外部入口都设置：
 
-常用于：
+- 最大 Header、Body、消息和数组长度。
+- 读取、处理、写回和空闲超时。
+- Content-Type 与编码校验。
+- 认证、授权和租户边界。
+- 参数化 SQL 与路径规范化。
+- 解压后大小、嵌套深度和总资源预算。
 
-- 系统级动态追踪
-- 网络观测
-- 调度延迟
-- 文件 I/O
-- syscall
-- off-CPU 分析
-- 低侵入线上诊断
+协议解析器适合用 libFuzzer 持续测试。一个长度字段在校验前参与 `resize()`，就可能把普通非法包变成内存拒绝服务。
 
-工具生态：
+## 11.2 TLS 和身份放在哪一层
 
-- bpftrace
-- BCC
-- libbpf
-- Pixie
-- Parca Agent
-- 企业内部 eBPF 平台
+公网 HTTP 常在 Envoy、Nginx 或云负载均衡器终止 TLS；服务到服务可使用 mTLS。即使入口网关完成认证，服务仍需验证可信的身份上下文，不能接受客户端自行伪造的内部 Header。
 
-## 17.7 常见性能瓶颈分类
+证书和密钥来自 Secret/KMS/Vault 类系统，不写入 Git、镜像层、日志、命令行或 core。密钥轮换必须在不中断服务的情况下演练。
 
-```mermaid
-flowchart TB
-    A["服务变慢"] --> B{"瓶颈类型"}
-    B --> C["CPU<br/>热点 / 分支 / Cache Miss"]
-    B --> D["内存<br/>分配 / 泄漏 / 碎片 / NUMA"]
-    B --> E["锁<br/>竞争 / 死锁 / 优先级反转"]
-    B --> F["I/O<br/>磁盘 / 网络 / 系统调用"]
-    B --> G["队列<br/>排队 / 背压不足"]
-    B --> H["下游<br/>DB / RPC / MQ"]
-```
+## 11.3 编译与供应链加固
 
-性能优化顺序：
+根据平台支持评估 PIE、RELRO、栈保护和 `_FORTIFY_SOURCE`。依赖要固定来源与版本，生成 SBOM、执行漏洞扫描并保留制品签名。镜像中只复制运行所需文件，服务使用非 root 用户和最小权限。
 
-1. 先测量。
-2. 找到主导瓶颈。
-3. 建立可复现基准。
-4. 修改一个变量。
-5. 比较吞吐、尾延迟、CPU、内存和错误率。
-6. 防止性能回归。
+# 12. 优雅关闭和容器部署
 
----
-
-# 18. 安全技术栈
-
-## 18.1 TLS
-
-常见库：
-
-- OpenSSL
-- BoringSSL
-- LibreSSL
-
-需要理解：
-
-- 证书链
-- CA
-- SNI
-- ALPN
-- TLS 终止
-- mTLS
-- 证书轮换
-- 私钥保护
-- Cipher Suite
-- 会话复用
-
-## 18.2 身份认证
-
-常见机制：
-
-- Session
-- JWT
-- OAuth 2.0
-- OpenID Connect
-- API Key
-- HMAC 签名
-- mTLS
-- 内部服务身份
-
-注意 JWT：
-
-- 验证签名
-- 验证 `exp`、`nbf`、`iss`、`aud`
-- 处理密钥轮换
-- 不在 Payload 放敏感明文
-- 不把“可解码”误认为“已认证”
-
-## 18.3 输入安全
-
-必须防御：
-
-- SQL Injection
-- Command Injection
-- Path Traversal
-- SSRF
-- 反序列化漏洞
-- 整数溢出
-- 缓冲区越界
-- 压缩炸弹
-- 超大请求
-- 正则表达式 DoS
-- 协议解析歧义
-
-协议解析器必须验证：
-
-- 长度
-- 偏移
-- 版本
-- 枚举范围
-- 嵌套深度
-- 元素数量
-- 总资源消耗
-
-## 18.4 Secret 管理
-
-不要把密钥放在：
-
-- Git 仓库
-- Docker 镜像层
-- 日志
-- 命令行参数
-- Core Dump
-- 明文配置
-
-可使用：
-
-- Kubernetes Secret
-- Vault
-- 云 KMS
-- 企业密钥平台
-- 短期凭证
-
-## 18.5 供应链安全
-
-关注：
-
-- 依赖版本锁定
-- SBOM
-- 漏洞扫描
-- 制品签名
-- 可重复构建
-- 私有镜像仓库
-- 最小基础镜像
-- 编译器和工具链可信来源
-
----
-
-# 19. 容器、部署与云原生
-
-## 19.1 Docker
-
-容器镜像包含运行容器所需的文件、二进制、库和配置。[Docker 文档][docker]
-
-典型多阶段构建：
-
-```dockerfile
-FROM ubuntu:24.04 AS builder
-
-RUN apt-get update && apt-get install -y \
-    build-essential cmake ninja-build
-
-WORKDIR /src
-COPY . .
-RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build build
-
-FROM ubuntu:24.04
-
-RUN useradd -r app
-COPY --from=builder /src/build/server /usr/local/bin/server
-
-USER app
-ENTRYPOINT ["/usr/local/bin/server"]
-```
-
-注意：
-
-- 多阶段构建
-- 固定基础镜像版本
-- 非 root 用户
-- 不复制编译缓存和密钥
-- 最小化运行时依赖
-- 设置健康检查
-- 正确处理 SIGTERM
-- 容器内写入临时目录而非镜像层
-
-## 19.2 Kubernetes
-
-Kubernetes 用于管理容器化工作负载和服务，支持声明式配置与自动化。[Kubernetes 文档][kubernetes]
-
-C++ 服务常涉及：
-
-- Deployment
-- StatefulSet
-- Service
-- ConfigMap
-- Secret
-- Ingress
-- HPA
-- PDB
-- Job / CronJob
-- Readiness Probe
-- Liveness Probe
-- Startup Probe
-
-```mermaid
-flowchart TB
-    D["Deployment"] --> RS["ReplicaSet"]
-    RS --> P1["Pod 1<br/>C++ Service"]
-    RS --> P2["Pod 2<br/>C++ Service"]
-    RS --> P3["Pod 3<br/>C++ Service"]
-    S["Service"] --> P1
-    S --> P2
-    S --> P3
-    I["Ingress / Gateway"] --> S
-```
-
-## 19.3 健康检查
-
-- **Liveness**：进程是否需要重启
-- **Readiness**：是否可以接收流量
-- **Startup**：慢启动期间避免被错误重启
-
-不要把所有下游依赖都放进 Liveness。否则下游故障会导致大规模重启风暴。
-
-## 19.4 优雅关闭
-
-典型流程：
+## 12.1 关闭顺序与启动顺序相反
 
 ```mermaid
 sequenceDiagram
-    participant K as Kubernetes
-    participant S as Service
+    participant O as Orchestrator
+    participant S as order-service
     participant LB as Load Balancer
-    participant C as Client
+    participant D as Dependencies
 
-    K->>S: SIGTERM
-    S->>LB: mark not ready
-    LB-->>S: stop new traffic
-    S->>S: stop accepting requests
-    S->>S: drain in-flight requests
-    S->>S: flush logs and metrics
-    S-->>K: exit
+    O->>S: SIGTERM
+    S->>S: readiness = false
+    LB-->>S: 停止新流量
+    S->>S: 停止 accept，新任务不再入队
+    S->>S: 等待在途请求至 drain deadline
+    S->>D: 关闭消费者、连接池和客户端
+    S->>S: flush logs / metrics / traces
+    S-->>O: exit
 ```
 
-## 19.5 Service Mesh
+信号处理器本身只发出停止通知，复杂关闭逻辑回到正常线程执行。超过 drain deadline 后取消剩余请求；不能让 Pod 永远停在 Terminating。
 
-常见：
+## 12.2 多阶段镜像保留运行依赖
 
-- Istio
-- Envoy
-- Linkerd
+```dockerfile
+# 替换为团队固定工具链、vcpkg baseline 和包缓存的 Builder 镜像。
+FROM registry.example/cpp-builder@sha256:<pinned-digest> AS builder
 
-可提供：
+WORKDIR /src
+COPY . .
+RUN cmake --preset release \
+    && cmake --build --preset release \
+    && cmake --install build/release --prefix /stage
 
-- mTLS
-- 路由
-- 重试
-- 熔断
-- 流量镜像
-- 可观测性
+FROM ubuntu:24.04
 
-但 Mesh 会增加：
+RUN useradd --system --uid 10001 app
+COPY --from=builder /stage/bin/order_server /usr/local/bin/
 
-- 资源开销
-- 网络路径复杂度
-- 故障面
-- 调试成本
+USER 10001
+ENTRYPOINT ["/usr/local/bin/order_server"]
+```
 
----
+[Docker 多阶段构建][docker]让编译工具链停留在 Builder 阶段。运行镜像仍需包含动态库、CA、时区等真实依赖；若希望极小镜像，先用 `ldd`、集成测试和 TLS 测试验证，而不是直接删除所有系统文件。
 
-# 20. CI/CD 与工程协作
+## 12.3 Kubernetes 资源与探针
 
-## 20.1 版本控制
+[Kubernetes][kubernetes] 通过探针和终止宽限期参与服务生命周期：
 
-Git 必须掌握：
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: order-service
+          image: registry.example/order-service:sha-<commit>
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              memory: "1Gi"
+```
 
-- branch
-- merge
-- rebase
-- cherry-pick
-- reset
-- revert
-- bisect
-- tag
-- submodule
-- conflict resolution
+CPU limit 会影响线程池和延迟，内存 limit 会改变 OOM 行为。线程数不要只取宿主机 `hardware_concurrency()`；容器配额、任务类型、事件循环和阻塞池应分别配置并用压测验证。
 
-## 20.2 CI 流水线
+## 12.4 CI 把同一制品推进到生产
 
 ```mermaid
 flowchart LR
-    A["提交代码"] --> B["格式检查"]
-    B --> C["静态分析"]
-    C --> D["编译"]
-    D --> E["单元测试"]
-    E --> F["Sanitizer 测试"]
-    F --> G["集成测试"]
-    G --> H["构建镜像"]
-    H --> I["漏洞扫描"]
-    I --> J["发布制品"]
-    J --> K["灰度部署"]
-    K --> L["监控验证"]
-    L --> M["全量 / 回滚"]
+    COMMIT["Commit"] --> FORMAT["format / lint"]
+    FORMAT --> BUILD["CMake build"]
+    BUILD --> UNIT["unit tests"]
+    UNIT --> SAN["ASan / UBSan / TSan"]
+    SAN --> INTEGRATION["integration / contract"]
+    INTEGRATION --> IMAGE["image + SBOM + symbols"]
+    IMAGE --> CANARY["canary"]
+    CANARY --> VERIFY["SLO / error budget 验证"]
+    VERIFY --> ROLLOUT["rollout 或 rollback"]
 ```
 
-常见平台：
+构建一次制品，后续环境只改变外部配置。数据库迁移先验证向后兼容：旧代码能读取新 Schema，新代码也能在滚动期间处理旧数据。
 
-- GitHub Actions
-- GitLab CI
-- Jenkins
-- Buildkite
-- Azure DevOps
-- 企业内部流水线
+# 13. 框架和工具怎么选
 
-## 20.3 制品管理
+## 13.1 Asio、Beast、muduo、libevent 和 libuv
 
-常见：
+### Boost.Asio / Standalone Asio
 
-- Docker Registry
-- Harbor
-- Artifactory
-- Nexus
-- Conan Remote
-- 内部二进制仓库
+适合需要自定义 TCP/UDP、Timer、TLS、串口或特殊连接协议的服务。它的核心价值是统一异步操作和 Executor，而不是提供完整服务治理。采用前要先设计对象生命期、取消、Buffer 所有权和错误传播。
 
-制品应关联：
+### Boost.Beast
 
-- Git Commit
-- Build ID
-- 编译器
-- 依赖锁文件
-- 构建参数
-- 测试结果
-- SBOM
+[Boost.Beast][beast] 建立在 Asio 上，提供 HTTP/1 和 WebSocket 协议组件。适合代理、网关或需要细粒度协议控制的组件；它不会自动提供 Controller、鉴权、配置中心和数据库层。若只是普通 REST API，应用框架通常更省维护成本。
 
-## 20.4 发布策略
+### muduo
 
-- Rolling Update
-- Blue-Green
-- Canary
-- 灰度
-- A/B
-- Feature Flag
+其 EventLoop、Channel、TcpConnection 和 one-loop-per-thread 设计很适合理解经典 Linux Reactor。新项目直接采用前需检查维护状态、C++ 标准、TLS/HTTP 需求、依赖和线上支持，不应只因其结构清晰就把它视为完整平台。
 
-发布必须有：
+### libevent / libuv
 
-- 指标基线
-- 自动停止条件
-- 回滚路径
-- 配置兼容
-- 数据库迁移策略
-- 新旧协议兼容
+libevent 提供事件通知、网络和定时器；libuv 提供跨平台事件循环、网络、文件和进程能力。C++ 项目通常需要再建立 RAII、类型安全、生命周期和协程适配层。已有成熟 C++ Asio 体系时，重复引入另一套事件循环会增加集成成本。
 
----
+## 13.2 Drogon、Oat++ 和 Crow
 
-# 21. 常见后端架构形态
+### Drogon
 
-## 21.1 单体服务
+适合需要异步 HTTP、Controller、中间件、WebSocket、数据库接入和插件机制的 C++ 服务。它减少协议层样板代码，但 Controller 并发安全、阻塞调用隔离、请求限制和观测仍由应用负责。
 
-```mermaid
-flowchart TB
-    C["Client"] --> A["C++ Monolith"]
-    A --> DB["Database"]
-    A --> R["Redis"]
-```
+### Oat++
 
-优点：
+[Oat++][oatpp] 强调类型化 API、对象映射和组件化，适合希望接口结构更显式的 REST 服务。选型时要验证异步路径、数据库适配、代码生成、部署体积和团队对其抽象的接受程度。
 
-- 部署简单
-- 调试容易
-- 本地调用成本低
-- 事务边界清晰
+### Crow
 
-风险：
+[Crow][crow] 接口轻量，适合内部工具、小型 API 和原型。进入长期生产链路前，应核对 TLS、HTTP 版本、中间件、限流、观测、安全更新和维护活跃度，而不是只比较 Hello World 吞吐。
 
-- 模块耦合
-- 发布影响面大
-- 扩容粒度粗
-- 团队协作冲突
+## 13.3 gRPC、bRPC、tRPC-Cpp 和 Tars
 
-## 21.2 微服务
+| 框架 | 主要优势 | 采用前重点确认 |
+|---|---|---|
+| [gRPC][grpc] | 跨语言 IDL、代码生成、Unary 与三种 Streaming、HTTP/2 生态 | Callback/Async 模型、Deadline、负载均衡、代理兼容 |
+| [Apache bRPC][brpc] | C++ 高性能服务、多协议与 bthread 生态 | 与现有线程模型、治理平台和协议的结合 |
+| [tRPC-Cpp][trpc] | 插件化、企业微服务能力整合 | 配置、名字服务、监控插件是否与现有平台匹配 |
+| [TarsCpp][tars] | IDL、RPC、注册、配置、监控和管理体系 | 是否采用完整 Tars 平台，跨团队运维成本 |
+
+标准跨语言服务优先考虑 gRPC；已有公司级 bRPC/tRPC/Tars 平台时，统一治理能力往往比单项基准更重要。不要在同一个调用链叠加两套重试、两套负载均衡和两套 Trace 注入。
+
+## 13.4 Nginx、HAProxy、Envoy 与 Gateway
+
+代理位于服务进程之外，适合统一处理 TLS、路由、负载均衡和入口保护，但不能替代应用自身的 Deadline、幂等和授权判断。
+
+| 方案 | 更合适的位置 | 主要特点 |
+|---|---|---|
+| [Nginx][nginx] | HTTP 反向代理、静态资源、TLS 入口 | 配置和模块生态成熟，也可代理 TCP/UDP |
+| [HAProxy][haproxy] | 四层/七层负载均衡 | 健康检查、运行时管理和代理能力集中 |
+| [Envoy][envoy] | 边缘网关、gRPC 代理、Service Mesh 数据面 | HTTP/L7 Filter、动态 xDS、细粒度观测与治理 |
+| [Kubernetes Gateway API][gateway-api] | 集群内声明监听器与路由 | 它是 API 模型，真正转发仍由具体 Controller/Data Plane 实现 |
 
 ```mermaid
 flowchart LR
-    C["Client"] --> G["Gateway"]
-    G --> U["User Service"]
-    G --> O["Order Service"]
-    G --> P["Payment Service"]
-    O --> R["Redis"]
-    O --> D["MySQL"]
-    O --> M["Message Queue"]
-    M --> N["Notification Service"]
+    CLIENT["Client"] --> EDGE["Edge Proxy<br/>TLS · 限流 · 路由"]
+    EDGE --> SERVICE["order-service"]
+    SERVICE --> SIDECAR["可选 Sidecar / Node Proxy"]
+    SIDECAR --> INVENTORY["inventory-service"]
 ```
 
-微服务不是为了“技术先进”，而是为了组织边界、独立发布和独立扩缩容。它会引入：
+接入代理时逐项确认责任归属：
 
-- 网络失败
-- 分布式事务
-- 版本兼容
-- 服务治理
-- 可观测性
-- 运维成本
+- 只能有明确的一层负责自动重试，且必须受总 Deadline 和幂等约束。
+- 代理与应用的 Body、Header、连接和空闲超时不能互相矛盾。
+- 正确传递 `traceparent`、客户端地址和原始协议，但只信任来自受控代理的内部 Header。
+- 应用进入 drain 后，代理停止新流量；长连接和 gRPC Stream 另设最大排空时间。
+- Mesh 增加一跳、资源和排错层次，只有统一 mTLS、治理与观测收益足以覆盖这些成本时才采用。
 
-## 21.3 分层架构
+## 13.5 序列化、日志和观测工具
+
+| 需求 | 常用方案 | 判断点 |
+|---|---|---|
+| 结构化日志 | spdlog、glog、Boost.Log | 异步队列、格式化成本、轮转、崩溃路径 |
+| 指标 | Prometheus client、框架内建 Metrics | 直方图、Label 基数、拉取或推送模型 |
+| 链路追踪 | OpenTelemetry C++ | SDK 初始化、采样、Exporter、Context 传播 |
+| JSON | nlohmann/json、RapidJSON、simdjson | 易用性、DOM/SAX、输入可信度、分配成本 |
+| Protobuf | protobuf runtime | Schema 演进、生成器版本、Arena 使用 |
+
+工具库不应该直接渗透领域对象。比如 Logger 和 Tracer 可在应用边界注入，业务状态不保存某个 Exporter 的 Handle。
+
+## 13.6 构建和分析工具各解决什么
+
+| 工具 | 负责 | 不负责 |
+|---|---|---|
+| GCC / Clang | 编译、优化、Sanitizer 插桩 | 项目依赖图和包解析 |
+| CMake | 描述 Target 并生成构建系统 | 下载所有依赖、替代编译器 |
+| Ninja / Make | 执行构建图 | 决定业务目录结构 |
+| Conan / vcpkg | 解析和构建依赖 | 自动保证 ABI 策略正确 |
+| clang-tidy | 静态规则和部分语义检查 | 代替运行测试和审查 |
+| GoogleTest | 测试组织与断言 | 自动产生有价值的测试用例 |
+| Google Benchmark | 进程内微基准 | 代替端到端容量测试 |
+| perf / eBPF | 运行时采样和系统观测 | 在没有复现场景时直接给出根因 |
+
+# 14. 三种常见落地方式
+
+## 14.1 普通 HTTP/RPC 业务服务
 
 ```text
-Transport Layer
-    ↓
-Application Service
-    ↓
-Domain Logic
-    ↓
-Repository / Infrastructure
-```
-
-适合业务系统，但不能机械套用。性能敏感路径可能需要减少抽象层和对象复制。
-
-## 21.4 事件驱动架构
-
-服务不直接同步调用所有后续系统，而是发布事件。
-
-优点：
-
-- 解耦
-- 削峰
-- 异步扩展
-- 容易接入新消费者
-
-风险：
-
-- 最终一致性
-- 重复消费
-- 事件顺序
-- 调试困难
-- Schema 演进
-
-## 21.5 CQRS
-
-Command 与 Query 分离：
-
-- 写模型处理状态变更
-- 读模型针对查询优化
-- 通过事件同步
-
-适合读写模式差异大、审计要求高的系统，不适合简单 CRUD 项目强行使用。
-
-## 21.6 游戏服务器架构
-
-```mermaid
-flowchart LR
-    C["Game Client"] --> A["Access / Gateway"]
-    A --> L["Login Service"]
-    A --> W["World / Lobby"]
-    W --> M["Matchmaking"]
-    M --> B["Battle Instance"]
-    W --> S["Social Service"]
-    W --> DB["Persistent Storage"]
-    B --> MQ["Event / Log Pipeline"]
-```
-
-关键技术：
-
-- 长连接与连接迁移
-- Session
-- 协议路由
-- Tick
-- 定时器
-- 状态机
-- AOI
-- 房间与实例调度
-- 断线重连
-- 消息顺序
-- 反作弊
-- 热更新与配置发布
-
----
-
-# 22. 典型技术栈组合
-
-## 22.1 通用 Linux 微服务
-
-```text
-C++20
-GCC / Clang
-CMake + Ninja
-Conan 2 或 vcpkg
-gRPC + Protocol Buffers
-MySQL / PostgreSQL
-Redis
-Kafka
-spdlog
-OpenTelemetry + Prometheus + Grafana
+C++23 + CMake + Ninja + vcpkg/Conan
+Drogon 对外 HTTP
+gRPC + Protobuf 对内调用
+MySQL + Redis + Kafka
+spdlog + OpenTelemetry + Prometheus
 GoogleTest + Sanitizers
 Docker + Kubernetes
 ```
 
-适合：
+重点是清晰边界、开发效率、接口兼容和运维能力，不必自研 Reactor。
 
-- 高性能内部服务
-- 多语言微服务
-- 推荐、搜索、风控、基础平台
-
-## 22.2 高性能自研网络服务
+## 14.2 高性能代理或长连接服务
 
 ```text
-C++20
-Linux
-epoll / io_uring
-Boost.Asio 或自研 Reactor
-自定义二进制协议 / Protobuf
-线程池或协程调度器
-jemalloc / tcmalloc
-perf + eBPF + FlameGraph
+C++20/23 + Asio/Beast 或成熟内部网络框架
+自定义连接状态机 + 有界 Buffer
+协议 Fuzz + 长连接压测
+jemalloc/tcmalloc 按证据评估
+perf + off-CPU + eBPF
+物理机或容器均以延迟和容量数据决定
 ```
 
-适合：
+重点转向连接生命周期、包解析、背压、内存复用、事件循环延迟和灰度兼容。`io_uring` 是否替代部分 epoll/线程池路径必须由目标内核、操作类型和基准决定。
 
-- 网关
-- 代理
-- 长连接
-- 实时通信
-- 游戏后台
-- 存储节点
-
-## 22.3 C++ REST API
+## 14.3 游戏或即时通信服务
 
 ```text
-C++20
-Drogon / Oat++
-CMake
-JSON
-PostgreSQL
-Redis
-JWT / OAuth2 接入
-OpenTelemetry
-Docker
-```
-
-适合：
-
-- 中小规模 HTTP 服务
-- 管理后台
-- BFF 中的性能敏感组件
-- 内部工具
-
-## 22.4 国内企业 RPC 体系
-
-```text
-C++17/20
-bRPC / tRPC-Cpp / Tars / 内部 RPC 框架
-Protobuf 或企业 IDL
-etcd / Nacos / 内部名字服务
-内部配置中心
-Prometheus / 内部监控
-Kubernetes 或自研部署平台
-```
-
-## 22.5 游戏服务器
-
-```text
-C++17/20
-Linux
-Asio / 内部网络框架
-TCP + UDP/KCP/QUIC
+Gateway / Session / Logic / Storage 分层
+TCP、WebSocket、UDP/KCP/QUIC 按链路选择
+Actor、协程或 Tick 驱动状态
 Protobuf / FlatBuffers / 自定义协议
-Redis
-MySQL
-Kafka / 内部消息总线
-Actor / 协程 / Tick 驱动
-Docker / 物理机 / Kubernetes 混合部署
+断线重连、消息序号、幂等和状态恢复
 ```
 
----
+连接、会话和业务实体的所有权模型比“用了哪个网络库”更关键。可结合 [NebulaIM](post.html?slug=nebula) 查看一个具体后端的模块和数据流。
 
-# 23. 技术选型原则
+# 15. 完成标准
 
-## 23.1 不要从框架名称开始
+一个服务达到可交付状态时，至少可以回答并验证这些问题：
 
-正确顺序：
+- 新机器能否只按文档和 lockfile 完成构建？
+- I/O 线程里是否存在阻塞数据库、DNS 或文件操作？
+- 每个外部调用是否有 Deadline，取消能传播到哪里？
+- 队列、连接池和请求 Body 是否有上限？
+- 写请求超时后，客户端重试是否会重复创建数据？
+- 订单与事件是否在同一事务中提交？
+- 日志、指标和 Trace 能否通过同一 request/trace ID 关联？
+- ASan、UBSan、TSan、静态分析和集成测试分别在哪里运行？
+- 发布二进制、调试符号、Build ID 和配置是否能准确对应？
+- SIGTERM 到来后，服务如何停止接流量并排空在途请求？
+- 新旧协议和数据库 Schema 能否完成滚动升级？
+- 发生 P99 上升、内存增长或 core dump 时，第一组证据在哪里？
 
-```mermaid
-flowchart LR
-    A["业务目标"] --> B["SLA 与流量模型"]
-    B --> C["一致性与可靠性要求"]
-    C --> D["团队能力与现有基础设施"]
-    D --> E["候选方案"]
-    E --> F["原型与压测"]
-    F --> G["最终选型"]
-```
+技术选型从请求路径和失败模型开始：先定义延迟、吞吐、一致性、可恢复性和团队维护边界，再选择框架。框架能减少样板代码，不能替代这些设计。
 
-## 23.2 关键问题
-
-### 流量
-
-- 平均 QPS 和峰值 QPS
-- 长连接数量
-- 请求大小
-- 读写比例
-- 流量是否突发
-- 是否需要跨机房
-
-### 延迟
-
-- 平均延迟
-- P99/P999
-- 抖动
-- 超时预算
-- 是否允许异步
-
-### 数据
-
-- 强一致还是最终一致
-- 事务边界
-- 数据规模
-- 热点
-- 访问模式
-- 是否需要历史回溯
-
-### 团队
-
-- 是否有成熟框架
-- 是否有运维平台
-- 是否能维护自研网络层
-- 是否有 C++ 线上排障能力
-- 是否要求跨语言
-
-## 23.3 选型常见误区
-
-- 因为性能高而选择 C++，但没有性能目标
-- 为简单 CRUD 自研 RPC 和网络框架
-- 把微服务当作默认架构
-- 使用无界队列掩盖下游变慢
-- 把重试当作可靠性保证
-- 在没有测量前做底层优化
-- 为了“现代 C++”过度模板化
-- 不考虑协议和数据的向后兼容
-- 只看平均延迟，不看尾延迟
-- 只关注代码，不建设监控和发布体系
-
-[cpp-standard]: https://www.iso.org/standard/83626.html
-[cmake]: https://cmake.org/cmake/help/latest/
-[bazel]: https://bazel.build/tutorials/cpp-use-cases
+[cmake-presets]: https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html
 [conan]: https://docs.conan.io/2/
 [vcpkg]: https://learn.microsoft.com/vcpkg/
+[bazel]: https://bazel.build/start/cpp
 [asio]: https://www.boost.org/doc/libs/latest/doc/html/boost_asio.html
-[drogon]: https://github.com/drogonframework/drogon
+[asio-coroutines]: https://www.boost.org/doc/libs/latest/doc/html/boost_asio/overview/composition/cpp20_coroutines.html
+[beast]: https://www.boost.org/doc/libs/latest/libs/beast/doc/html/index.html
+[drogon]: https://github.com/drogonframework/drogon/wiki
+[oatpp]: https://oatpp.io/docs/start/
+[crow]: https://crowcpp.org/master/
 [grpc]: https://grpc.io/docs/languages/cpp/
+[grpc-best-practices]: https://grpc.io/docs/languages/cpp/best_practices/
+[protobuf]: https://protobuf.dev/programming-guides/proto3/
 [brpc]: https://github.com/apache/brpc
 [trpc]: https://github.com/trpc-group/trpc-cpp
 [tars]: https://github.com/TarsCloud/TarsCpp
+[gtest]: https://google.github.io/googletest/
+[benchmark]: https://github.com/google/benchmark
+[clang-tidy]: https://clang.llvm.org/extra/clang-tidy/
+[asan]: https://clang.llvm.org/docs/AddressSanitizer.html
+[libfuzzer]: https://llvm.org/docs/LibFuzzer.html
 [otel]: https://opentelemetry.io/docs/languages/cpp/
 [prometheus]: https://prometheus.io/docs/introduction/overview/
-[gtest]: https://google.github.io/googletest/
-[asan]: https://clang.llvm.org/docs/AddressSanitizer.html
-[perf]: https://perfwiki.github.io/main/
-[docker]: https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/
-[kubernetes]: https://kubernetes.io/docs/concepts/overview/
+[docker]: https://docs.docker.com/build/building/multi-stage/
+[kubernetes]: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
+[nginx]: https://nginx.org/en/docs/
+[haproxy]: https://www.haproxy.com/documentation/haproxy-configuration-tutorials/
+[envoy]: https://www.envoyproxy.io/docs/envoy/latest/intro/what_is_envoy
+[gateway-api]: https://kubernetes.io/docs/concepts/services-networking/gateway/
