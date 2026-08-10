@@ -515,30 +515,52 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 }
 .mermaid-wrapper {
   position: relative;
+  display: flex;
+  flex-direction: column;
   margin: 1rem 0;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.2);
+  overflow: hidden;
 }
 .mermaid-scroll {
+  min-width: 0;
   overflow: auto;
   max-height: 600px;
   padding: 1rem;
-  text-align: center;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.mermaid-wrapper .mermaid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0 auto;
+}
+.mermaid-wrapper .mermaid svg {
+  display: block;
+  margin: 0 auto;
 }
 .mermaid-controls {
   position: absolute;
-  bottom: 0.5rem;
   right: 0.5rem;
+  bottom: 0.5rem;
   display: flex;
+  align-items: center;
   gap: 0.3rem;
   z-index: 2;
 }
-.mermaid-zoom-btn {
+.mermaid-control-btn {
   width: 28px;
   height: 28px;
   display: grid;
   place-items: center;
+  padding: 0;
   font-size: 1rem;
   font-weight: 600;
   line-height: 1;
@@ -547,11 +569,68 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
+  white-space: nowrap;
   transition: color 0.2s, border-color 0.2s;
 }
-.mermaid-zoom-btn:hover {
+.mermaid-control-btn:hover:not(:disabled),
+.mermaid-control-btn:focus-visible {
   color: var(--accent-2);
   border-color: var(--accent-2);
+  outline: none;
+}
+.mermaid-control-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.mermaid-fullscreen-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+body.mermaid-page-fullscreen-open {
+  overflow: hidden;
+}
+.mermaid-wrapper.is-mermaid-page-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: #08080c;
+}
+.mermaid-wrapper.is-mermaid-page-fullscreen .mermaid-controls {
+  top: 0.75rem;
+  right: 0.75rem;
+  bottom: auto;
+}
+.mermaid-wrapper.is-mermaid-page-fullscreen .mermaid-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  padding: 4.25rem 1.5rem 1.5rem;
+}
+.mermaid-wrapper.is-mermaid-page-fullscreen .mermaid-fullscreen-btn {
+  width: auto;
+  min-width: 28px;
+  padding: 0 0.65rem;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 480px) {
+  .mermaid-wrapper.is-mermaid-page-fullscreen .mermaid-scroll {
+    padding: 4rem 0.75rem 0.75rem;
+  }
 }
 
 .markdown-body pre {

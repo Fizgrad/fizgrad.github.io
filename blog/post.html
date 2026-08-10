@@ -62,6 +62,7 @@
   </footer>
 
   <script src="../assets/js/markdown-code.js"></script>
+  <script src="../assets/js/mermaid-viewer.js"></script>
   <script>
     (function () {
       var mathItems = new Map();
@@ -150,7 +151,8 @@
           tocTitle: "目录", footerBuilt: "使用 GLM-5.2 构建", backHome: "← 返回主页",
           loading: "加载中...", notFound: "未找到文章", loadFailed: "文章加载失败",
           copy: "复制", copied: "已复制", copyFailed: "复制失败",
-          zoomIn: "放大图表", zoomOut: "缩小图表", expandCode: "展开（共 {lines} 行）", collapseCode: "收起",
+          zoomIn: "放大图表", zoomOut: "缩小图表", fullscreen: "网页全屏查看图表", exitFullscreen: "返回正文",
+          diagramControls: "图表控制", expandCode: "展开（共 {lines} 行）", collapseCode: "收起",
           expandSection: "展开本节", collapseSection: "收起本节", headingAnchor: "链接到本节：",
           mathMissing: "[公式数据缺失]"
         },
@@ -159,7 +161,8 @@
           tocTitle: "Contents", footerBuilt: "Built with GLM-5.2", backHome: "← Back to home",
           loading: "Loading...", notFound: "Post not found", loadFailed: "Failed to load post",
           copy: "Copy", copied: "Copied!", copyFailed: "Failed",
-          zoomIn: "Zoom in", zoomOut: "Zoom out", expandCode: "Expand ({lines} lines)", collapseCode: "Collapse",
+          zoomIn: "Zoom in", zoomOut: "Zoom out", fullscreen: "Expand diagram to fill page", exitFullscreen: "Back to document",
+          diagramControls: "Diagram controls", expandCode: "Expand ({lines} lines)", collapseCode: "Collapse",
           expandSection: "Expand section", collapseSection: "Collapse section", headingAnchor: "Link to section: ",
           mathMissing: "[Missing formula data]"
         }
@@ -197,9 +200,9 @@
           btn.setAttribute("aria-label", t("copy"));
         });
         document.querySelectorAll("#post-content .code-expand-btn").forEach(updateCodeExpandButton);
-        document.querySelectorAll("#post-content .mermaid-zoom-btn[data-zoom]").forEach(function (btn) {
-          btn.setAttribute("aria-label", t(btn.dataset.zoom === "in" ? "zoomIn" : "zoomOut"));
-        });
+        if (typeof MermaidViewer !== "undefined") {
+          MermaidViewer.updateLabels(document.getElementById("post-content"), t);
+        }
         document.querySelectorAll("#post-content .section-toggle").forEach(function (btn) {
           var collapsed = btn.parentElement.classList.contains("collapsed");
           btn.setAttribute("aria-label", t(collapsed ? "expandSection" : "collapseSection"));
@@ -309,72 +312,19 @@
           if (mermaidBlocks.length > 0 && typeof mermaid !== "undefined") {
             mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
             mermaidBlocks.forEach(function (code) {
-              var wrapper = document.createElement("div");
-              wrapper.className = "mermaid-wrapper";
-              var scrollDiv = document.createElement("div");
-              scrollDiv.className = "mermaid-scroll";
-              var div = document.createElement("div");
-              div.className = "mermaid";
-              div.textContent = code.textContent;
-              scrollDiv.appendChild(div);
-              wrapper.appendChild(scrollDiv);
-              var controls = document.createElement("div");
-              controls.className = "mermaid-controls";
-              var scale = 1;
-              var baseW = null, baseH = null;
-              function applyMermaidZoom() {
-                var svg = div.querySelector("svg");
-                if (!svg) return;
-                if (baseW === null) {
-                  var rect = svg.getBoundingClientRect();
-                  baseW = rect.width || 500;
-                  baseH = rect.height || 300;
-                }
-                svg.removeAttribute("width");
-                svg.removeAttribute("height");
-                svg.style.maxWidth = "none";
-                svg.style.width = (baseW * scale) + "px";
-                svg.style.height = (baseH * scale) + "px";
-              }
-              var zoomIn = document.createElement("button");
-              zoomIn.className = "mermaid-zoom-btn";
-              zoomIn.dataset.zoom = "in";
-              zoomIn.textContent = "+";
-              zoomIn.setAttribute("aria-label", t("zoomIn"));
-              zoomIn.addEventListener("click", function () {
-                scale = Math.min(scale + 0.1, 3);
-                applyMermaidZoom();
-              });
-              var zoomOut = document.createElement("button");
-              zoomOut.className = "mermaid-zoom-btn";
-              zoomOut.dataset.zoom = "out";
-              zoomOut.textContent = "\u2212";
-              zoomOut.setAttribute("aria-label", t("zoomOut"));
-              zoomOut.addEventListener("click", function () {
-                scale = Math.max(scale - 0.1, 0.5);
-                applyMermaidZoom();
-              });
-              controls.appendChild(zoomIn);
-              controls.appendChild(zoomOut);
-              wrapper.appendChild(controls);
+              var wrapper = MermaidViewer.createDiagram(code.textContent, { label: t });
               code.parentElement.replaceWith(wrapper);
             });
-            try { mermaid.run().catch(function () {}); } catch (e) {}
-            setTimeout(function () {
-              container.querySelectorAll(".mermaid svg").forEach(function (svg) {
-                var vb = svg.getAttribute("viewBox");
-                if (!vb) return;
-                var parts = vb.split(/\s+/);
-                var w = parseFloat(parts[2]);
-                var h = parseFloat(parts[3]);
-                if (!w || !h) return;
-                svg.removeAttribute("width");
-                svg.removeAttribute("height");
-                svg.style.maxWidth = "none";
-                svg.style.width = (w * 0.8) + "px";
-                svg.style.height = (h * 0.8) + "px";
-              });
-            }, 800);
+            try {
+              var renderResult = mermaid.run();
+              if (renderResult && typeof renderResult.then === "function") {
+                renderResult.then(function () {
+                  MermaidViewer.refresh(container);
+                }).catch(function () {});
+              } else {
+                setTimeout(function () { MermaidViewer.refresh(container); }, 800);
+              }
+            } catch (e) {}
           }
           var slugSet = {};
           container.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach(function (h) {
