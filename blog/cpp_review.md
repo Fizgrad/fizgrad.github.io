@@ -24,22 +24,22 @@
 - [9. new/delete 与 malloc/free](#9-newdelete-与-mallocfree)
 - [10. 虚函数、虚表、多态](#10-虚函数虚表多态)
 - [11. 构造析构中的虚函数行为](#11-构造析构中的虚函数行为)
-- [12. 重载、重写、隐藏](#12-重载重写隐藏)
-- [13. 对象模型与内存布局](#13-对象模型与内存布局)
+- [12. 重载决议、重写与名字查找](#12-重载决议重写与名字查找)
+- [13. 继承、对象模型与内存布局](#13-继承对象模型与内存布局)
 
 ### 容器、算法与泛型
 
 - [14. STL 容器：vector、deque、list](#14-stl-容器vectordequelist)
 - [15. map 与 unordered_map](#15-map-与-unordered_map)
 - [16. 迭代器失效](#16-迭代器失效)
-- [17. STL 算法与 lambda](#17-stl-算法与-lambda)
+- [17. STL 算法、迭代器与 lambda](#17-stl-算法迭代器与-lambda)
 - [18. 模板基础](#18-模板基础)
 - [19. 完美转发、万能引用、引用折叠](#19-完美转发万能引用引用折叠)
 - [20. SFINAE、type traits、concepts](#20-sfinaetype-traitsconcepts)
 
 ### 异常与并发
 
-- [21. 异常安全与 noexcept](#21-异常安全与-noexcept)
+- [21. 异常传播、异常安全与 noexcept](#21-异常传播异常安全与-noexcept)
 - [22. 并发基础：thread、mutex、lock](#22-并发基础threadmutexlock)
 - [23. condition_variable](#23-condition_variable)
 - [24. atomic 与内存模型](#24-atomic-与内存模型)
@@ -65,7 +65,7 @@
 
 ### 生命周期、并发进阶与工程化
 
-- [38. 存储期、初始化顺序与对象生命周期](#38-存储期初始化顺序与对象生命周期)
+- [38. 初始化、存储期、求值顺序与对象生命周期](#38-初始化存储期求值顺序与对象生命周期)
 - [39. 成员函数限定、类型转换与类型安全](#39-成员函数限定类型转换与类型安全)
 - [40. 线程生命周期、任务与异步结果](#40-线程生命周期任务与异步结果)
 - [41. 并发进阶：读写锁、原子等待与缓存竞争](#41-并发进阶读写锁原子等待与缓存竞争)
@@ -73,6 +73,7 @@
 - [43. 可调用对象、std::function 与类型擦除](#43-可调用对象stdfunction-与类型擦除)
 - [44. Ranges、expected 与现代接口设计](#44-rangesexpected-与现代接口设计)
 - [45. 库、符号、诊断与工程验证](#45-库符号诊断与工程验证)
+- [46. C++20 协程机制](#46-c20-协程机制)
 
 # 1. C++ 核心问题
 
@@ -1068,6 +1069,69 @@ A a;
 
 ---
 
+## 8.8 自定义删除器与别名构造
+
+`shared_ptr` 的删除器保存在控制块中，因此不同资源可以沿用同一套共享所有权机制：
+
+```cpp
+auto file = std::shared_ptr<std::FILE>(
+    std::fopen("config.txt", "r"),
+    [](std::FILE* fp) {
+        if (fp != nullptr) {
+            std::fclose(fp);
+        }
+    });
+```
+
+自定义删除器是 `shared_ptr` 运行期状态的一部分，不会像 `unique_ptr<T, Deleter>` 那样直接成为指针对象的模板参数。这使不同删除器的 `shared_ptr<T>` 仍然具有相同类型，但控制块会保存相应的删除逻辑。
+
+别名构造函数允许“拥有一个对象，但暴露它的某个子对象”：
+
+```cpp
+struct Packet {
+    int header;
+    std::vector<std::byte> payload;
+};
+
+auto packet = std::make_shared<Packet>();
+std::shared_ptr<std::vector<std::byte>> payload(packet, &packet->payload);
+```
+
+此时需要区分两个指针：
+
+1. `payload.get()` 指向 `packet->payload`；
+2. 控制块仍然拥有整个 `Packet`；
+3. 只要 `payload` 还存在，整个 `Packet` 就不会析构；
+4. `get()` 相同不代表共享控制块，`get()` 不同也不代表所有权无关。
+
+别名构造适合返回对象内部视图，但如果子对象指针被继续当成独立所有权交给别处，就会让接口含义变得混乱。
+
+---
+
+## 8.9 `atomic<shared_ptr>` 与线程安全边界
+
+C++20 提供 `std::atomic<std::shared_ptr<T>>`，可原子地发布和替换一个共享所有权快照：
+
+```cpp
+std::atomic<std::shared_ptr<const Config>> current;
+
+void publish(Config next) {
+    current.store(
+        std::make_shared<const Config>(std::move(next)),
+        std::memory_order_release);
+}
+
+std::shared_ptr<const Config> snapshot() {
+    return current.load(std::memory_order_acquire);
+}
+```
+
+它保证的是 `shared_ptr` 这个句柄的原子读写，以及相应控制块状态的正确维护，不会让 `Config` 的可变成员自动变成线程安全。发布不可变快照通常比让多个线程共同修改同一个对象更容易推理。
+
+普通 `shared_ptr` 已经允许多个线程操作各自的句柄副本；只有多个线程需要并发读写**同一个句柄变量**时，才需要锁或原子接口。
+
+---
+
 # 9. new/delete 与 malloc/free
 
 ## 9.1 区别
@@ -1128,6 +1192,46 @@ A* p = new (mem) A();
 p->~A();
 std::free(mem);
 ```
+
+placement new 只构造对象，不负责释放底层存储。显式析构也只结束对象生命周期，不会自动调用 `free` 或 `operator delete`。
+
+---
+
+## 9.4 分配失败、对齐与匹配的释放函数
+
+普通 throwing `new` 分配失败时通常抛出 `std::bad_alloc`。全局分配函数可以借助 `std::set_new_handler` 安装失败处理器：
+
+```cpp
+void on_allocation_failure() {
+    release_emergency_cache();
+    std::set_new_handler(nullptr);
+}
+
+std::set_new_handler(on_allocation_failure);
+```
+
+处理器返回后，分配函数可以再次尝试；处理器也可以抛出异常或终止程序。它不是普通业务内存不足处理方案，因为进程接近耗尽内存时，日志、异常对象和恢复操作本身也可能需要分配。
+
+对于过度对齐类型，new 表达式会选择带 `std::align_val_t` 的分配接口：
+
+```cpp
+struct alignas(64) CacheLine {
+    std::byte data[64];
+};
+
+auto* line = new CacheLine;
+delete line;
+```
+
+编译器负责让对应的对齐分配和释放函数匹配。自行定义类专属 `operator new/delete` 时，需要同时考虑普通、数组、对齐和可能的 sized delete 形式，不要把来自一种分配接口的指针交给另一种释放接口。
+
+还有一个容易遗漏的异常路径：
+
+```cpp
+Widget* p = new Widget(args...);
+```
+
+如果原始存储已经分配成功，但 `Widget` 构造函数抛出异常，new 表达式会自动调用与本次分配匹配的 `operator delete`。对象没有构造完成，因此调用者既拿不到 `p`，也不应手动释放它。
 
 ---
 
@@ -1324,7 +1428,7 @@ if (auto* derived = dynamic_cast<Derived*>(base_ptr)) {
 
 ---
 
-# 12. 重载、重写、隐藏
+# 12. 重载决议、重写与名字查找
 
 ## 12.1 overload
 
@@ -1395,7 +1499,161 @@ public:
 
 ---
 
-# 13. 对象模型与内存布局
+## 12.4 重载决议怎样选出一个函数
+
+重载决议不是“看到最像的参数就调用”，而是按阶段完成：
+
+1. 名字查找形成候选函数集合；
+2. 根据参数个数、默认参数、约束等筛出可行函数；
+3. 为每个实参计算隐式转换序列；
+4. 比较所有参数的转换质量，选出唯一的最佳可行函数；
+5. 最后再检查被选函数是否已删除、是否可访问，以及调用本身是否满足其他语义限制。
+
+常见标准转换等级可以简化为：
+
+```text
+精确匹配  >  提升  >  一般转换
+```
+
+不同大类之间通常是：
+
+```text
+标准转换  >  用户定义转换  >  省略号 ...
+```
+
+```cpp
+void pick(int);
+void pick(long);
+void pick(double);
+
+short value = 1;
+pick(value); // short -> int 是整型提升，选择 pick(int)
+```
+
+不能只看“最终都能变成目标类型”。例如从类类型转换到另一个类型时，一条用户定义转换序列最多包含一次用户定义转换；否则转换链可能无限递归，也无法稳定排序。
+
+如果两个候选对不同参数各有优势，通常没有唯一最佳函数：
+
+```cpp
+void mix(int, double);
+void mix(double, int);
+
+// mix(1, 1); // 两个候选各在一个参数上更好，调用有歧义
+```
+
+当转换质量相同时，还会继续比较非模板与模板、模板偏序、约束强弱等规则。不能把“非模板一定胜过模板”当成无条件规则：只有候选在前面的比较中无法分出胜负时，后续规则才参与决胜。
+
+被删除函数仍会参加重载决议：
+
+```cpp
+void consume(int) = delete;
+void consume(double);
+
+// consume(1); // 最佳匹配是已删除的 consume(int)，因此编译失败
+```
+
+这类设计可以显式禁止某些参数类型，而不是让它们悄悄转换到另一个重载。
+
+---
+
+## 12.5 隐式转换、转换构造函数与 `explicit`
+
+只要构造函数能用一个实参调用，它就可能定义从实参类型到类类型的隐式转换；这也包括其余参数都有默认值的多参数构造函数。
+
+```cpp
+class Meter {
+public:
+    explicit Meter(double value) : value_(value) {}
+
+private:
+    double value_;
+};
+
+Meter a(1.5);      // 直接初始化，OK
+Meter b{1.5};      // 直接列表初始化，OK
+// Meter c = 1.5;  // copy-initialization 不考虑 explicit 构造函数
+```
+
+转换运算符定义从类类型到其他类型的转换：
+
+```cpp
+class FileHandle {
+public:
+    explicit operator bool() const noexcept {
+        return fd_ >= 0;
+    }
+
+private:
+    int fd_ = -1;
+};
+
+if (handle) { // contextual conversion to bool，允许使用 explicit operator bool
+    // handle 有效
+}
+```
+
+`explicit` 的目的不是禁止显式转换，而是防止转换在参数传递、返回值、赋值和重载决议中悄悄发生。C++20 的 `explicit(condition)` 还能让模板构造函数根据类型条件决定是否允许隐式转换。
+
+---
+
+## 12.6 运算符重载、友元与 ADL
+
+运算符重载允许用户类型沿用表达式语法，但不能：
+
+1. 创造新的运算符；
+2. 改变运算符优先级和结合性；
+3. 改变内建运算符的操作数个数；
+4. 让重载后的 `&&`、`||` 获得内建版本的短路求值语义。
+
+对称的二元运算通常适合写成非成员函数，让左右操作数都能参加转换：
+
+```cpp
+class Vec2 {
+public:
+    Vec2(double x, double y) : x_(x), y_(y) {}
+
+    Vec2& operator+=(const Vec2& rhs) {
+        x_ += rhs.x_;
+        y_ += rhs.y_;
+        return *this;
+    }
+
+    friend Vec2 operator+(Vec2 lhs, const Vec2& rhs) {
+        lhs += rhs;
+        return lhs;
+    }
+
+    friend bool operator==(const Vec2&, const Vec2&) = default;
+
+private:
+    double x_;
+    double y_;
+};
+```
+
+这里的 friend 函数在类内定义，但不是成员函数。普通的非限定名字查找不一定找到它；当实参含有 `Vec2` 时，ADL（argument-dependent lookup）会到 `Vec2` 所在的关联作用域查找，因此 `a + b` 能找到该函数。这种写法常称为 hidden friend：运算符只在相关类型参与调用时进入候选集，可以减少无关重载污染。
+
+友元只授予访问权限，不建立继承关系，也不具有传递性。应优先通过公开接口实现运算符，只有确实需要访问内部表示时才使用 friend。
+
+---
+
+## 12.7 `nullptr`、`NULL` 与重载
+
+`nullptr` 的类型是 `std::nullptr_t`，可以转换为任意对象指针或成员指针，但不会像整数 `0` 一样参加普通整型重载：
+
+```cpp
+void open(int flags);
+void open(const char* path);
+
+open(0);        // 选择 open(int)
+open(nullptr);  // 选择 open(const char*)
+```
+
+`NULL` 在不同实现中可能只是整数常量宏，因此它在重载场景中不能稳定表达“空指针”。现代 C++ 接口应使用 `nullptr`；如果多个不同指针类型重载同时可行，传入 `nullptr` 仍可能产生歧义，需要显式转换为目标指针类型。
+
+---
+
+# 13. 继承、对象模型与内存布局
 
 ```mermaid
 flowchart TD
@@ -1507,6 +1765,180 @@ c: 1
 tail padding: 2
 total: 8
 ```
+
+---
+
+## 13.5 成员访问与继承方式
+
+成员自身的 `public/protected/private` 和继承列表中的访问说明符解决的是两个不同问题：
+
+1. 成员访问说明符决定基类成员在基类接口中的可见性；
+2. 继承方式决定基类的公开、保护成员进入派生类后具有怎样的访问级别，以及外部能否把派生类隐式转换为基类。
+
+| 继承方式 | 基类 public 成员在派生类中 | 基类 protected 成员在派生类中 | 外部的 Derived → Base 转换 |
+| --- | --- | --- | --- |
+| `public` | public | protected | 允许 |
+| `protected` | protected | protected | 通常不允许 |
+| `private` | private | private | 通常不允许 |
+
+基类的 private 成员始终不能被派生类直接访问，但它仍然存在于基类子对象中，可以通过基类提供的成员函数操作。
+
+```cpp
+class Engine {
+public:
+    void start();
+
+protected:
+    int rpm_ = 0;
+
+private:
+    int secret_ = 0;
+};
+
+class Car : public Engine {
+public:
+    void idle() {
+        rpm_ = 800;     // OK
+        // secret_ = 1; // error
+    }
+};
+```
+
+public 继承通常表达 is-a 和可替换关系；private 继承更接近“借用基类实现”。如果不需要覆盖虚函数、访问 protected 成员或利用 EBO，组合通常比 private 继承更直接。
+
+---
+
+## 13.6 多继承、菱形继承与虚继承
+
+普通菱形继承会包含两份共同基类子对象：
+
+```text
+             Device
+             /    \
+        Input      Output
+             \    /
+           SmartDevice
+```
+
+```cpp
+struct Device {
+    int id = 0;
+};
+
+struct Input : Device {};
+struct Output : Device {};
+struct SmartDevice : Input, Output {};
+
+SmartDevice d;
+// d.id = 1; // error：不知道是 Input::Device::id 还是 Output::Device::id
+d.Input::id = 1;
+d.Output::id = 2;
+```
+
+如果语义上整个最派生对象只应有一份 `Device`，两条路径都要虚继承它：
+
+```cpp
+struct Input : virtual Device {};
+struct Output : virtual Device {};
+struct SmartDevice : Input, Output {};
+
+SmartDevice d;
+d.id = 1; // 只有一个共享的 Device 虚基类子对象
+```
+
+典型 ABI 会在对象或虚表中保存到虚基类的动态偏移，因此虚继承可以解决重复基类子对象问题，但会增加布局和访问成本。它不是“让虚函数生效”的继承方式，和动态多态是两个独立概念。
+
+虚基类由**最派生类**负责构造：
+
+```cpp
+struct Device {
+    explicit Device(int id);
+};
+
+struct Input : virtual Device {
+    Input() : Device(1) {} // 单独构造 Input 时使用
+};
+
+struct SmartDevice : Input {
+    SmartDevice() : Device(42), Input() {}
+};
+```
+
+构造 `SmartDevice` 时，`Input` 初始化列表里的 `Device(1)` 不负责这份虚基类，最终使用最派生类给出的 `Device(42)`。完整对象的构造顺序是：虚基类、直接基类、按声明顺序排列的成员、构造函数体；析构顺序相反。初始化列表的书写顺序不能改变这个规则。
+
+---
+
+## 13.7 多继承中的指针调整与 thunk
+
+多继承对象中的不同基类子对象可能位于不同偏移：
+
+```cpp
+struct Left {
+    virtual ~Left() = default;
+    virtual void run();
+};
+
+struct Right {
+    virtual ~Right() = default;
+    virtual void stop();
+};
+
+struct Both : Left, Right {
+    void run() override;
+    void stop() override;
+};
+
+Both object;
+Left* left = &object;
+Right* right = &object;
+```
+
+`left` 和 `right` 转换成 `void*` 后的数值不一定相同，因为它们分别指向两个基类子对象。编译器在派生类与基类之间转换时会调整地址；通过 `Right*` 调用 `Both::stop()` 时，典型 ABI 还可能使用一小段 thunk 代码，把收到的 `this` 调整到 `Both` 对象所需的位置后再进入真正函数。
+
+这些偏移、vptr 数量和 thunk 形式属于 ABI 实现细节。源码只能依赖转换后的语义，不能通过手工加减地址模拟它们。需要跨层级安全转换时，使用语言提供的隐式派生到基类转换、`static_cast` 或多态场景中的 `dynamic_cast`。
+
+---
+
+## 13.8 抽象类、纯虚析构、`final` 与协变返回
+
+含有未被实现的纯虚函数的类是抽象类，不能直接创建对象：
+
+```cpp
+struct Pass {
+    virtual ~Pass() = default;
+    virtual void run() = 0;
+};
+
+struct DcePass final : Pass {
+    void run() override;
+};
+```
+
+`= 0` 表示该虚函数在这个类中是纯虚的，但纯虚函数仍可以在类外提供定义。纯虚析构函数尤其需要定义，因为销毁派生对象时最终仍会执行基类析构：
+
+```cpp
+struct Interface {
+    virtual ~Interface() = 0;
+};
+
+inline Interface::~Interface() = default;
+```
+
+`final` 用在类上表示禁止继续派生，用在虚函数上表示禁止后续类再次重写。它既能表达设计约束，也可能让编译器在已知动态类型时更容易去虚化，但不能承诺一定消除虚调用。
+
+重写函数通常必须保持返回类型一致，协变返回是一个受限例外：基类返回类指针或引用时，派生类可以返回更具体的派生类指针或引用。
+
+```cpp
+struct Node {
+    virtual Node* clone() const = 0;
+};
+
+struct Expr : Node {
+    Expr* clone() const override; // 协变返回
+};
+```
+
+值类型返回不适用协变规则。参数类型也不能用“更具体的类型”来实现重写；改变参数只会形成隐藏或新的重载。
 
 ---
 
@@ -1805,7 +2237,7 @@ for (auto it = v.begin(); it != v.end(); ) {
 
 ---
 
-# 17. STL 算法与 lambda
+# 17. STL 算法、迭代器与 lambda
 
 ## 17.1 remove 不是真删除
 
@@ -1918,6 +2350,97 @@ public:
 
 ---
 
+## 17.4 迭代器分类决定能做什么
+
+迭代器不是统一能力的“泛化指针”。算法会根据迭代器类别约束可用操作和复杂度：
+
+| 类别 | 关键能力 | 典型来源 |
+| --- | --- | --- |
+| input | 单向读取，通常只保证单遍 | 输入流迭代器 |
+| output | 单向写入，通常只保证单遍 | 输出流、插入迭代器 |
+| forward | 单向读写并支持多遍遍历 | `forward_list` |
+| bidirectional | 还可以执行 `--it` | `list`、`set`、`map` |
+| random access | 支持 `it + n`、距离和下标式跳转 | `deque` |
+| contiguous | 随机访问且元素在内存中连续 | `vector`、`array`、`span` |
+
+C++20 用 iterator concepts 更精确地表达这些能力。类别越强，能使用的算法通常越多，但不能根据接口长得像指针就假定底层连续。
+
+```cpp
+std::vector<int> values{3, 1, 2};
+std::sort(values.begin(), values.end()); // 需要随机访问迭代器
+
+std::list<int> nodes{3, 1, 2};
+// std::sort(nodes.begin(), nodes.end()); // error
+nodes.sort();                            // list 自己利用节点结构排序
+```
+
+复杂度也由类别决定：对随机访问迭代器，`std::distance(first, last)` 可以通过相减在常数时间完成；对链表迭代器则必须逐个前进，是线性时间。`std::advance` 同理。
+
+还要区分迭代器与哨兵。Ranges 允许结束位置使用不同类型的 sentinel，从而表达“读到终止符”“读满固定长度”等不必预先计算同型尾迭代器的范围。
+
+---
+
+## 17.5 泛型 lambda、初始化捕获与递归
+
+泛型 lambda 的 `auto` 参数会让闭包类型的调用运算符成为函数模板：
+
+```cpp
+auto add = [](const auto& lhs, const auto& rhs) {
+    return lhs + rhs;
+};
+
+auto i = add(1, 2);
+auto s = add(std::string("a"), std::string("b"));
+```
+
+初始化捕获可以移动资源，或创建一个与外部变量不同名、不同类型的闭包成员：
+
+```cpp
+auto resource = std::make_unique<Resource>();
+auto task = [resource = std::move(resource)]() mutable {
+    resource->run();
+};
+```
+
+此时闭包也会成为 move-only 类型，不能存入要求可拷贝目标的旧式 `std::function`；可以使用支持 move-only callable 的接口，或重新设计所有权。
+
+lambda 在初始化完成前还不能直接按变量名引用自己。C++14 起可以把自身作为显式参数传递，实现不依赖 `std::function` 的递归：
+
+```cpp
+auto factorial = [](auto&& self, int n) -> int {
+    return n <= 1 ? 1 : n * self(self, n - 1);
+};
+
+int result = factorial(factorial, 5);
+```
+
+无捕获 lambda 可以转换为兼容的普通函数指针；有捕获 lambda 必须携带闭包状态，不能直接完成这种转换。
+
+---
+
+## 17.6 并行算法执行策略
+
+C++17 的部分标准算法接受执行策略：
+
+```cpp
+std::for_each(std::execution::par,
+              values.begin(), values.end(),
+              [](Item& item) {
+                  item.process();
+              });
+```
+
+执行策略表达允许的执行方式，而不是强制一定创建多少线程：
+
+1. `seq` 按顺序执行；
+2. `par` 允许多个线程并行；
+3. `par_unseq` 还允许交错和向量化执行；
+4. C++20 的 `unseq` 允许在当前线程中采用非排序的向量化执行。
+
+回调必须满足对应策略的并发要求。尤其在 `par_unseq`/`unseq` 下，不能执行依赖互斥锁、分配器内部全局状态等不适合向量化交错执行的操作。并行版本还可能因为任务规模太小、内存带宽饱和或调度开销而更慢，使用前仍要测量。
+
+---
+
 # 18. 模板基础
 
 ## 18.1 模板什么时候实例化
@@ -1995,6 +2518,165 @@ struct TypeName<T*> {
 ```
 
 函数模板不能偏特化，只能重载或全特化。
+
+---
+
+## 18.4 两阶段名字查找与 dependent name
+
+模板定义中的名字分为不依赖模板参数的名字和 dependent name：
+
+1. 非依赖名字通常在模板定义处查找并绑定；
+2. 依赖名字要等模板实参确定后，在实例化相关规则下继续查找；
+3. 因为解析模板定义时类型还未知，编译器有时需要 `typename` 或 `template` 帮助消除语法歧义。
+
+```cpp
+void helper(long);
+
+template <typename T>
+void call(T value) {
+    helper(0);     // 非依赖调用，在模板定义处完成普通查找
+    process(value); // 依赖调用，实例化时还会考虑相应的 ADL 候选
+}
+
+void helper(int); // 不会回过头改变模板中 helper(0) 的绑定
+```
+
+依赖限定名默认不一定被当作类型：
+
+```cpp
+template <typename T>
+void consume(T& object) {
+    typename T::value_type value{};
+    object.template convert<int>(value);
+}
+```
+
+这里：
+
+1. `typename` 告诉解析器 `T::value_type` 是类型；
+2. `template` 告诉解析器 dependent object 后面的 `convert` 是模板，`<` 不是小于号；
+3. 两个关键字解决的是解析问题，不会让一个原本不存在的成员变合法。
+
+依赖基类成员也不会自动进入普通的非限定查找：
+
+```cpp
+template <typename T>
+struct Derived : T {
+    void run() {
+        this->start(); // this 使查找依赖于模板参数
+        // start();    // 可能在模板定义处找不到
+    }
+};
+```
+
+这也是不同编译器对不规范模板代码给出不同诊断时应优先检查的地方。
+
+---
+
+## 18.5 模板参数推导与非推导上下文
+
+模板参数推导从函数形参类型和实参类型建立匹配，不会为了“猜出 T”而任意执行用户定义转换：
+
+```cpp
+template <typename T>
+void same(T lhs, T rhs);
+
+same(1, 2);      // T = int
+// same(1, 2.0); // 无法把 T 同时推导为 int 和 double
+same<double>(1, 2.0); // 显式给出 T 后，1 可以转换为 double
+```
+
+按值形参推导时会忽略实参的顶层 `const` 和引用；引用形参则会保留更多 cv 和值类别信息。这与 `auto` 推导相似，但转发引用还要应用第 19 章的特殊规则。
+
+有些位置属于 non-deduced context，不参与推导，可用于让一个参数只负责校验和转换：
+
+```cpp
+template <typename T>
+void append(std::vector<T>& out, std::type_identity_t<T> value) {
+    out.push_back(std::move(value));
+}
+
+std::vector<long> out;
+append(out, 1); // T 由第一个参数确定为 long，第二个参数再执行 int -> long
+```
+
+裸花括号列表本身没有普通表达式类型，因此通用 `T` 往往无法从 `{1, 2, 3}` 推导；形参明确为 `std::initializer_list<T>` 或目标类型已由其他位置确定时才有相应规则。
+
+---
+
+## 18.6 可变参数模板与折叠表达式
+
+参数包可以表示任意数量的类型或值，`sizeof...` 返回包中元素个数：
+
+```cpp
+template <typename... Args>
+void log_values(Args&&... args) {
+    std::cout << "count=" << sizeof...(Args) << ': ';
+    ((std::cout << std::forward<Args>(args) << ' '), ...);
+    std::cout << '\n';
+}
+```
+
+`args...` 是包展开；外层 `(..., ...)` 是 C++17 fold expression。折叠可以是一元或二元、左折叠或右折叠：
+
+```cpp
+template <typename... T>
+auto sum(T... values) {
+    return (values + ... + 0); // 带初始值的右折叠
+}
+```
+
+选择方向时要考虑运算符是否满足结合律。浮点加法、字符串拼接和减法在不同结合方向下可能产生不同结果。空参数包也只有在运算符具有标准定义的空包单位元，或代码显式提供初始值时才一定合法。
+
+---
+
+## 18.7 CTAD 与 deduction guide
+
+C++17 的 class template argument deduction 允许从构造实参推导类模板参数：
+
+```cpp
+template <typename T>
+struct Box {
+    explicit Box(T value) : value(std::move(value)) {}
+    T value;
+};
+
+Box box{42}; // 推导为 Box<int>
+```
+
+编译器会根据构造函数等信息形成隐式 deduction guides。默认规则不能表达预期关系时，可以提供显式推导指引：
+
+```cpp
+template <typename T>
+struct Range {
+    template <typename It>
+    Range(It first, It last);
+};
+
+template <typename It>
+Range(It, It) -> Range<typename std::iterator_traits<It>::value_type>;
+```
+
+deduction guide 只参与类型推导，不是构造函数，也不负责实际初始化。推导成功后仍要为得到的具体类类型选择可行构造函数。
+
+---
+
+## 18.8 函数模板偏序
+
+函数模板不能偏特化，但多个重载模板之间可以比较谁更特殊：
+
+```cpp
+template <typename T>
+void inspect(T);
+
+template <typename T>
+void inspect(T*);
+
+int value = 0;
+inspect(&value); // 选择 T* 版本
+```
+
+比较的核心不是“源码看起来更长”，而是一个模板能够接受的参数集合是否比另一个更窄。加入 Concepts 后，还要结合约束的偏序；不能仅凭 requires 表达式在逻辑上似乎更严格，就假定编译器能推导出这种包含关系。
 
 ---
 
@@ -2215,7 +2897,59 @@ void print_size(const T& t) {
 
 ---
 
-# 21. 异常安全与 noexcept
+## 20.5 `requires` 表达式的四类要求
+
+`requires` 不只检查“某个表达式能否编译”，还可以表达类型、返回类型和额外布尔约束：
+
+```cpp
+template <typename T>
+concept Sequence = requires(T value, const T const_value) {
+    typename T::value_type;                       // type requirement
+    value.clear();                                // simple requirement
+    { const_value.size() } -> std::convertible_to<std::size_t>;
+                                                   // compound requirement
+    requires std::same_as<                        // nested requirement
+        std::remove_cvref_t<decltype(*value.begin())>,
+        typename T::value_type>;
+};
+```
+
+requires expression 在约束替换过程中得到 false 时，通常使候选不满足约束，而不是像函数体内的普通错误那样立即终止整个编译。但不依赖模板参数、对所有可能实参都无效的代码仍可能使程序本身不合法。
+
+---
+
+## 20.6 约束包含关系与受约束重载
+
+当两个重载的普通转换质量相同，编译器可以通过 constraint subsumption 选择约束更强的版本：
+
+```cpp
+template <typename T>
+concept Decrementable = requires(T value) {
+    --value;
+};
+
+template <typename T>
+concept Dereferenceable = requires(T value) {
+    *value;
+};
+
+template <typename T>
+concept ReverseCursor = Decrementable<T> && Dereferenceable<T>;
+
+template <Decrementable T>
+void walk(T);
+
+template <ReverseCursor T>
+void walk(T); // 对 ReverseCursor 更受约束
+```
+
+`ReverseCursor` 显式复用了 `Decrementable`，编译器能从规范化后的原子约束看出包含关系。如果在两个地方分别复制一段看似相同的 requires 表达式，它们不一定被视为同一个原子约束，可能导致重载歧义。
+
+因此应把有语义名字的基础能力提取为小 concept，再组合出更强 concept；这同时改善接口文档、诊断信息和重载排序。
+
+---
+
+# 21. 异常传播、异常安全与 noexcept
 
 ```mermaid
 flowchart TD
@@ -2325,6 +3059,102 @@ struct A {
 建议：
 
 > 资源接管型移动构造一般不会抛异常，应标记 noexcept。
+
+---
+
+## 21.6 异常对象、匹配与重抛
+
+`throw expression` 会用表达式初始化一个独立的异常对象。处理器按类型匹配它；派生类型处理器应写在基类处理器之前，否则前面的基类引用会先捕获所有派生异常。
+
+```cpp
+try {
+    run();
+} catch (const ParseError& error) {
+    report(error);
+} catch (const std::exception& error) {
+    report(error);
+} catch (...) {
+    report_unknown_error();
+}
+```
+
+通常按 `const&` 捕获：
+
+1. 避免再复制异常对象；
+2. 保留派生类型的动态多态，避免按值捕获导致切片；
+3. 不意外修改正在处理的异常。
+
+在处理器中继续传播当前异常时要使用空的 `throw;`：
+
+```cpp
+try {
+    run();
+} catch (const std::exception& error) {
+    log(error.what());
+    throw; // 重抛原异常对象
+}
+```
+
+`throw error;` 会根据表达式的静态类型创建新的异常对象，可能切掉派生部分，并重置传播起点。只有确实要转换异常类型并补充上下文时，才构造一个新异常；需要保留底层原因时可以使用 `std::throw_with_nested` 等机制。
+
+---
+
+## 21.7 栈展开与构造失败
+
+找到匹配处理器的过程中会发生 stack unwinding：从抛出点到处理器之间已经完整构造的自动对象按相反顺序析构。这正是 RAII 能在异常路径释放锁、文件和内存的基础。
+
+```cpp
+void update() {
+    std::lock_guard<std::mutex> lock(mutex);
+    Buffer temporary;
+    apply(temporary); // 即使抛异常，temporary 和 lock 都会正确析构
+}
+```
+
+如果构造函数抛出异常：
+
+1. 这个最外层对象没有构造完成，因此不会调用它自己的析构函数；
+2. 已经构造完成的基类和成员会按逆序析构；
+3. 尚未开始构造的成员什么也不做；
+4. 构造函数体中已经完成的局部对象同样按栈展开规则析构。
+
+因此资源应直接放进 RAII 成员，而不是先存入裸句柄、等构造函数最后再手动登记。后者在中途抛异常时容易泄漏。
+
+析构函数如果在没有其他活动异常时抛出，理论上仍可被外层捕获；但如果它在栈展开期间又让异常逃出，就会调用 `std::terminate()`。工程上通常直接把析构函数设计为不抛。
+
+---
+
+## 21.8 function-try-block
+
+普通函数的 function-try-block 可以覆盖整个函数体；构造函数的版本还能捕获成员初始化列表中抛出的异常：
+
+```cpp
+Worker::Worker(Config config)
+try : connection_(open_connection(config)), cache_(load_cache()) {
+    start();
+} catch (const std::exception& error) {
+    log_construction_failure(error.what());
+    throw;
+}
+```
+
+进入构造函数处理器时，已完成的基类和成员已经被销毁。此时读取这个对象的非静态成员或基类状态是不安全的，处理器应只使用独立日志设施、构造参数副本或异常本身。构造函数或析构函数的 function-try-block 处理器不能通过正常返回把一个未完成构造或析构的对象交给调用者。
+
+function-try-block 主要用于异常翻译和诊断，不应代替成员自身清晰的异常安全契约。
+
+---
+
+## 21.9 异常边界
+
+异常只能穿越双方共同遵守的 C++ ABI 和运行时约定。以下位置应建立明确边界并在边界内捕获：
+
+1. `extern "C"` 导出的 C 接口；
+2. 由 C 库调用的函数指针回调；
+3. 线程入口和任务执行器顶层；
+4. 插件、动态库或使用不同编译器选项构建的模块边界；
+5. 标记为 `noexcept` 的回调接口。
+
+边界层通常把异常转换为错误码、状态对象或宿主框架规定的失败协议。不能让异常直接穿越不理解 C++ 展开表和异常对象 ABI 的代码。
 
 ---
 
@@ -2722,6 +3552,64 @@ C++ 中 `volatile` 主要用于表达某些需要观察实际读写的对象，�
 
 ---
 
+## 24.9 原子操作与 fence
+
+带 acquire/release 的原子读写既操作值，又携带排序语义；fence 只建立排序约束，不保存业务值：
+
+```cpp
+int payload = 0;
+std::atomic<bool> ready{false};
+
+// producer
+payload = 42;
+std::atomic_thread_fence(std::memory_order_release);
+ready.store(true, std::memory_order_relaxed);
+
+// consumer
+if (ready.load(std::memory_order_relaxed)) {
+    std::atomic_thread_fence(std::memory_order_acquire);
+    use(payload);
+}
+```
+
+只有当 consumer 的原子读取确实观察到与 release fence 关联的写入，并满足标准规定的先后关系时，这组 fence 才能发布 `payload`。把任意两个 fence 放在线程两端不会自动建立同步。
+
+这个例子通常直接写成 `ready.store(..., release)` 与 `ready.load(..., acquire)` 更清楚。fence 主要用于一个排序点需要协调多次原子操作、实现底层并发原语或映射特定硬件协议的场景。
+
+`std::atomic_signal_fence` 只约束编译器相对于同线程信号处理的重排，不要求生成跨核心硬件屏障；不要把它当成 `atomic_thread_fence` 的廉价替代品。
+
+---
+
+## 24.10 `atomic_ref`
+
+C++20 的 `std::atomic_ref<T>` 给一个已经存在的对象提供原子访问视图，而不改变该对象的声明类型：
+
+```cpp
+struct Counters {
+    alignas(std::atomic_ref<std::uint64_t>::required_alignment)
+    std::uint64_t completed = 0;
+};
+
+Counters counters;
+
+void finish_one() {
+    std::atomic_ref<std::uint64_t> completed(counters.completed);
+    completed.fetch_add(1, std::memory_order_relaxed);
+}
+```
+
+使用时必须满足：
+
+1. 被引用对象的类型和对齐满足 `atomic_ref` 要求；
+2. 对象生命周期覆盖所有 atomic view；
+3. 存在指向该对象的 `atomic_ref` 期间，并发访问不能绕过原子接口直接读写原对象；
+4. 原子性不等于无锁，仍要检查目标平台能力；
+5. 它只保护被包装的单个对象，不会让所在结构体的整体不变量原子化。
+
+它适合在不能修改数据布局、共享内存格式或外部结构声明时增加原子访问，但也更容易把同一地址的原子与非原子访问混在一起。能直接把成员声明为 `std::atomic<T>` 时，后者通常更容易审查。
+
+---
+
 # 25. C++17/20 常见特性
 
 ## 25.1 auto 类型推导
@@ -2818,6 +3706,62 @@ if (auto it = mp.find(key); it != mp.end()) {
 
 ---
 
+## 25.6 `enum class`
+
+传统未限定枚举会把枚举名注入外层作用域，并且通常可以隐式转换为整数：
+
+```cpp
+enum Color { red, green };
+int value = red; // 允许隐式转换
+```
+
+限定枚举把名字留在枚举作用域内，也不会隐式转成整数：
+
+```cpp
+enum class Color : std::uint8_t {
+    red,
+    green,
+};
+
+Color color = Color::red;
+auto raw = static_cast<std::uint8_t>(color);
+```
+
+显式底层类型可以稳定存储宽度，但序列化协议仍应定义每个枚举值的编码和未知值策略，不能只依赖编译器布局。C++23 可用 `std::to_underlying(color)` 代替显式转换。
+
+`enum class` 不会自动获得位运算。如果它表达标志集合，应显式定义类型安全的 `operator|`、`operator&` 等操作，并说明哪些组合有效。
+
+---
+
+## 25.7 三路比较 `operator<=>`
+
+C++20 的三路比较可以集中定义相等和排序关系：
+
+```cpp
+struct Version {
+    int major;
+    int minor;
+    int patch;
+
+    auto operator<=>(const Version&) const = default;
+};
+```
+
+默认三路比较按基类和成员的声明顺序逐项比较，并可合成 `<`、`<=`、`>`、`>=`；在满足默认规则时也会得到相应的 `==`。返回类别取决于成员能够提供的比较强度：
+
+1. `std::strong_ordering`：相等对象可完全互换，例如整数；
+2. `std::weak_ordering`：等价但不要求完全相同，例如忽略大小写的字符串视图；
+3. `std::partial_ordering`：某些值不可比较，例如含 NaN 的浮点数。
+
+```cpp
+double nan = std::numeric_limits<double>::quiet_NaN();
+auto order = nan <=> 1.0; // unordered
+```
+
+不能看到 `<=>` 就假设一定得到全序。把含浮点成员的默认比较结果用于有序容器键之前，要先定义 NaN、正负零等边界的业务语义。
+
+---
+
 # 26. optional、variant、any、string_view、span
 
 ## 26.1 optional
@@ -2903,7 +3847,48 @@ auto s = std::any_cast<std::string>(a);
 
 ---
 
-## 26.4 string_view
+## 26.4 `std::string` 的存储与失效规则
+
+`std::string` 拥有字符序列，并保证字符连续存储。`size()` 表示保存的字符数量，不依赖第一个 `\0` 的位置：
+
+```cpp
+std::string value{"ab\0cd", 5};
+
+assert(value.size() == 5);
+assert(std::strlen(value.c_str()) == 2); // C 接口把中间的 \0 当作结束
+```
+
+因此把 `string` 传给只接受 C 字符串的接口时，既要考虑结尾零字符，也要确认协议是否允许内嵌零字符。
+
+和 `vector` 类似，需要区分长度与容量：
+
+```cpp
+std::string text = "hello";
+text.reserve(1024); // 只预留容量，不改变 size
+text.resize(10);    // 改变 size，新字符进行值初始化
+```
+
+`reserve` 可以减少已知增长过程中的重复分配。`shrink_to_fit` 只是非强制请求，不能依赖它一定释放内存。可能触发重新分配的操作会使已有指针、引用、迭代器和 `string_view` 失效。
+
+许多实现使用 SSO（Small String Optimization），把短字符串直接放在 `string` 对象内部，避免堆分配：
+
+```text
+短字符串：string 对象内部缓冲区保存字符
+长字符串：string 对象保存指针、长度和容量
+```
+
+SSO 是实现策略，不是标准接口契约：
+
+1. 内部容量阈值依赖标准库、ABI 和字符类型；
+2. 不能通过字符串长度断言“这次一定不分配”；
+3. 移动短字符串可能仍要复制其内部字符；
+4. 不要把对象内部布局写入文件或跨动态库 ABI 暴露。
+
+`c_str()` 和 `data()` 返回的指针只在相应失效规则允许的期间有效。C++17 起非常量 `string::data()` 返回可写字符指针，但只能在现有 `[0, size())` 范围内修改字符；改变长度仍应调用 `resize`、`append` 等成员函数。
+
+---
+
+## 26.5 string_view
 
 非拥有字符串视图。
 
@@ -2944,7 +3929,7 @@ std::string getName() {
 
 ---
 
-## 26.5 span
+## 26.6 span
 
 `std::span<T>` 是连续内存的非拥有视图。
 
@@ -4006,9 +4991,47 @@ private:
 
 ---
 
-# 38. 存储期、初始化顺序与对象生命周期
+# 38. 初始化、存储期、求值顺序与对象生命周期
 
-## 38.1 四类存储期
+## 38.1 初始化形式先分清
+
+初始化不是一种单一动作。相似的标点可能进入不同规则，最终决定是否清零、是否允许 `explicit` 构造函数、是否检查窄化以及怎样进行重载决议。
+
+| 形式 | 示例 | 核心含义 |
+| --- | --- | --- |
+| 默认初始化 | `T object;` | 类类型调用默认构造；自动存储期的基础类型可能保持未初始化 |
+| 值初始化 | `T object{};`、`T()` | 类类型按值初始化规则构造；基础类型得到零值 |
+| 直接初始化 | `T object(args);` | 直接选择构造函数，可以考虑 `explicit` 构造函数 |
+| 拷贝初始化 | `T object = value;` | 通过隐式转换序列初始化，不考虑 `explicit` 构造函数 |
+| 列表初始化 | `T object{args};` | 使用列表规则，禁止许多窄化，并优先考虑 `initializer_list` |
+| 聚合初始化 | `Aggregate{members...}` | 按聚合元素顺序初始化，不调用用户自定义的聚合构造逻辑 |
+
+```cpp
+int first;       // 默认初始化，值不确定，读取前必须先写入
+int second{};    // 值初始化，得到 0
+int third = 3;   // 拷贝初始化
+int fourth(4);   // 直接初始化
+int fifth{5};    // 直接列表初始化
+```
+
+零初始化通常不是源代码中独立写出的语法阶段。例如静态存储期对象在其他初始化之前会先零初始化；某些值初始化也会先执行零初始化，再进行默认初始化。不能看到 `{}` 就机械断言“整块对象先 memset 为零”，类构造函数和对象模型规则仍然生效。
+
+简单聚合可以按成员顺序初始化：
+
+```cpp
+struct Point {
+    int x;
+    int y;
+};
+
+Point p{1, 2};
+```
+
+“什么类仍是 aggregate”的精确定义在不同语言版本中有调整。只要加入构造函数、虚函数、私有成员或复杂继承，就应由 `std::is_aggregate_v<T>` 或编译器按目标标准判断，不要依赖一条跨版本口诀。
+
+---
+
+## 38.2 四类存储期
 
 对象的“作用域”和“生命周期”不是同一概念。作用域决定名字在哪里可见，存储期决定对象存储大致存在多久。
 
@@ -4023,7 +5046,7 @@ private:
 
 ---
 
-## 38.2 构造顺序
+## 38.3 构造顺序
 
 一个派生类对象的构造顺序是：
 
@@ -4050,7 +5073,7 @@ private:
 
 ---
 
-## 38.3 静态初始化顺序
+## 38.4 静态初始化顺序
 
 同一翻译单元内，具有有序动态初始化的对象通常按定义顺序初始化；跨翻译单元的动态初始化顺序通常不应依赖。
 
@@ -4086,7 +5109,7 @@ Config& config() {
 
 ---
 
-## 38.4 临时对象与生命周期延长
+## 38.5 临时对象与生命周期延长
 
 临时对象通常在包含它的完整表达式结束时销毁，但绑定到某些引用时可以延长生命周期：
 
@@ -4110,7 +5133,7 @@ const std::string& ref = identity(std::string("hello"));
 
 ---
 
-## 38.5 `explicit`、委托构造与继承构造
+## 38.6 `explicit`、委托构造与继承构造
 
 单参数构造函数如果允许隐式转换，可能产生意外匹配：
 
@@ -4142,7 +5165,7 @@ public:
 
 ---
 
-## 38.6 花括号初始化与 `initializer_list` 优先级
+## 38.7 花括号初始化与 `initializer_list`
 
 花括号初始化可以阻止许多数值窄化：
 
@@ -4158,6 +5181,100 @@ std::vector<int> second{10, 1}; // 两个元素：10 和 1
 ```
 
 因此 `{}` 并不总是与 `()` 等价。设计和调用构造函数时，应明确是否存在 `initializer_list` 重载，以及初始化表达式想表达“元素列表”还是“构造参数”。
+
+`initializer_list` 保存的是一段编译器生成的只读数组视图，不拥有可以任意移动出来的独立元素：
+
+```cpp
+std::initializer_list<int> make_values() {
+    return {1, 2, 3}; // 错误设计：返回后底层临时数组已经失效
+}
+```
+
+这也是 `std::vector<std::unique_ptr<T>>` 不能直接通过普通 initializer-list 拷贝构造一组 `unique_ptr` 的原因之一：列表元素是 const，不能从中移动。需要 move-only 元素时应逐个 `emplace_back`，或从可移动范围构造。
+
+C++20 允许对聚合使用指定初始化，但标号顺序仍必须与成员声明顺序一致：
+
+```cpp
+struct Options {
+    int threads = 1;
+    bool tracing = false;
+};
+
+Options options{.threads = 8, .tracing = true};
+// Options bad{.tracing = true, .threads = 8}; // error：顺序颠倒
+```
+
+---
+
+## 38.8 most vexing parse
+
+C++ 语法在一段文本既可能是声明又可能是表达式时，会优先按声明解释：
+
+```cpp
+Widget object(); // 声明一个返回 Widget 的函数，不是默认构造对象
+Widget value{};  // 明确构造对象
+```
+
+带迭代器的局部变量也可能触发相同问题：
+
+```cpp
+std::vector<int> values(
+    std::istream_iterator<int>(input),
+    std::istream_iterator<int>()); // 可能被解析为函数声明
+```
+
+可以使用花括号、先保存迭代器变量，或给其中一个表达式增加不会被解释成声明的结构：
+
+```cpp
+auto first = std::istream_iterator<int>(input);
+auto last = std::istream_iterator<int>();
+std::vector<int> values(first, last);
+```
+
+花括号不是无条件修复手段，因为类如果有 `initializer_list` 构造函数，改用 `{}` 可能改变重载含义。应先确认目标构造函数集合。
+
+---
+
+## 38.9 求值顺序与 sequenced-before
+
+运算符的优先级和结合性决定表达式如何分组，不等于子表达式按什么时间顺序求值：
+
+```cpp
+int result = f() + g() * h();
+```
+
+这里乘法先分组，但不能据此断言 `g()` 一定在 `f()` 前执行。只有语言明确建立 sequenced-before 的位置才能依赖顺序。
+
+常见具有明确短路或顺序关系的运算包括：
+
+1. `lhs && rhs` 和 `lhs || rhs`：先求值左侧，并可能跳过右侧；
+2. `condition ? yes : no`：先求值条件，再只求值一个分支；
+3. 内建逗号运算符：先左后右；
+4. 完整表达式结束后，才进入下一个完整表达式；
+5. C++17 起，赋值运算符右侧先于左侧的最终写入相关求值。
+
+函数实参在进入函数体前都会完成求值，但彼此的先后次序通常未指定：
+
+```cpp
+consume(make_left(), make_right());
+```
+
+不能依赖 `make_left()` 一定先执行。C++17 起不同参数的初始化不会彼此交错，但具体谁先仍可变化。多个参数如果读写同一状态，即使不再构成旧版本中的未定义行为，也可能得到不同结果：
+
+```cpp
+int index = 0;
+record(index++, index++); // C++17 起结果顺序仍未指定，不应这样写
+```
+
+清晰写法是把带副作用的步骤拆开：
+
+```cpp
+int first = index++;
+int second = index++;
+record(first, second);
+```
+
+并发内存序中的 happens-before 是跨线程关系；本节的 sequenced-before 主要描述单线程求值。两者可以组合建立完整的线程间可见性，但不是同一个概念。
 
 ---
 
@@ -4295,6 +5412,141 @@ std::uint32_t bits = std::bit_cast<std::uint32_t>(f);
 2. 对象生命周期已经开始；
 3. 访问类型符合语言规则；
 4. 必要时使用 `std::launder` 处理特定复用存储场景。
+
+---
+
+## 39.5 trivial、standard-layout 与 aggregate
+
+旧资料常把“POD”当成可以随意按字节处理的类型。现代 C++ 更适合拆开讨论不同性质：
+
+| 性质 | 主要回答的问题 |
+| --- | --- |
+| trivially destructible | 析构是否不需要执行用户逻辑 |
+| trivially copyable | 是否允许按标准规定通过字节复制保存和恢复值 |
+| standard-layout | 是否满足适合与其他语言或固定布局规则衔接的一组布局限制 |
+| aggregate | 是否可以按聚合元素直接初始化 |
+| literal type | 对象是否具备进入常量表达式相关场景的类型条件 |
+
+这些集合彼此相关但不等价。一个类型可平凡复制，不代表可以用 `memcmp` 判断对象相等，因为 padding byte 可能具有不同值，浮点和指针表示也有额外语义。
+
+对 trivially copyable 类型，可以把对象表示复制到 `char`、`unsigned char` 或 `std::byte` 数组中，并在满足标准条件时复制回来：
+
+```cpp
+static_assert(std::is_trivially_copyable_v<Header>);
+
+std::array<std::byte, sizeof(Header)> bytes;
+Header source = make_header();
+std::memcpy(bytes.data(), &source, sizeof source);
+
+Header restored;
+std::memcpy(&restored, bytes.data(), sizeof restored);
+```
+
+这不等于得到稳定的序列化格式。padding、端序、类型宽度和 ABI 都可能变化；跨进程或跨平台协议仍应逐字段编码。
+
+`offsetof` 只应对满足相应 standard-layout 条件的类型使用。需要编译期确认时，可以组合 `std::is_trivially_copyable_v`、`std::is_standard_layout_v`、`std::is_aggregate_v` 等 type traits，而不是根据“没有虚函数”自行猜测。
+
+---
+
+## 39.6 原始存储、对象生命周期与 `std::launder`
+
+一段对齐且足够大的字节区域只是存储，不一定已经存在目标类型对象。C++20 可以用 `std::construct_at` 和 `std::destroy_at` 清楚表达生命周期：
+
+```cpp
+alignas(Widget) std::byte storage[sizeof(Widget)];
+
+auto* location = reinterpret_cast<Widget*>(storage);
+Widget* widget = std::construct_at(location, 42);
+widget->run();
+std::destroy_at(widget);
+```
+
+底层字节数组仍然存在，但 `Widget` 的生命周期只覆盖 construct/destroy 之间。再次在同一地址构造对象时，要重新审查旧指针、引用和 const 对象是否仍能表示新对象：
+
+```cpp
+Widget* next = std::construct_at(location, 7);
+```
+
+在满足 transparently replaceable 等条件的普通同类型完整对象复用中，旧名字和指针通常可以自动指代新对象；const 完整对象、基类子对象、带 `[[no_unique_address]]` 的成员等情况更复杂。`std::launder` 只为标准规定的这些特殊场景取得可用指针，不会修复：
+
+1. 地址未对齐；
+2. 对象根本没有构造；
+3. 数组越界；
+4. 违反别名规则；
+5. 已经结束生命周期的资源仍被并发访问。
+
+C++23 的 `std::start_lifetime_as` 为部分隐式生命周期类型提供了更直接的底层接口，但它同样受类型、对齐和存储范围约束。
+
+---
+
+## 39.7 union 的活跃成员
+
+union 的成员共享存储，同一时刻通常只有一个成员处于活跃生命周期：
+
+```cpp
+union Number {
+    int integer;
+    double real;
+
+    Number() : integer(0) {}
+};
+
+Number value;
+value.integer = 42;
+// double x = value.real; // 读取非活跃成员，通常不是合法的 C++ type punning
+```
+
+对含非平凡成员的 union，切换活跃成员还需要显式结束旧对象并构造新对象，异常安全和特殊成员函数也要自行处理。`std::variant` 把标签、构造析构和异常状态封装在一起，通常比手写 tagged union 安全。
+
+某些 standard-layout union/结构存在“共同初始序列”的受限读取例外，但它不是通用的二进制重解释工具。读取对象表示应优先使用 `std::bit_cast` 或 `memcpy`。
+
+---
+
+## 39.8 数组退化、数组引用与多维数组
+
+内建数组在多数表达式中会退化为指向首元素的指针，长度信息随之丢失：
+
+```cpp
+void inspect(int* values); // 不知道调用方数组长度
+
+int values[4]{1, 2, 3, 4};
+inspect(values);
+```
+
+`sizeof(array)`、`decltype(array)`、取数组地址等上下文不会执行这种退化。模板也可以通过数组引用保留长度：
+
+```cpp
+template <typename T, std::size_t N>
+constexpr std::size_t count_of(T (&)[N]) noexcept {
+    return N;
+}
+
+static_assert(count_of(values) == 4);
+```
+
+接口更常直接使用 `std::span<T>`，同时传递首地址和长度。字符串字面量的数组长度还包含结尾 `\0`，这一点与 `std::string_view` 的逻辑长度不同。
+
+二维内建数组退化后得到的是“指向一行数组的指针”，不是 `int**`：
+
+```cpp
+int matrix[3][4]{};
+int (*row)[4] = matrix;
+// int** wrong = matrix; // error
+```
+
+`int**` 指向的是指针，通常表示若干独立分配的行；`int[3][4]` 则是连续的 12 个整数。两者布局和寻址公式不同，不能通过强制转换互换。
+
+---
+
+## 39.9 端序与协议表示
+
+对象的内存表示不等于网络或文件格式。C++20 的 `std::endian` 可以描述平台原生端序，C++23 的 `std::byteswap` 可以辅助整数换序，但协议仍应明确字段宽度和目标字节序：
+
+```cpp
+std::uint32_t value = read_u32_be(bytes); // 协议函数明确“大端 32 位”
+```
+
+不要直接把结构体 `reinterpret_cast` 成字节流发送：成员 padding、尾部 padding、对齐、端序和 ABI 都可能改变。稳定协议应逐字段编码，并在读取前验证长度和数值范围。
 
 ---
 
@@ -4648,7 +5900,49 @@ void invoke_twice(F&& function) {
 
 ---
 
-## 43.2 `std::function`
+## 43.2 函数指针、成员指针与 `std::invoke`
+
+普通函数指针只保存兼容函数的入口：
+
+```cpp
+using Compare = bool (*)(int, int);
+
+bool less_than(int lhs, int rhs) {
+    return lhs < rhs;
+}
+
+Compare compare = &less_than;
+bool result = compare(1, 2);
+```
+
+成员指针还绑定了所属类类型，需要一个对象才能访问：
+
+```cpp
+struct Worker {
+    int id = 0;
+    int run(int value) const { return id + value; }
+};
+
+int Worker::* data_member = &Worker::id;
+int (Worker::*member_function)(int) const = &Worker::run;
+
+Worker worker{7};
+int id = worker.*data_member;
+int answer = (worker.*member_function)(5);
+```
+
+成员函数指针不应被假设成一个普通代码地址；在多继承和虚函数场景中，它的表示可能还需要编码调整信息。`std::invoke` 可以统一调用普通函数、函数对象和成员指针：
+
+```cpp
+std::invoke(member_function, worker, 5);
+std::invoke(data_member, &worker);
+```
+
+`std::bind` 也能适配参数，但默认会衰减并复制绑定值，引用需要 `std::ref` 明确包装，占位符和嵌套 bind 还会降低可读性。多数新代码用 lambda 能更清楚地表达捕获方式、参数类型和所有权。
+
+---
+
+## 43.3 `std::function`
 
 `std::function<R(Args...)>` 是拥有型类型擦除包装器：
 
@@ -4674,9 +5968,9 @@ std::function<int(int)> function = [](int value) {
 
 ---
 
-## 43.3 move-only 回调
+## 43.4 move-only 回调
 
-`std::function` 在 C++23 之前通常要求目标可复制，因此不能直接保存捕获 `unique_ptr` 的 move-only lambda。
+`std::function` 自身是可复制的，因此它保存的目标也必须满足相应的可复制要求，不能直接保存捕获 `unique_ptr` 的 move-only lambda。C++23 另外提供了 `std::move_only_function`，并没有改变 `std::function` 自身的复制语义。
 
 ```cpp
 auto task = [ptr = std::make_unique<int>(1)]() mutable {
@@ -4693,7 +5987,7 @@ auto task = [ptr = std::make_unique<int>(1)]() mutable {
 
 ---
 
-## 43.4 回调生命周期
+## 43.5 回调生命周期
 
 异步回调最常见的错误不是类型，而是捕获对象已经销毁：
 
@@ -4735,6 +6029,28 @@ for (int value : even_squares) {
 ```
 
 view 通常是惰性、轻量的适配器，很多 view 非拥有，但标准库也存在能够拥有底层范围的 view。必须根据具体 view 类型判断所有权。对于非拥有 view，底层范围销毁、容器扩容或引用失效后，view 也可能失效；不能把 view 自动理解为复制后的独立结果。
+
+Ranges 算法会用 borrowed range 规则阻止一部分明显的悬垂返回值：
+
+```cpp
+auto found = std::ranges::find(std::vector<int>{1, 2, 3}, 2);
+// found 的结果类型是 std::ranges::dangling，不能解引用
+```
+
+临时 `vector` 在调用结束后销毁，因此算法不能安全返回其中的迭代器。`std::span`、`std::string_view` 等非拥有视图可以是 borrowed range，因为销毁视图对象本身不会销毁其指向的数据；这仍不保证底层数据还活着。
+
+projection 可以把“先取字段，再比较”的步骤直接交给算法：
+
+```cpp
+struct User {
+    int id;
+    std::string name;
+};
+
+std::ranges::sort(users, std::ranges::less{}, &User::id);
+```
+
+这比在每个调用点重复编写比较 lambda 更容易保持排序字段一致。view pipeline 默认只是描述计算；需要独立结果时要显式复制到容器，C++23 可以在支持的标准库中使用 `std::ranges::to`。
 
 ---
 
@@ -4894,3 +6210,371 @@ Sanitizer 不是形式证明，也不能覆盖所有执行路径。应结合单�
 8. 同时检查正确性，避免“通过引入 UB 获得性能”。
 
 性能结论必须附带平台、编译器、编译选项、数据规模和测量方法。
+
+---
+
+## 45.6 C 与 C++ ABI 边界
+
+`extern "C"` 为名字声明 C language linkage。在常见工具链上，它会采用与 C 接口匹配的符号命名和调用约定，从而避免 C++ 重载产生的 name mangling：
+
+```cpp
+extern "C" int plugin_init(const char* config);
+```
+
+它不会把函数体变成 C，也不会让 C 理解类、模板、异常、引用或 STL 容器。对同时被 C 和 C++ 包含的头文件，常见写法是：
+
+```c
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct engine_handle;
+
+struct engine_handle* engine_create(const char* config);
+int engine_run(struct engine_handle* handle);
+void engine_destroy(struct engine_handle* handle);
+
+#ifdef __cplusplus
+}
+#endif
+```
+
+实现内部可以使用 C++，边界只暴露不透明句柄、固定宽度整数、字节缓冲区和明确的错误协议：
+
+```cpp
+extern "C" int engine_run(engine_handle* handle) noexcept {
+    try {
+        if (handle == nullptr) {
+            return invalid_argument;
+        }
+        handle->impl.run();
+        return success;
+    } catch (const std::exception& error) {
+        save_last_error(error.what());
+        return internal_error;
+    } catch (...) {
+        save_last_error("unknown error");
+        return internal_error;
+    }
+}
+```
+
+设计边界时还要明确：
+
+1. 谁分配、谁释放，最好由同一模块提供成对 create/destroy；
+2. 缓冲区长度、字符编码、对齐和生命周期；
+3. 结构体版本和大小字段，便于向后扩展；
+4. 回调在哪个线程执行、能否重入以及怎样注销；
+5. 异常绝不能逃到 C 调用方；
+6. 不把 `std::string`、`std::vector`、虚函数类等实现相关布局直接暴露给边界另一侧。
+
+即使两边都是 C++，只要编译器、标准库、编译选项或运行库不同，也应把边界视为潜在 ABI 边界。
+
+---
+
+## 45.7 头文件、宏与 C++20 Modules
+
+传统头文件通过文本包含工作，同一份声明会在每个翻译单元重新预处理和解析。头文件至少需要 include guard：
+
+```cpp
+#ifndef PROJECT_MATH_VECTOR_H
+#define PROJECT_MATH_VECTOR_H
+
+struct Vector;
+
+#endif
+```
+
+`#pragma once` 被主流编译器广泛支持，但不是 ISO C++ 语言标准的一部分。无论采用哪种方式，都只能防止单个翻译单元内重复包含；跨翻译单元定义仍要遵守 ODR。
+
+宏在预处理阶段进行 token 替换，没有作用域和类型检查：
+
+```cpp
+#define SQUARE(x) x * x
+
+int value = SQUARE(1 + 2); // 展开成 1 + 2 * 1 + 2
+```
+
+即使补齐括号，`SQUARE(i++)` 仍会重复求值。常量、内联函数、模板、`constexpr` 和 enum 通常能提供更安全的替代；宏主要保留给条件编译、平台探测和确实需要生成 token 的场景。
+
+C++20 Modules 用语言级导入替代接口的文本复制：
+
+```cpp
+// math.cppm：模块接口单元
+export module math;
+
+export int add(int lhs, int rhs);
+```
+
+```cpp
+// math.cpp：模块实现单元
+module math;
+
+int add(int lhs, int rhs) {
+    return lhs + rhs;
+}
+```
+
+```cpp
+// app.cpp
+import math;
+
+int result = add(1, 2);
+```
+
+模块的主要收益是：
+
+1. 接口只解析成模块产物一次，减少大型头文件的重复解析；
+2. 非 export 声明不会成为模块公开接口；
+3. 导入方的宏通常不会渗入模块接口并改变其含义；
+4. 名字依赖关系比 include 的文本顺序更明确。
+
+需要包含传统配置头时，可把它放进 global module fragment：
+
+```cpp
+module;
+#include "legacy_config.h"
+
+export module bridge;
+export int configured_value();
+```
+
+Modules 不会自动提供稳定 ABI，也不是动态库打包格式。构建系统仍需先生成编译器相关的 BMI/PCM 等模块产物，再编译依赖者和链接目标文件；这些产物通常不能跨编译器版本随意复用。模块分区、header unit 和第三方库迁移能力还依赖具体工具链，应先在目标编译器与构建系统上验证。
+
+---
+
+# 46. C++20 协程机制
+
+有栈协程与无栈协程的调度模型在 [Linux 系统专题](post.html?slug=os_review) 中介绍。本章只讨论 C++20 的语言机制：编译器如何把一个函数改写为可暂停状态机，以及返回对象如何拥有这段状态。
+
+C++ 协程不是线程、调度器或异步 I/O 库。函数体中出现 `co_await`、`co_yield` 或 `co_return` 时，它成为协程；标准规定转换协议，何时恢复以及在哪个线程恢复由库和调度器决定。
+
+```text
+调用协程函数
+    |
+    v
+创建 coroutine frame
+    |-- 参数副本
+    |-- 跨挂起点存活的局部变量
+    |-- promise 对象
+    `-- 恢复位置与状态
+    |
+    v
+返回 task/generator 等拥有型对象
+```
+
+## 46.1 `promise_type` 与 coroutine frame
+
+返回类型通过 `promise_type` 定义协程与调用者之间的协议。准确地说，编译器从 `std::coroutine_traits<返回类型, 参数类型...>::promise_type` 取得 promise 类型；普通返回类型通常直接提供嵌套的 `promise_type`。一个典型 promise 需要回答：
+
+| 成员 | 作用 |
+| --- | --- |
+| `get_return_object()` | 创建返回给调用者的 task/generator |
+| `initial_suspend()` | 函数刚创建后是否立即挂起 |
+| `final_suspend()` | 执行结束时如何挂起和移交控制 |
+| `return_value()` / `return_void()` | 接收 `co_return` 的结果 |
+| `yield_value()` | 接收 `co_yield` 的值 |
+| `unhandled_exception()` | 保存或转换未捕获异常 |
+
+协程帧通常需要动态存储，但标准允许编译器在生命周期严格嵌套且大小可知等条件下把分配消除。不能把“协程一定进行一次堆分配”当作语言保证，也不能假设优化器一定能消除它。
+
+传值参数会复制或移动进协程帧；引用参数仍然只是引用：
+
+```cpp
+Task use_later(const std::string& text) {
+    co_await schedule();
+    consume(text); // 调用方的 string 可能早已销毁
+}
+```
+
+只要协程可能在调用表达式结束后恢复，就必须重新检查引用、指针、`this` 和 view 的生命周期。需要独立数据时应按值传入或显式建立共享所有权。
+
+---
+
+## 46.2 `co_await` 的 awaiter 协议
+
+一个 awaiter 提供三个核心操作：
+
+```cpp
+struct ScheduleAwaiter {
+    Scheduler& scheduler;
+
+    bool await_ready() const noexcept {
+        return false; // false 表示需要走挂起流程
+    }
+
+    void await_suspend(std::coroutine_handle<> continuation) {
+        scheduler.enqueue(continuation);
+    }
+
+    void await_resume() const noexcept {
+        // 恢复后向协程表达式返回结果；这里返回 void
+    }
+};
+```
+
+执行 `co_await expression` 时，promise 可以先通过 `await_transform` 改写普通表达式；随后语言按规则查找成员或非成员 `operator co_await`，没有相应运算符时就把表达式本身作为 awaiter。之后可以简化理解为：
+
+1. 从 expression 得到 awaiter；
+2. 调用 `await_ready()`，若为 true 就不挂起；
+3. 否则保存协程状态，并把当前 coroutine handle 传给 `await_suspend()`；
+4. 将来有人调用 handle 的 `resume()`；
+5. 恢复后调用 `await_resume()`，其返回值就是整个 `co_await` 表达式的结果。
+
+`await_suspend` 返回 `void` 表示已经安排挂起；返回 `bool` 可以决定最终是否保持挂起；返回另一个 `coroutine_handle` 可以把控制直接转交给另一个协程，常用于 symmetric transfer。
+
+一旦 `await_suspend` 把 handle 发布给其他线程，协程可能立即恢复，甚至在 `await_suspend` 返回前执行完并销毁相关状态。因此发布之后不能再无同步访问可能属于协程帧的成员。这类竞争是协程异步原语实现中最隐蔽的生命周期问题之一。
+
+---
+
+## 46.3 一个最小 generator
+
+下面的 generator 使用 `co_yield` 逐个产生值。它采用 lazy start：创建 generator 时先挂起，每次 `next()` 才恢复到下一个产出点。
+
+```cpp
+#include <coroutine>
+#include <exception>
+#include <optional>
+#include <type_traits>
+#include <utility>
+
+template <typename T>
+class Generator {
+public:
+    struct promise_type;
+    using handle_type = std::coroutine_handle<promise_type>;
+
+    struct promise_type {
+        std::optional<T> current;
+        std::exception_ptr error;
+
+        Generator get_return_object() noexcept {
+            return Generator(handle_type::from_promise(*this));
+        }
+
+        std::suspend_always initial_suspend() const noexcept {
+            return {};
+        }
+
+        std::suspend_always final_suspend() const noexcept {
+            return {};
+        }
+
+        std::suspend_always yield_value(T value) noexcept(
+            std::is_nothrow_move_constructible_v<T>) {
+            current.emplace(std::move(value));
+            return {};
+        }
+
+        void return_void() const noexcept {}
+
+        void unhandled_exception() noexcept {
+            error = std::current_exception();
+        }
+    };
+
+    explicit Generator(handle_type handle) noexcept : handle_(handle) {}
+
+    Generator(const Generator&) = delete;
+    Generator& operator=(const Generator&) = delete;
+
+    Generator(Generator&& other) noexcept
+        : handle_(std::exchange(other.handle_, {})) {}
+
+    Generator& operator=(Generator&& other) noexcept {
+        if (this != &other) {
+            if (handle_) {
+                handle_.destroy();
+            }
+            handle_ = std::exchange(other.handle_, {});
+        }
+        return *this;
+    }
+
+    ~Generator() {
+        if (handle_) {
+            handle_.destroy();
+        }
+    }
+
+    bool next() {
+        if (!handle_ || handle_.done()) {
+            return false;
+        }
+
+        handle_.resume();
+
+        if (handle_.promise().error) {
+            std::rethrow_exception(handle_.promise().error);
+        }
+
+        return !handle_.done();
+    }
+
+    const T& value() const {
+        return *handle_.promise().current;
+    }
+
+private:
+    handle_type handle_{};
+};
+
+Generator<int> count_to(int limit) {
+    for (int value = 1; value <= limit; ++value) {
+        co_yield value;
+    }
+}
+
+auto numbers = count_to(3);
+while (numbers.next()) {
+    use(numbers.value());
+}
+```
+
+这里有几个关键所有权决定：
+
+1. `Generator` 独占 coroutine handle，因此只能移动；
+2. `final_suspend()` 返回 `suspend_always`，让帧在结束点保留，最后由 `Generator` 析构时 `destroy()`；
+3. 如果这里改成自动销毁帧，却仍保留 handle，析构时会二次销毁；
+4. 未捕获异常先存入 promise，再由 `next()` 在调用者一侧重抛；
+5. `value()` 只在最近一次成功 `next()` 后、下一次恢复前有效。
+
+完整库还要定义空 generator 上调用 `value()` 的契约、迭代器接口、引用产出、取消和分配失败策略。
+
+---
+
+## 46.4 task、continuation 与异常
+
+异步 task 通常不是让调用方主动循环 `resume()`，而是记录等待它的 continuation：
+
+```text
+caller co_await task
+        |
+        v
+task promise 保存 caller handle
+        |
+        v
+异步操作完成，恢复 task
+        |
+        v
+task final_suspend 把控制转回 caller
+```
+
+task 的 `operator co_await` 会提供 awaiter；awaiter 在 `await_suspend` 中把调用方 handle 存入被等待 task 的 promise。task 到达 `final_suspend` 后，再恢复 continuation。使用 handle 返回值做 symmetric transfer 可以减少递归式 `resume()` 造成的额外栈增长。
+
+异常不会自动跳过挂起边界传播到另一个协程。被等待 task 通常在 `unhandled_exception()` 中保存 `std::exception_ptr`，调用方恢复并执行 `await_resume()` 时再重抛。这样异常出现在 `co_await task` 这一逻辑调用点。
+
+---
+
+## 46.5 销毁、取消与恢复线程
+
+销毁一个处于挂起状态的 handle 会销毁协程帧中的 promise、参数副本和仍存活的局部对象，但不会自动取消已经提交给内核、事件循环或设备队列的外部操作。安全取消需要协议配合：
+
+1. 请求停止外部操作或标记结果不再需要；
+2. 确保完成回调不会恢复已经销毁的 handle；
+3. 等待或引用计数保护仍在飞行中的回调；
+4. 最后销毁 coroutine frame。
+
+`resume()` 在调用它的线程中继续执行协程。I/O 完成线程、线程池和 UI 线程之间的切换都是 awaiter/调度器的行为，不由 `co_await` 关键字自动决定。共享状态仍要遵守普通 C++ 数据竞争和内存序规则。
+
+不要对已经完成、正在运行或已被销毁的 coroutine handle 再次 `resume()`。裸 handle 只是非拥有控制句柄；生产接口应把它封装进具有明确所有权、完成状态和取消协议的 task/generator 类型。

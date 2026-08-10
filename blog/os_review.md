@@ -199,10 +199,95 @@ task_struct
 
 **无栈协程**通常被编译为状态机，把跨挂起点仍需存活的局部变量、恢复位置等保存到协程帧中。
 
+假设一个服务器要先读取请求头，再根据其中的用户 ID 查询数据库，最后生成响应。有栈协程可以把这段逻辑写成普通的同步调用链。下面的 `StackfulContext` 和异步函数是为了说明控制流而设计的简化接口，不属于标准 C++：
+
+```cpp
+Response handle_request(StackfulContext& context, int socket_fd) {
+    Header header = read_header(context, socket_fd);
+    User user = query_user(context, header.user_id);
+    return render_response(user);
+}
+
+Header read_header(StackfulContext& context, int socket_fd) {
+    while (!socket_ready(socket_fd)) {
+        context.wait_readable(socket_fd);  // 注册事件并挂起当前协程
+    }
+    return parse_header(nonblocking_read(socket_fd));
+}
+
+User query_user(StackfulContext& context, int user_id) {
+    RequestId request = submit_database_query(user_id);
+    while (!database_result_ready(request)) {
+        context.wait_database(request);    // 在普通函数内部再次挂起
+    }
+    return take_database_result(request);
+}
+```
+
+执行到 `wait_database()` 时，逻辑调用关系仍然是：
+
+```text
+handle_request()
+└── query_user()
+    └── wait_database()  ← 挂起点
+```
+
+运行时把数据库请求注册到事件循环，保存必要寄存器和栈指针，然后切换到其他协程。`handle_request()` 和 `query_user()` 的栈帧、返回地址及局部变量仍保留在该协程的独立栈中。数据库事件到达后，运行时恢复栈指针，`wait_database()` 像一次普通阻塞调用返回那样继续执行。它的价值是深层普通函数也能暂停整条调用链，旧的同步代码较容易改造成协程代码；代价是每个协程需要独立栈或可增长栈，还要处理栈空间、栈溢出和上下文切换。挂起时通常不是复制整块栈，而是让栈内存留在原处并保存恢复上下文，具体实现也可能使用分段栈或栈复制。
+
+Boost.Context、Boost.Fiber 一类库属于典型有栈思路；Go 的 goroutine 也拥有可增长栈并由运行时调度。它们是否采用 1:N 或 M:N、能否跨线程迁移，是调度器的选择，不由“有栈”三个字决定。
+
+同一流程用 C++20 风格的无栈协程可以写成：
+
+```cpp
+Task<Response> handle_request(int socket_fd) {
+    Header header = co_await async_read_header(socket_fd);
+    User user = co_await async_query_user(header.user_id);
+    co_return render_response(user);
+}
+```
+
+这里假设 `Task<T>`、`async_read_header()` 和 `async_query_user()` 由异步库提供。标准 C++20 只定义协程转换和 `co_await` 等语言机制，不自带 `Task`、事件循环或网络运行时。
+
+编译器会把 `handle_request()` 大致转换成堆上或由调用方提供存储的协程帧，以及一个根据状态跳转的恢复函数：
+
+```cpp
+struct HandleRequestFrame {
+    enum class State {
+        waiting_for_header,
+        waiting_for_user,
+        finished
+    } state;
+
+    int socket_fd;
+    Header header;       // 第二个挂起点之后仍要使用
+    Coroutine continuation;
+    // 还包括 awaiter、异常和返回值等运行时状态
+};
+
+void resume(HandleRequestFrame& frame) {
+    switch (frame.state) {
+    case State::waiting_for_header:
+        // 取得请求头，发起用户查询，必要时再次挂起
+        break;
+    case State::waiting_for_user:
+        // 取得用户信息并生成响应
+        break;
+    case State::finished:
+        break;
+    }
+}
+```
+
+这不是编译器生成代码的逐行复刻，而是说明其结构。执行 `co_await` 时，编译器记录下次从哪个状态恢复，并把跨挂起点仍然存活的局部变量放进协程帧。运行中的代码仍使用承载线程的普通调用栈，但挂起后不会为它保留一条独立的完整调用栈。被等待的子协程通常也有自己的协程帧，通过 continuation 在完成时恢复调用方，因此“无栈”不等于没有任何栈或只有一个状态对象。
+
+无栈协程只能在编译器明确识别的 `co_await`、`co_yield` 等位置暂停。普通函数不能在调用方毫不知情的情况下挂起整条调用链，异步结果通常需要逐层返回，形成常说的“异步一路向上传播”。它不必为每个任务预留独立栈，百万级等待任务时内存更容易核算，但协程帧生命周期、取消、异常和 continuation 仍需要运行时或库正确管理。C++20 协程、Rust `async/await` 和许多语言的 `async` 状态机都属于这一路径。
+
 因此，协程切换不应统一描述为“切换栈指针”：
 
 - 有栈协程主要保存和恢复栈上下文；
 - 无栈协程主要保存和恢复状态机及协程帧；
+- 有栈协程更容易在深层普通函数中透明挂起，无栈协程的挂起点由语言和类型显式表达；
+- 有栈或无栈只描述暂停状态如何保存，不决定是否多线程、是否抢占，也不决定 I/O 是否真正异步；
 - 具体成本取决于实现和挂起点行为。
 
 ### 4.2 协程通常如何调度？
