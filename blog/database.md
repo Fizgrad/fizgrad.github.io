@@ -23,48 +23,71 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    CLIENT["客户端 / 应用"] --> CONNECTOR["连接器<br/>认证 · 权限 · 会话"]
+    CLIENT["客户端 / 应用"] --> CONNECTOR
 
-    subgraph SERVER["MySQL Server 层"]
-        direction LR
-        CONNECTOR --> PARSER["解析器"]
-        PARSER --> OPTIMIZER["优化器<br/>选择索引与执行计划"]
-        OPTIMIZER --> EXECUTOR["执行器"]
-        EXECUTOR --> COMMIT["提交协调<br/>redo prepare → binlog → redo commit"]
-        EXECUTOR -.-> BINCACHE["binlog cache<br/>记录逻辑变更事件"]
+    subgraph PROCESS["mysqld 进程：CPU 执行 + RAM（进程退出后不保留）"]
+        direction TB
+
+        subgraph SERVER["Server 层：解析、计划、执行与提交控制"]
+            direction LR
+            CONNECTOR["连接器<br/>认证 · 权限 · 会话状态"] --> PARSER["解析器"]
+            PARSER --> OPTIMIZER["优化器<br/>选择索引与执行计划"]
+            OPTIMIZER --> EXECUTOR["执行器"]
+            EXECUTOR --> COMMIT["提交协调<br/>redo prepare → binlog → redo commit"]
+            EXECUTOR -. "生成逻辑变更事件" .-> BINCACHE["binlog cache<br/>会话缓存：内存为主<br/>过大时可使用临时文件"]
+        end
+
+        subgraph INNODB["InnoDB：运行期状态与内存缓存"]
+            direction LR
+            HANDLER["Handler 接口"] --> INDEX["B+ 树访问逻辑<br/>索引本体不是单独的内存副本"]
+            INDEX --> BP["Buffer Pool（RAM）<br/>缓存索引页 · 数据页 · undo 页<br/>包含 clean page / dirty page"]
+            HANDLER --> TRX["事务系统（RAM）<br/>锁 · Read View · 活跃事务"]
+            TRX -->|"生成 undo / 修改缓存页"| BP
+            TRX -->|"生成 redo record"| REDOBUF["redo log buffer（RAM）<br/>尚未持久化的 redo"]
+        end
+
+        EXECUTOR --> HANDLER
+        COMMIT -. "prepare / commit" .-> TRX
+        COMMIT -. "触发 redo 持久化" .-> REDOBUF
+        COMMIT -. "协调 binlog 刷出" .-> BINCACHE
     end
 
-    subgraph ENGINE["InnoDB 存储引擎"]
+    subgraph DISK["文件系统 / SSD：持久化文件（是否真正落盘由 write + fsync 策略决定）"]
         direction LR
-        EXECUTOR --> HANDLER["Handler 接口"]
-        HANDLER --> INDEX["B+ 树索引访问<br/>聚簇索引 · 二级索引"]
-        INDEX --> BP["Buffer Pool<br/>索引页 · 数据页 · undo 页"]
-        HANDLER --> TRX["事务系统<br/>MVCC · 锁"]
-        TRX --> UNDO["undo log<br/>回滚 · 历史版本"]
-        TRX --> REDOBUF["redo log buffer<br/>记录页修改"]
-        UNDO --> BP
+        TABLESPACE["表空间文件<br/>聚簇 / 二级 B+ 树页<br/>行数据"]
+        UNDOFILE["undo 表空间<br/>持久化的 undo 页"]
+        REDOFILE["redo 日志文件<br/>崩溃恢复"]
+        BINLOGFILE["binlog 文件<br/>复制 · PITR"]
     end
 
-    subgraph STORAGE["持久化存储"]
-        direction LR
-        DATA["表空间文件<br/>B+ 树页与行数据"]
-        UNDOFILE["undo 表空间"]
-        REDOFILE["redo 日志文件"]
-        BINLOGFILE["binlog 文件"]
-    end
+    TABLESPACE -->|"缺页读取"| BP
+    BP -->|"后台刷脏页 / checkpoint"| TABLESPACE
+    UNDOFILE -->|"读取历史 undo 页"| BP
+    BP -->|"刷回 undo 页"| UNDOFILE
+    REDOBUF -->|"write / fsync（按配置）"| REDOFILE
+    BINCACHE -->|"write / fsync（按配置）"| BINLOGFILE
 
-    DATA -->|"缺页读取"| BP
-    BP -->|"后台刷脏页 / checkpoint"| DATA
-    BP <-->|"undo 页读写"| UNDOFILE
-    REDOBUF -->|"write / fsync"| REDOFILE
-    BINCACHE -->|"write / fsync"| BINLOGFILE
-    COMMIT -.-> REDOBUF
-    COMMIT --> BINCACHE
+    classDef external fill:#27272a,stroke:#a1a1aa,color:#fafafa;
+    classDef runtime fill:#172554,stroke:#60a5fa,color:#eff6ff;
+    classDef memory fill:#083344,stroke:#22d3ee,color:#ecfeff;
+    classDef disk fill:#451a03,stroke:#f59e0b,color:#fffbeb;
+    class CLIENT external;
+    class CONNECTOR,PARSER,OPTIMIZER,EXECUTOR,COMMIT,HANDLER,INDEX runtime;
+    class BINCACHE,BP,TRX,REDOBUF memory;
+    class TABLESPACE,UNDOFILE,REDOFILE,BINLOGFILE disk;
+    style PROCESS fill:#06171f,stroke:#22d3ee,stroke-width:2px,color:#ecfeff;
+    style SERVER fill:#0f172a,stroke:#60a5fa,color:#eff6ff;
+    style INNODB fill:#0f172a,stroke:#60a5fa,color:#eff6ff;
+    style DISK fill:#211506,stroke:#f59e0b,stroke-width:2px,color:#fffbeb;
 ```
 
-- 读取路径：执行器通过 Handler 按 B+ 树查找索引页；页命中 Buffer Pool 时直接读取，否则从表空间载入。
-- 更新路径：事务系统生成 undo 以支持回滚和 MVCC，修改 Buffer Pool 中的页，同时把页修改写入 redo log buffer。
-- 提交路径：Server 层以两阶段提交协调 InnoDB redo 与 binlog；事务提交不要求数据页立即刷盘，脏页可由后台线程稍后写回。
+图中蓝色节点是执行与控制逻辑，青色节点是在 mysqld 进程内保存的易失状态或缓存，橙色节点是面向持久化的文件。
+
+- B+ 树在哪里：完整索引页长期保存在表空间文件中；正在访问的索引页被读入 Buffer Pool，因此同一页可能同时具有磁盘版本和内存缓存版本。修改先发生在内存页，脏页稍后刷回表空间。
+- undo 在哪里：undo 是 InnoDB 生成的记录，作为 undo 页进入 Buffer Pool，并按页写入 undo 表空间。它既不是只存在内存的临时对象，也不是 Server 层日志。
+- redo 在哪里：页修改先生成到内存中的 redo log buffer，提交时按配置写入并同步到 redo 日志文件；它保证崩溃后可以重放尚未刷回的数据页修改。
+- binlog 在哪里：事务执行期间的逻辑事件先进入 Server 层的 binlog cache，提交阶段再写入 binlog 文件。超大事务的 cache 可能使用临时文件，但它仍不等于最终持久化 binlog。
+- 提交意味着什么：两阶段提交协调 redo 与 binlog；事务提交通常不要求数据页和 undo 页立即落盘。图中的“磁盘文件”表示持久化目标，`write` 之后数据仍可能停留在操作系统或设备缓存中，是否具备断电持久性还取决于 `fsync`、数据库配置和存储设备语义。
 
 # 2. SQL 与关系模型：从 CRUD 到组合查询
 
