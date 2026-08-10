@@ -340,6 +340,21 @@ C++ 表达式有值类别。常见的有：
 
 “左值一定能直接取地址”只适合作为入门近似：位域不能直接取地址，类型还可能重载 `operator&`。更本质的区分是表达式是否具有身份，以及其资源能否被复用。
 
+`decltype((表达式))` 可以在编译期观察值类别：结果为 `T&` 表示左值，为 `T&&` 表示将亡值，为非引用 `T` 表示纯右值。
+
+```cpp
+#include <type_traits>
+#include <utility>
+
+int value = 0;
+
+static_assert(std::is_same_v<decltype((value)), int&>);             // lvalue
+static_assert(std::is_same_v<decltype((std::move(value))), int&&>); // xvalue
+static_assert(std::is_same_v<decltype((value + 1)), int>);          // prvalue
+```
+
+这里的双层括号有意义：`decltype(value)` 对无括号名字使用特殊规则，得到变量声明时的类型 `int`；`decltype((value))` 才按表达式的值类别得到 `int&`。`std::move` 本身不移动数据，它只生成一个将亡值表达式。
+
 ---
 
 ## 4.2 变量名永远是左值表达式
@@ -1249,17 +1264,180 @@ flowchart LR
 
 ## 10.1 虚函数实现原理
 
-典型实现：
+C++ 标准规定动态分派的行为，不规定对象里必须有 vptr，也不规定 vtable 的布局。下面使用 Linux 上常见的 Itanium C++ ABI 说明 Clang/LLVM 的典型实现：
 
-1. 含虚函数的类有虚表 vtable。
-2. 对象中有虚指针 vptr。
-3. vptr 指向该对象实际类型对应的虚表。
-4. 调用虚函数时，通过 vptr 找到虚表，再找到函数地址。
+1. Clang 按 ABI 为多态类生成 vtable，重写函数占据与基类虚函数相同的逻辑槽位。
+2. 对象中的 vptr 指向其当前动态类型的 vtable address point。
+3. 构造函数负责写入 vptr；构造、析构进入不同子对象阶段时，vptr 也会随之改变。
+4. 虚调用从对象读取 vptr，再从固定槽位读取函数地址，最后执行间接调用。
 
 ```cpp
-Base* p = new Derived();
-p->foo(); // 动态绑定，调用 Derived::foo
+struct Base {
+    virtual int value() const;
+};
+
+struct Derived final : Base {
+    int value() const override;
+};
+
+int Base::value() const { return 1; }
+int Derived::value() const { return 2; }
+
+int dispatch(const Base& object) {
+    return object.value();
+}
+
+int known_type() {
+    Derived object;
+    return dispatch(object);
+}
 ```
+
+可以生成未优化和优化后的 LLVM IR：
+
+```bash
+clang++ -std=c++20 -O0 -S -emit-llvm virtual.cpp -o virtual-O0.ll
+clang++ -std=c++20 -O2 -S -emit-llvm virtual.cpp -o virtual-O2.ll
+```
+
+### vtable 与 vptr 是怎样生成的
+
+上例在 x86-64 Itanium ABI 下会产生类似的 vtable 全局常量。下面删去了链接属性，并给符号补上注释：
+
+```llvm
+@_ZTV7Derived = constant [3 x ptr] [
+    ptr null,                       ; offset-to-top = 0
+    ptr @_ZTI7Derived,              ; Derived 的 RTTI/typeinfo
+    ptr @_ZNK7Derived5valueEv       ; Derived::value() const
+]
+```
+
+这里的 `ptr null` 不是“空的虚函数地址”。Itanium ABI 把 offset-to-top 定义为有符号的 `ptrdiff_t`；这份 LLVM IR 为了把等宽的 vtable 表项放进 `ptr` 数组，用全零的 `ptr null` 表示数值 0。若某个次级 vtable 需要记录 `-8`，Clang 可能写成 `ptr inttoptr (i64 -8 to ptr)`。
+
+`_ZTV7Derived` 是 `Derived` 的 vtable，`_ZTI7Derived` 是 RTTI 描述对象。表的起始地址不一定就是对象保存的地址；这里的 vptr 指向第 3 项形成的 address point，因此“虚函数槽位 0”就是 `Derived::value()`：
+
+```mermaid
+flowchart LR
+    subgraph OBJECT["Derived object"]
+        VPTR["vptr"]
+    end
+
+    subgraph VTABLE["@_ZTV7Derived（vtable 起始位置）"]
+        direction TB
+        OFFSET["表项 0<br/>offset-to-top = 0<br/>LLVM IR：ptr null"]
+        RTTI["表项 1<br/>RTTI：@_ZTI7Derived"]
+        TARGET["表项 2<br/>&Derived::value<br/>address point<br/>相对 vptr：虚函数槽位 0"]
+        OFFSET ~~~ RTTI
+        RTTI ~~~ TARGET
+    end
+
+    VPTR ==>|"保存 address point 的地址"| TARGET
+```
+
+offset-to-top 用于从“保存当前 vptr 的位置”回到最派生完整对象的起始地址：
+
+```text
+完整对象起始地址 = 当前 vptr 所在地址 + offset-to-top
+```
+
+上例只有单继承，`Derived` 的主 vptr 就在完整对象起始位置，所以偏移是 0。多继承时，次要基类子对象可能位于非零偏移；下面假设典型 64 位布局中的 `Right` 子对象位于 `Both + 8`：
+
+```mermaid
+flowchart LR
+    subgraph BOTH["Both complete object"]
+        direction TB
+        LEFT["Left 子对象<br/>位置：top + 0<br/>primary vptr"]
+        RIGHT["Right 子对象<br/>位置：top + 8<br/>secondary vptr"]
+    end
+
+    TOP["Both 完整对象起始地址 top"]
+    LEFT -->|"offset-to-top = 0"| TOP
+    RIGHT -->|"offset-to-top = -8"| TOP
+```
+
+因此，从 `Right*` 执行 `dynamic_cast<void*>` 时，运行时可以读取次级 vtable 中的 `-8`，把当前地址减去 8 字节并得到 `Both` 的起始地址。`+8` 和 `-8` 是这个 ABI 布局示例的结果，不是 C++ 标准规定的固定偏移。
+
+在 x86-64 上，Clang 对该转换生成的核心 IR 如下，省略了空指针分支：
+
+```llvm
+%vptr = load ptr, ptr %right
+%offset_slot = getelementptr i8, ptr %vptr, i64 -16
+%offset_to_top = load i64, ptr %offset_slot
+%top = getelementptr i8, ptr %right, i64 %offset_to_top
+```
+
+`-16` 表示从 address point 向前跨过两个 8 字节表项，定位 offset-to-top 表项；随后加载出的值才是这个 `Right` 子对象对应的 `-8`，最后用它调整 `%right`。
+
+Clang 在构造函数中生成的核心操作可简化为：
+
+```llvm
+%address_point = getelementptr [3 x ptr], ptr @_ZTV7Derived, i64 0, i64 2
+store ptr %address_point, ptr %this
+```
+
+构造 `Derived` 时，`Base` 构造函数先把 vptr 写成 `Base` 的 address point，随后 `Derived` 构造函数再写成 `Derived` 的 address point。这也解释了为什么基类构造函数中的虚调用只会到达基类版本：当时派生类对应的 vptr 尚未建立。层级中存在实际析构过程时，vptr 通常按相反方向切换。
+
+### RTTI/typeinfo 保存什么
+
+RTTI（Run-Time Type Information）是 C++ 的运行期类型识别机制，`std::type_info` 是标准库提供的查询接口；`_ZTI7Derived` 则是 Itanium ABI 为 `Derived` 生成的 typeinfo 全局对象。各个 `Derived` 实例不会复制这份信息：就类型识别而言，每个多态对象通过自身的 vptr 间接找到通常由链接器合并为一份的 typeinfo。
+
+Itanium ABI 使用不同的运行时描述类型表示不同继承结构：
+
+| ABI 描述类型 | 适用结构 | 主要内容 |
+| --- | --- | --- |
+| `__class_type_info` | 没有基类的类 | 类型身份和实现定义的类型名称 |
+| `__si_class_type_info` | 单个 public、非虚基类 | 直接基类的 typeinfo 指针 |
+| `__vmi_class_type_info` | 多继承、虚继承等复杂层级 | 层级标志、基类数量，以及每个基类的 typeinfo、偏移和 public/virtual 标记 |
+
+具体到上面的 `Derived : Base`，`_ZTI7Derived` 通常是一个 `__si_class_type_info` 对象：它包含 typeinfo 元对象自己的运行时描述类 vptr、指向修饰类型名 `_ZTS7Derived` 的指针，以及指向直接基类 `_ZTI4Base` 的 typeinfo 指针。这里的“typeinfo 自己的 vptr”属于 ABI 运行库实现，不是每个 `Derived` 实例中的 vptr。
+
+这些数据足以描述“当前动态类型是谁、目标基类是否存在唯一且可访问的路径、目标子对象位于什么偏移”，但不包含成员变量名称、成员函数列表或源码结构，因此 RTTI 不是反射系统。
+
+RTTI 主要服务于：
+
+1. `typeid(expression)` 返回表示静态类型或动态类型的 `std::type_info`。
+2. `dynamic_cast` 检查向下转换和横向转换是否合法，并把指针调整到目标基类子对象。
+3. `dynamic_cast<void*>` 结合 vtable 中的 offset-to-top 找到最派生对象的起始地址。
+4. 典型 C++ ABI 在异常匹配中也会复用 typeinfo 来比较抛出类型与捕获类型。
+
+普通虚函数分派不读取 RTTI：它只按固定槽位从 vtable 取得函数地址。关闭 RTTI 后，虚函数仍能工作；需要运行期类型识别的 `typeid`、向下或横向 `dynamic_cast` 则不能照常使用。
+
+### 虚调用怎样变成 LLVM IR
+
+`dispatch()` 在 `-O0` 下的核心 IR 可以化简为：
+
+```llvm
+define i32 @dispatch(ptr %object) {
+    %vptr = load ptr, ptr %object
+    %slot = getelementptr ptr, ptr %vptr, i64 0
+    %callee = load ptr, ptr %slot
+    %result = call i32 %callee(ptr %object)
+    ret i32 %result
+}
+```
+
+四条指令分别完成：
+
+1. 从 `Base` 子对象的起始位置读取 vptr。
+2. 根据编译期确定的槽位编号定位表项。
+3. 读取该表项保存的函数地址。
+4. 间接调用函数，并把 `%object` 作为隐藏的 `this` 参数传入。
+
+`Base::value()` 与 `Derived::value()` 使用同一个槽位编号。`dispatch()` 不需要判断对象是什么类型；`Derived` 构造时写入的 vptr 已经让槽位 0 指向 `Derived::value()`。
+
+LLVM IR 没有专门的“虚函数调用”指令。Clang 前端负责依据 C++ ABI 生成 vtable、vptr 写入和槽位访问，LLVM 优化器看到的是全局常量、指针加载和普通的间接 `call`，目标后端再把它降低为相应架构的间接调用指令。
+
+### 去虚化发生在哪里
+
+`dispatch(const Base&)` 面向未知调用者时仍需保留间接调用；但 `known_type()` 中的对象明确是 `final` 的 `Derived`。在 `-O2` 下，优化器可以内联 `dispatch()`、证明目标函数，再内联 `Derived::value()` 并常量折叠：
+
+```llvm
+define i32 @known_type() {
+    ret i32 2
+}
+```
+
+这种变换称为去虚化。`final`、可见的具体对象类型、内联和 LTO 都可能增加去虚化机会，但源码语义不能依赖某次编译一定完成该优化。
 
 ---
 
@@ -1416,7 +1594,33 @@ consume(d); // 只复制 Base 子对象，Derived 部分丢失
 void consume(const Base& value);
 ```
 
-`dynamic_cast` 用于多态层级中的运行期安全向下转换：
+切片后的新对象就是独立的 `Base`，RTTI 无法恢复已经丢失的 `Derived::extra`。引用或指针仍指向原来的完整对象，因此可以观察动态类型。
+
+### `typeid` 与 `std::type_info`
+
+```cpp
+#include <cstddef>
+#include <typeinfo>
+
+Derived derived;
+Base& reference = derived;
+Base sliced = derived;
+
+const std::type_info& dynamic_info = typeid(reference);
+bool reference_is_derived = (dynamic_info == typeid(Derived)); // true
+bool sliced_is_base = (typeid(sliced) == typeid(Base));         // true
+
+std::size_t hash = dynamic_info.hash_code();
+const char* name = dynamic_info.name(); // 内容由实现决定，可能是修饰后的名称
+```
+
+`typeid(reference)` 的表达式是多态类型的左值，因此查询对象的动态类型 `Derived`；`sliced` 本身已经是 `Base` 对象，所以结果是 `Base`。对非多态表达式，`typeid` 只反映编译期静态类型。`name()` 的格式和 `hash_code()` 的具体值都不应持久化，也不能作为跨编译器、跨进程协议；需要把类型作为关联容器的键时，可以使用 `std::type_index` 包装 `std::type_info`。
+
+若 `base_ptr == nullptr`，表达式 `typeid(*base_ptr)` 在 `Base` 为多态类型时会抛出 `std::bad_typeid`，而不是实际解引用空指针。
+
+### `dynamic_cast` 如何检查和调整指针
+
+向下转换从基类接口恢复更具体的派生类型：
 
 ```cpp
 if (auto* derived = dynamic_cast<Derived*>(base_ptr)) {
@@ -1424,7 +1628,32 @@ if (auto* derived = dynamic_cast<Derived*>(base_ptr)) {
 }
 ```
 
-对指针转换失败返回 `nullptr`；对引用转换失败抛出 `std::bad_cast`。如果程序能够通过虚函数接口完成工作，通常应优先使用多态接口而不是频繁向下转换。
+RTTI 还支持多继承中的横向转换：
+
+```cpp
+struct Drawable {
+    virtual ~Drawable() = default;
+};
+
+struct Serializable {
+    virtual ~Serializable() = default;
+};
+
+struct Asset final : Drawable, Serializable {};
+
+Asset asset;
+Drawable* drawable = &asset;
+
+Serializable* serializable = dynamic_cast<Serializable*>(drawable);
+void* complete_object = dynamic_cast<void*>(drawable);
+
+// serializable 指向 asset 内部的 Serializable 子对象，地址可能经过调整。
+// complete_object 指向最派生的 Asset 对象起始位置。
+```
+
+运行库会根据源对象的 typeinfo 查找目标类型，确认存在唯一的 public 继承路径，再计算目标子对象地址。对指针转换失败返回 `nullptr`；对引用转换失败抛出 `std::bad_cast`。普通的派生类到基类转换通常可由编译器静态完成，不需要这次运行期搜索。
+
+如果工作可以直接通过虚函数接口完成，通常不需要先判断具体类型；频繁向下转换往往意味着基类接口没有表达完整行为。
 
 ---
 
@@ -1687,6 +1916,30 @@ C++ 标准规定对象语义和若干布局约束，但不会统一规定普通�
 2. 普通成员函数。
 3. 静态成员函数。
 4. 非虚函数代码。
+
+下面的程序可以直接观察目标 ABI 的对齐和 padding：
+
+```cpp
+#include <cstddef>
+#include <iostream>
+
+struct Layout {
+    char tag;
+    int value;
+
+    static int object_count;
+    void touch() {}
+};
+
+int main() {
+    std::cout << "sizeof=" << sizeof(Layout)
+              << ", alignof=" << alignof(Layout)
+              << ", value offset=" << offsetof(Layout, value)
+              << '\n';
+}
+```
+
+一种常见输出是 `sizeof=8, alignof=4, value offset=4`：`tag` 后面插入了 3 字节 padding，使 `value` 满足对齐要求。具体数字不是标准保证，应在目标编译器和 ABI 上实测。删除静态成员或普通成员函数通常不会改变结果，因为它们不存放在每个 `Layout` 对象里。
 
 ---
 
@@ -2680,6 +2933,123 @@ inspect(&value); // 选择 T* 版本
 
 ---
 
+## 18.9 CRTP 与静态多态
+
+CRTP（Curiously Recurring Template Pattern，奇异递归模板模式）的基本形式是：派生类把自己的类型作为模板参数传给基类。
+
+```cpp
+template <typename Derived>
+class Base {};
+
+class Derived : public Base<Derived> {};
+```
+
+它看起来像递归，但不会无限继承：`Base<Derived>` 只是一个普通的模板实例。基类拿到 `Derived` 这个类型后，可以在编译期调用派生类约定的接口，从而实现静态多态。
+
+### 最小实现
+
+```cpp
+#include <iostream>
+
+template <typename Derived>
+class Drawable {
+    // 只有约定的 Derived 可以调用基类构造函数，避免类型参数写错。
+    friend Derived;
+    Drawable() = default;
+
+    const Derived& derived() const noexcept {
+        return static_cast<const Derived&>(*this);
+    }
+
+protected:
+    ~Drawable() = default;
+
+public:
+    void draw() const {
+        derived().draw_impl();
+    }
+};
+
+class Circle final : public Drawable<Circle> {
+public:
+    void draw_impl() const {
+        std::cout << "Circle\n";
+    }
+};
+
+class Square final : public Drawable<Square> {
+public:
+    void draw_impl() const {
+        std::cout << "Square\n";
+    }
+};
+
+int main() {
+    Circle circle;
+    Square square;
+    circle.draw(); // Drawable<Circle>::draw -> Circle::draw_impl
+    square.draw(); // Drawable<Square>::draw -> Square::draw_impl
+}
+```
+
+调用过程是：
+
+1. `Circle` 继承 `Drawable<Circle>`。
+2. `draw()` 中的 `this` 原本指向 `Drawable<Circle>` 基类子对象。
+3. `static_cast<const Circle&>(*this)` 恢复具体派生类型。
+4. 编译器据此直接选择 `Circle::draw_impl()`，不经过虚表。
+
+这里没有 `virtual`、vptr 或运行期动态派发，编译器通常也更容易内联调用。不过“没有虚调用”不等于必然更快：每个 `Derived` 都会实例化一份模板代码，可能增加编译时间和代码体积，虚函数在已知动态类型时也可能被去虚化。
+
+### 和虚函数的边界
+
+| 对比项 | 虚函数多态 | CRTP 静态多态 |
+| --- | --- | --- |
+| 选择具体实现 | 运行期 | 编译期 |
+| 公共基类类型 | `Base` | 每个 `Base<Derived>` 都是不同类型 |
+| 异构对象集合 | 可通过 `Base*` / `Base&` 统一保存 | 不能直接统一保存，需 `variant`、类型擦除或额外共同基类 |
+| 调用方式 | 间接虚调用，可能被去虚化 | 直接调用，通常容易内联 |
+| 主要代价 | vptr、虚表和间接分派 | 模板实例化、编译时间和潜在代码膨胀 |
+
+如果需要在运行期从插件、配置或输入中选择不同实现，虚函数或类型擦除通常更合适。CRTP 更适合调用方在编译期已经知道具体类型的场景，例如提供统一外观、复用一组操作、构建 Mixin，或者让链式接口返回准确的派生类型。
+
+### `static_cast` 的安全前提
+
+CRTP 的向下转换没有运行期检查。下面的类型参数虽然语法上可以写出，但对象实际不是 `Circle`：
+
+```cpp
+// 如果 Drawable 的构造函数没有访问限制，这种错误层级可能被构造出来。
+class Wrong : public Drawable<Circle> {};
+```
+
+此时在 `Wrong` 对象上调用 `draw()`，把基类子对象当作 `Circle` 使用会破坏类型前提。上例用私有基类构造函数和 `friend Derived` 阻止普通代码构造这种错误层级，并把具体派生类声明为 `final`，明确表达“模板参数就是最终对象类型”。CRTP 依赖的是结构约定，不能把 `static_cast` 当成带检查的 `dynamic_cast`。
+
+### 用 Concepts 改善接口诊断
+
+如果 `Derived` 忘记提供 `draw_impl()`，普通 CRTP 往往要等到 `draw()` 实例化时才产生较长的模板错误。C++20 可以把要求写到成员函数上：
+
+```cpp
+#include <concepts>
+
+template <typename Derived>
+class Drawable {
+public:
+    void draw() const
+        requires requires(const Derived& value) {
+            { value.draw_impl() } -> std::same_as<void>;
+        }
+    {
+        static_cast<const Derived&>(*this).draw_impl();
+    }
+};
+```
+
+不要急着在 `Drawable<Derived>` 类模板本身实例化时检查 `Derived` 的全部成员：写出 `class Circle : public Drawable<Circle>` 时，`Circle` 仍是不完整类型。把依赖派生类完整定义的检查和访问延迟到成员函数被使用时，才能符合 CRTP 的实例化顺序。
+
+CRTP、Mixin、策略类和 Concepts 容易混在一起：CRTP 描述“派生类把自身类型交给基类”的结构；Mixin 强调通过继承注入可复用能力；策略类通常把行为类型作为参数组合进宿主；Concepts 负责声明类型必须满足什么条件。它们可以组合使用，但不是同一个概念。
+
+---
+
 # 19. 完美转发、万能引用、引用折叠
 
 ```mermaid
@@ -3412,6 +3782,49 @@ sequenceDiagram
 3. 可能阻塞。
 4. 使用更直观。
 
+两个变量分别是原子的，不代表它们组成的业务不变量也是原子的：
+
+```cpp
+#include <atomic>
+
+std::atomic<int> left{50};
+std::atomic<int> right{50};
+
+void transfer_bad() {
+    left.fetch_sub(10);  // 观察线程可能恰好在两步之间运行
+    right.fetch_add(10);
+}
+
+int total_bad() {
+    return left.load() + right.load(); // 可能暂时读到 90，而不是 100
+}
+```
+
+即使使用默认的 `seq_cst`，上面仍有两个独立操作；更强内存序不能把它们合成事务。要维护 `left + right == 100`，应把相关状态放进同一个临界区：
+
+```cpp
+#include <mutex>
+
+struct Accounts {
+    int left = 50;
+    int right = 50;
+    std::mutex mutex;
+
+    void transfer() {
+        std::lock_guard lock(mutex);
+        left -= 10;
+        right += 10;
+    }
+
+    int total() {
+        std::lock_guard lock(mutex);
+        return left + right;
+    }
+};
+```
+
+如果确实要无锁地维护复合状态，通常需要把状态编码进一个可原子更新的值，并用 CAS 循环修改；这比把每个字段简单换成 `atomic` 要严格得多。
+
 ---
 
 ## 24.2 memory_order_relaxed
@@ -4025,6 +4438,29 @@ ODR：One Definition Rule，单一定义规则。
 2. 未定义行为。
 3. 不同翻译单元看到不同类布局。
 4. 奇怪的运行期错误。
+
+ODR 违反不一定表现为“重复定义”。下面的内联函数被两个翻译单元看到，但预处理后的定义不同：
+
+```cpp
+// queue_config.h
+inline int queue_capacity() {
+#ifdef SMALL_QUEUE
+    return 64;
+#else
+    return 256;
+#endif
+}
+
+// producer.cpp：使用 -DSMALL_QUEUE 编译
+#include "queue_config.h"
+int producer_capacity() { return queue_capacity(); }
+
+// consumer.cpp：没有 -DSMALL_QUEUE
+#include "queue_config.h"
+int consumer_capacity() { return queue_capacity(); }
+```
+
+链接器可能不会报错，但两个翻译单元对同一个外部链接内联函数给出了不等价定义，程序违反 ODR。最终观察到 64、256 或被各自内联后的不同结果都不能作为可靠行为。会改变头文件内类或内联函数定义的配置宏，必须在所有翻译单元中保持一致。
 
 ---
 
@@ -5705,6 +6141,50 @@ std::cout << future.get();
 
 线程池不是“把任务放进去就天然高性能”。任务粒度太小会放大排队和同步成本，任务长时间阻塞会耗尽工作线程，CPU 密集任务还应考虑核心数、NUMA 和线程亲和性。
 
+下面的 worker loop 展示一种“停止接收，但排空已入队任务”的核心状态机：
+
+```cpp
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <queue>
+#include <utility>
+
+std::mutex queue_mutex;
+std::condition_variable queue_cv;
+std::queue<std::function<void()>> tasks;
+bool stopping = false;
+
+void report_task_failure();
+
+void worker_loop() {
+    for (;;) {
+        std::function<void()> task;
+        {
+            std::unique_lock lock(queue_mutex);
+            queue_cv.wait(lock, [] {
+                return stopping || !tasks.empty();
+            });
+
+            if (stopping && tasks.empty()) {
+                return;
+            }
+
+            task = std::move(tasks.front());
+            tasks.pop();
+        } // 执行任务前释放队列锁
+
+        try {
+            task();
+        } catch (...) {
+            report_task_failure(); // 不能让异常逃出线程入口
+        }
+    }
+}
+```
+
+关停线程应先在 `queue_mutex` 保护下设置 `stopping = true`，再 `notify_all()`，最后逐个 `join()`。提交函数也必须在同一把锁下检查 `stopping` 并拒绝新任务，否则可能在 worker 已退出后留下永远无人执行的任务。这里的队列仍是无界的；生产实现还要增加容量谓词、背压和提交失败协议。
+
 ---
 
 # 41. 并发进阶：读写锁、原子等待与缓存竞争
@@ -5840,6 +6320,67 @@ arena 从较大的内存块中线性分配对象，最后统一释放：
 - 析构顺序需要显式设计；
 - 长短生命周期对象混用会造成浪费；
 - 不能让对象逃逸到 arena 生命周期之外。
+
+下面是一个只允许平凡析构类型的最小线性 arena。它展示了真正的分配步骤：对齐当前指针、返回内存，再推进 offset。
+
+```cpp
+#include <cstddef>
+#include <memory>
+#include <new>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+class LinearArena {
+public:
+    explicit LinearArena(std::size_t bytes) : storage_(bytes) {}
+
+    void* allocate(std::size_t bytes, std::size_t alignment) {
+        void* cursor = storage_.data() + offset_;
+        std::size_t space = storage_.size() - offset_;
+
+        if (std::align(alignment, bytes, cursor, space) == nullptr) {
+            throw std::bad_alloc();
+        }
+
+        auto* aligned = static_cast<std::byte*>(cursor);
+        offset_ = static_cast<std::size_t>(aligned - storage_.data()) + bytes;
+        return aligned;
+    }
+
+    template <typename T, typename... Args>
+    T* create(Args&&... args) {
+        static_assert(std::is_trivially_destructible_v<T>,
+                      "this minimal arena does not run destructors");
+        void* memory = allocate(sizeof(T), alignof(T));
+        return ::new (memory) T(std::forward<Args>(args)...);
+    }
+
+    void reset() noexcept {
+        offset_ = 0;
+    }
+
+private:
+    std::vector<std::byte> storage_;
+    std::size_t offset_ = 0;
+};
+
+struct Point {
+    Point(int x_value, int y_value) : x(x_value), y(y_value) {}
+
+    int x;
+    int y;
+};
+
+int main() {
+    LinearArena arena(1024);
+    Point* point = arena.create<Point>(1, 2);
+    point->x += point->y;
+    arena.reset(); // 从这里开始不得再访问 point，后续分配可能覆盖原位置
+}
+```
+
+`reset()` 只是回卷指针，不会逐个析构对象。若要容纳 `std::string` 等非平凡类型，就必须登记析构回调并按逆序执行，或者由调用者在 reset 前显式销毁。还要处理构造函数抛出后的 offset 回滚、过度对齐、扩容策略和线程安全；因此这个例子用于解释机制，不是通用分配器。
 
 ---
 
@@ -6089,6 +6630,52 @@ parse_config(std::string_view text);
 | `std::string_view` / `std::span` | 非拥有连续数据视图 |
 
 不要仅因为“避免拷贝”就把所有参数改成引用。小型标量按值传递更自然；需要在函数内保存数据时，视图参数尤其要谨慎。
+
+非拥有视图适合作为“只在本次调用期间读取”的参数，却不应在没有生命周期约束时直接保存：
+
+```cpp
+#include <iostream>
+#include <string>
+#include <string_view>
+
+class BadRegistry {
+public:
+    explicit BadRegistry(std::string_view name) : name_(name) {}
+    std::string_view name() const { return name_; }
+
+private:
+    std::string_view name_; // 不拥有字符数据
+};
+
+BadRegistry make_registry() {
+    std::string local = "worker";
+    return BadRegistry(local); // 返回后 local 销毁，内部 view 悬空
+}
+
+int main() {
+    auto registry = make_registry();
+    std::cout << registry.name(); // 读取已经失效的字符数据，未定义行为
+}
+```
+
+如果对象需要长期保存名称，就应在边界建立所有权：
+
+```cpp
+#include <string>
+#include <string_view>
+#include <utility>
+
+class Registry {
+public:
+    explicit Registry(std::string name) : name_(std::move(name)) {}
+    std::string_view name() const { return name_; }
+
+private:
+    std::string name_;
+};
+```
+
+`std::span`、迭代器和普通指针具有同类风险：复制视图不会延长底层对象生命周期。API 文档必须说明借用能持续多久；需要跨线程、异步保存或延迟执行时，通常应复制数据或传递明确的共享所有权。
 
 ---
 
@@ -6563,6 +7150,37 @@ task final_suspend 把控制转回 caller
 task 的 `operator co_await` 会提供 awaiter；awaiter 在 `await_suspend` 中把调用方 handle 存入被等待 task 的 promise。task 到达 `final_suspend` 后，再恢复 continuation。使用 handle 返回值做 symmetric transfer 可以减少递归式 `resume()` 造成的额外栈增长。
 
 异常不会自动跳过挂起边界传播到另一个协程。被等待 task 通常在 `unhandled_exception()` 中保存 `std::exception_ptr`，调用方恢复并执行 `await_resume()` 时再重抛。这样异常出现在 `co_await task` 这一逻辑调用点。
+
+下面是 `final_suspend()` 中把控制权交还 continuation 的关键部分：
+
+```cpp
+#include <coroutine>
+
+struct FinalAwaiter {
+    bool await_ready() const noexcept {
+        return false;
+    }
+
+    template <typename Promise>
+    std::coroutine_handle<> await_suspend(
+        std::coroutine_handle<Promise> current) const noexcept {
+        auto continuation = current.promise().continuation;
+        return continuation ? continuation : std::noop_coroutine();
+    }
+
+    void await_resume() const noexcept {}
+};
+
+struct PromiseExcerpt {
+    std::coroutine_handle<> continuation;
+
+    FinalAwaiter final_suspend() const noexcept {
+        return {};
+    }
+};
+```
+
+`await_suspend` 返回另一个 handle 时，运行时可以直接恢复它，这就是 symmetric transfer。当前 task 的帧仍停在最终挂起点，不能在这里自行销毁；拥有 task 的对象应在确认不再访问 promise 后调用 `destroy()`。如果 promise 保存了异常，等待该 task 的 awaiter 会在 `await_resume()` 中检查并重抛。
 
 ---
 
