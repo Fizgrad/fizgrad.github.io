@@ -3333,7 +3333,233 @@ inode
 | 原名称删除 | 只要仍有链接或打开引用，数据可继续存在 | 可能变成悬空链接 |
 | 路径解析 | 直接得到同一 inode | 需要继续解析目标路径 |
 
-## 6. 页缓存、缓冲与持久化
+## 6. Linux 文件锁机制
+
+### 6.1 文件锁锁住的是什么
+
+文件锁用于让多个执行流协调对同一个文件或字节区间的访问。进程先通过 fd 提交加锁
+请求；内核根据文件对象、锁类型、字节范围和锁的所有者检查是否与现有锁冲突：
+
+```mermaid
+flowchart TD
+    A["进程通过 fd 请求 flock 或 fcntl 加锁"] --> B["VFS 找到对应文件对象"]
+    B --> C["文件锁管理代码比较<br/>锁类型、范围与所有者"]
+    C --> D{"存在不兼容的锁？"}
+    D -->|"否"| E["记录新锁并返回成功"]
+    D -->|"是，非阻塞请求"| F["返回 EAGAIN / EACCES<br/>或 EWOULDBLOCK"]
+    D -->|"是，阻塞请求"| G["当前任务进入等待"]
+    H["持有者解锁、关闭 fd 或退出"] --> I["移除或调整锁并唤醒等待者"]
+    I --> C
+```
+
+锁与已经解析出的文件对象关联，而不是单纯锁住路径字符串。假设进程 A 已打开并锁住
+`config`，进程 B 把另一个文件 `rename()` 到 `config`：A 的 fd 和锁仍指向旧 inode，
+随后通过路径重新 `open("config")` 得到的却可能是新 inode。需要在文件原子替换期间
+互斥时，通常使用一个不会被替换的独立 lock file 作为共同协调点。
+
+### 6.2 默认是建议锁
+
+本地 Linux 文件系统上的 `flock()`、传统 POSIX 记录锁和 OFD 锁通常都是
+**advisory lock（建议锁）**：内核记录持有者并协调其他加锁请求，但一个完全不调用
+相同加锁协议、且本身有访问权限的进程仍可直接 `read()` 或 `write()` 文件。
+
+因此建议锁的前提是所有参与者都遵守约定：
+
+```text
+加锁成功 → 在锁保护下重新检查共享状态 → 读写 → 解锁
+```
+
+旧版 Linux 曾支持文件系统 mandatory locking，但实现问题较多，并从 Linux 5.15 起
+不再支持。不要再依赖“设置特殊模式位后让普通 read/write 自动被锁拦截”的方案。
+NFS、SMB 等远端文件系统可能把锁映射到网络协议；锁是否传播、不同锁类型是否交互，
+甚至是否表现出强制语义，都可能受客户端、服务器、协议版本和挂载选项影响。
+
+### 6.3 三类常用锁
+
+| 类型 | 范围 | 锁的所有者 | `fork()` / `dup()` | 释放时机 |
+|---|---|---|---|---|
+| BSD `flock()` | 整个文件 | open file description | 复制的 fd 共享同一把锁 | `LOCK_UN`，或引用该 open file description 的 fd 全部关闭 |
+| POSIX `fcntl()` 记录锁 | 任意字节区间 | 进程与文件 | 子进程不继承；同一进程内的线程共享 | 显式解锁、进程退出，或该进程关闭指向此文件的任意 fd |
+| `fcntl()` OFD 锁 | 任意字节区间 | open file description | 复制的 fd 共享；子进程继承 | 显式解锁，或最后一个相关 fd 关闭 |
+
+三类锁都支持共享/读锁与排他/写锁：多个读锁可以覆盖同一区域；写锁与其他读锁或写锁
+冲突。若 fd 没有因 `FD_CLOEXEC` 关闭，这些锁可以跨 `execve()` 保留。
+
+#### `flock()`：整文件锁
+
+```c
+#include <sys/file.h>
+
+flock(fd, LOCK_SH);           /* 阻塞地取得共享锁 */
+flock(fd, LOCK_EX);           /* 阻塞地取得排他锁 */
+flock(fd, LOCK_EX | LOCK_NB); /* 无法立即取得时返回 EWOULDBLOCK */
+flock(fd, LOCK_UN);           /* 解锁 */
+```
+
+`flock()` 与 open file description 关联，所以 `dup()` 得到的 fd 和 `fork()` 后的对应
+fd 操作的是同一把锁。对同一文件分别执行两次 `open()` 则得到两个 open file
+description，它们的 `flock()` 请求彼此独立，甚至可能与当前进程自己已有的锁冲突。
+
+#### 传统 POSIX `fcntl()` 记录锁
+
+```c
+struct flock lock = {
+    .l_type = F_WRLCK,
+    .l_whence = SEEK_SET,
+    .l_start = 0,
+    .l_len = 4096,
+};
+
+fcntl(fd, F_SETLK, &lock);  /* 非阻塞加锁 */
+fcntl(fd, F_SETLKW, &lock); /* 阻塞等待 */
+fcntl(fd, F_GETLK, &lock);  /* 查询一把冲突锁，不会真正加锁 */
+```
+
+`struct flock` 的范围由 `l_whence + l_start` 确定起点，`l_len` 表示长度；`l_len = 0`
+表示从起点一直锁到 EOF，并随文件增长继续覆盖。读锁要求 fd 可读，写锁要求 fd 可写。
+
+传统记录锁最容易踩到的规则是：锁属于“进程 + 文件”，不是取得锁的那个 fd。只要该
+进程关闭了任何一个指向相同文件的 fd，进程在该文件上的全部传统记录锁都可能被释放，
+即使锁是通过另一个 fd 取得的。库函数在内部重新打开并关闭同一文件也可能意外触发
+这个行为。
+
+`lockf()` 通常是基于 `fcntl()` 记录锁的库封装，不是第四种独立锁模型。
+
+#### OFD 锁
+
+OFD 锁使用：
+
+```c
+F_OFD_GETLK
+F_OFD_SETLK
+F_OFD_SETLKW
+```
+
+它拥有 `fcntl()` 的字节区间能力，但生命周期像 `flock()` 一样绑定 open file
+description，解决了传统记录锁“关闭任意 fd 就全部释放”和“同进程线程共享锁所有权”
+的问题。每个线程分别 `open()` 文件后，可以用各自的 OFD 锁互相协调；通过 `dup()`
+或 `fork()` 共享同一个 open file description 时，则仍视为同一锁所有者。
+
+OFD 锁是 Linux 3.15 引入的接口。使用 `F_OFD_*` 时 `struct flock.l_pid` 必须设为
+零；查询到冲突的 OFD 锁时，内核通常以 `l_pid = -1` 表示它不属于单一进程。
+
+### 6.4 一个完整的 `fcntl()` 加锁骨架
+
+下面锁住整个文件。真实程序应根据取消语义决定收到信号后继续等待还是把 `EINTR`
+返回给上层：
+
+```c
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+
+static int change_lock(int fd, short type, int operation)
+{
+    struct flock lock = {
+        .l_type = type,
+        .l_whence = SEEK_SET,
+        .l_start = 0,
+        .l_len = 0,
+    };
+
+    for (;;) {
+        if (fcntl(fd, operation, &lock) == 0)
+            return 0;
+        if (errno != EINTR)
+            return -1;
+    }
+}
+
+int main(void)
+{
+    int fd = open("state.bin", O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd == -1) {
+        perror("open");
+        return 1;
+    }
+
+    if (change_lock(fd, F_WRLCK, F_SETLKW) == -1) {
+        perror("fcntl lock");
+        close(fd);
+        return 1;
+    }
+
+    /* 在锁内重新读取状态，再执行需要互斥的 read/write。 */
+
+    if (change_lock(fd, F_UNLCK, F_SETLK) == -1) {
+        perror("fcntl unlock");
+        close(fd);
+        return 1;
+    }
+
+    close(fd);
+    return 0;
+}
+```
+
+非阻塞的 `F_SETLK` 遇到冲突时应同时考虑 `EACCES` 和 `EAGAIN`。阻塞的
+`F_SETLKW` 可能被信号中断，并能对一部分传统记录锁等待关系报告 `EDEADLK`；
+`flock()` 和 OFD 锁没有同等的死锁检测保证，仍需统一加锁顺序、控制持锁范围并考虑
+超时或取消。
+
+### 6.5 Shell 中使用 `flock`
+
+util-linux 的 `flock` 命令适合防止定时任务或维护脚本重复运行：
+
+```bash
+# 立即尝试独占锁；已有实例持锁时直接失败。
+flock -n /run/lock/my-task.lock ./my-task
+
+# 最多等待 5 秒。
+flock -w 5 /run/lock/my-task.lock ./my-task
+```
+
+需要让多条 shell 命令共用同一把锁时，可以显式打开一个 fd：
+
+```bash
+(
+    flock -n 9 || exit 1
+    update_step_one
+    update_step_two
+) 9>/run/lock/my-task.lock
+```
+
+真正表示持锁的是内核中与打开文件关联的锁记录，不是 lock file 是否存在。进程退出
+后文件可以继续存在，但锁已经释放。lock file 应放在权限和生命周期明确的目录中；
+如果被执行的命令会派生后台子进程，还要确认这些子进程是否继承了持锁 fd，避免任务
+结束后锁仍被意外保留。
+
+### 6.6 文件锁不保证什么
+
+- **不保证所有进程都遵守协议。** 建议锁无法阻止绕过加锁步骤的本地进程直接 I/O。
+- **不等于线程互斥锁。** 传统 POSIX 记录锁由同一进程内线程共享；保护进程内内存
+  状态仍应使用 mutex 等线程同步机制。
+- **不让多步更新自动成为事务。** 锁只能排斥配合者，无法自动回滚写到一半的数据。
+- **不提供断电持久性。** `flock()`/`fcntl()` 与 `fsync()` 解决的问题不同；解锁不
+  代表数据已经落到稳定存储。
+- **不能安全地任意混用锁家族。** 本地 Linux 上 `flock()` 和 `fcntl()` 记录锁通常
+  互不交互，而在 NFS/SMB 上又可能相互影响。一个协议应统一选择一种锁模型。
+- **锁升级未必原子。** `flock()` 从共享锁转换为排他锁时可能先释放旧锁，再尝试取得
+  新锁，中间可能被其他等待者插入。
+
+若使用 stdio，用户态缓冲可能把真正的 I/O 推迟到临界区之外。至少应在持锁后读取，
+并在解锁前检查 `fflush()` 等操作的结果；需要精确控制记录锁与 I/O 顺序时，直接使用
+`read()`、`write()`、`pread()`、`pwrite()` 更清晰。
+
+### 6.7 查看系统中的锁
+
+```bash
+lslocks
+cat /proc/locks
+```
+
+`/proc/locks` 会显示 `FLOCK`、`POSIX`、`OFDLCK`，以及 `READ`/`WRITE`、设备号、
+inode 和锁定区间。OFD 锁可能由多个进程共享，所以其 PID 显示为 `-1`。该文件提供的
+只是读取瞬间的快照，检查完成前锁状态就可能改变；PID namespace 还会影响可见范围。
+
+## 7. 页缓存、缓冲与持久化
 
 普通文件 I/O 通常经过 page cache：
 
@@ -4112,8 +4338,38 @@ epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event);
 
 因此，两个 fd 即使指向同一个 open file description，也可以具有不同的 `FD_CLOEXEC`；但修改其中一个 fd 对应的 `O_NONBLOCK` 等文件状态标志，通常会影响其他指向同一 open file description 的 fd。
 
+### 1.2 `fork()` 后会被清空或不继承的状态
 
-### 1.2 多线程程序中的 fork
+`fork()` 不会把父进程的所有内核状态原样复制给子进程，常见例外包括：
+
+- **未决信号不会继承。** 子进程的 pending signal set 初始为空；但信号屏蔽字和
+  信号处置会继承。因此父进程中一个已经到达但尚未处理的信号不会复制给子进程，
+  而父进程在 `fork()` 时屏蔽的信号在子进程中仍然被屏蔽。
+- **传统的进程关联记录锁不会继承。** 通过 `fcntl(fd, F_SETLK/F_SETLKW, ...)`
+  建立的 POSIX byte-range lock 仍属于父进程，子进程不会成为该锁的持有者。
+- **定时器不会继承。** `alarm()`、`setitimer()` 和 `timer_create()` 建立的定时器
+  不会继续出现在子进程中，子进程需要自行重新设置。
+
+“未决警报”不是一个独立的内核类别：尚未到期的 `alarm()` 属于定时器，不继承；
+如果它已经到期并产生了被阻塞的 `SIGALRM`，该信号属于 pending signal，同样不会
+出现在子进程的初始未决信号集合中。
+
+“文件锁不会继承”不能推广到所有锁类型。`F_OFD_SETLK` 建立的 open file
+description lock 和 `flock()` 锁关联于父子共享的 open file description，因此会随
+`fork()` 保留。类似地，`timerfd_create()` 返回的是文件描述符，子进程继承该 fd 后
+仍引用同一个底层 timerfd 对象；它不属于上面所说的进程定时器继承规则。
+
+```text
+父进程在 fork() 前
+├── pending signals ──────────────> 子进程初始为空
+├── signal mask / dispositions ───> 子进程继承
+├── fcntl 进程记录锁 ─────────────> 子进程不继承锁所有权
+├── OFD / flock 锁 ───────────────> 通过共享 open file description 保留
+└── alarm / interval / POSIX timer -> 子进程不继承
+```
+
+
+### 1.3 多线程程序中的 fork
 
 多线程进程调用 `fork()` 后：
 
@@ -4187,6 +4443,61 @@ sequenceDiagram
     Child->>Kernel: exit
     Kernel-->>Shell: 退出状态
 ```
+
+### 3.1 SUID/SGID 与 `execve()` 后的进程凭据
+
+SUID 是普通可执行文件上的 **set-user-ID** 模式位，SGID 是 **set-group-ID** 模式位。
+它们改变的是执行该文件后进程使用的身份，不是把文件本身变成“root 文件”，也不
+意味着 SUID 程序一定以 root 运行。
+
+进程凭据中需要区分：
+
+| 凭据 | 主要含义 |
+|---|---|
+| real UID/GID | 谁启动了进程，通常保持调用者的身份 |
+| effective UID/GID | 内核进行多数权限检查时使用的身份 |
+| saved set-user-ID/set-group-ID | 保存 `execve()` 后的有效身份，供特权程序按规则暂时降低并恢复权限 |
+| supplementary groups | 调用者所属的附加组列表，不会仅因 SUID/SGID 自动替换 |
+
+例如，一个由 root 拥有并带 SUID 位的可执行文件：
+
+```bash
+sudo chown root:root /usr/local/bin/helper
+sudo chmod 4755 /usr/local/bin/helper   # 等价于为所有者权限增加 u+s
+ls -l /usr/local/bin/helper
+# -rwsr-xr-x ... root root ... /usr/local/bin/helper
+```
+
+普通用户以 UID 1000 执行它时，典型身份变化为：
+
+```text
+execve() 之前：real UID = 1000, effective UID = 1000
+文件：          owner UID = 0, SUID = 1
+execve() 之后：real UID = 1000, effective UID = 0, saved UID = 0
+```
+
+如果文件所有者是 UID 1001，进程获得的是 1001 的有效身份，而不是 root 身份。SGID
+对有效 GID 和 saved GID 的处理类似。`ls -l` 中的小写 `s` 表示相应的执行位和
+SUID/SGID 位都存在；大写 `S` 表示设置了 SUID/SGID，却没有对应的执行位。
+
+不要把可执行文件上的 SGID 与目录 SGID 混为一谈：目录 SGID 通常让新建条目继承
+目录的组，Linux 则忽略目录上的 SUID 位；它们不会按上面的流程改变进程有效身份。
+
+内核并非在所有情况下都应用这些身份变化。以下情况会使 SUID/SGID 和文件
+capability 不产生预期的提权效果：
+
+- 调用线程设置了 `no_new_privs`；
+- 文件所在的挂载点使用了 `nosuid`；
+- 调用进程正被 `ptrace`；
+- 目标是解释器脚本：Linux 忽略脚本文件本身的 SUID/SGID 位。
+
+因此检查 SUID 问题不能只看 `chmod` 结果，还要检查挂载选项、进程属性以及真正被
+内核加载的可执行文件。
+
+SUID 程序跨越了安全边界。实现时应缩小特权代码范围，验证参数和路径，避免继承
+意外的文件描述符，不信任调用者可控的输入，并在完成特权操作后通过合适的
+`setresuid()`/`setresgid()` 流程永久降低权限且检查返回值。只需要少量内核权限时，
+文件 capability 往往比授予完整的 SUID-root 身份更符合最小权限原则。
 
 ## 4. wait 和僵尸进程
 
@@ -5501,9 +5812,133 @@ if (ready.load(std::memory_order_acquire)) {
 原子 ≠ 自动可扩展
 ```
 
-## 5. Linux 内核调度细节
+## 5. RCU（Read-Copy Update）
 
-### 5.1 调度对象
+### 5.1 RCU 解决什么问题
+
+RCU 是 Linux 内核中面向**读多写少**共享数据结构的一组同步与内存回收机制。它的
+重点不是阻止读者和写者同时执行，而是把一次更新拆成两个阶段：
+
+1. 先发布新版本，使后来的读者不再取得旧对象；
+2. 等可能仍持有旧对象的读者全部离开后，再回收旧对象。
+
+这样，读者通常不需要争抢一把全局读锁，也不会因为写者正在更新而排队。代价是
+更新路径更复杂，旧版本还要在一段时间内继续占用内存。RCU 的名称常概括为“读取
+旧对象、复制并修改新对象、发布新对象”，但并非每种 RCU 数据结构都必须完整复制
+整个对象；**发布新状态与延迟回收旧状态**才是核心。
+
+```mermaid
+flowchart TD
+    subgraph Reader["读者"]
+        R1["rcu_read_lock()"] --> R2["rcu_dereference()<br/>取得当前对象"]
+        R2 --> R3["读取对象"]
+        R3 --> R4["rcu_read_unlock()"]
+    end
+
+    subgraph Updater["更新者"]
+        U1["分配并初始化新对象"] --> U2["必要时用锁串行化多个更新者"]
+        U2 --> U3["rcu_assign_pointer()<br/>发布新对象"]
+        U3 --> U4["旧对象已移出数据结构<br/>但暂时不能释放"]
+        U4 --> U5["synchronize_rcu() 或 call_rcu()"]
+        U5 --> U6["宽限期结束后回收旧对象"]
+    end
+
+    R4 -. "发布前已经进入的读者全部退出" .-> U5
+```
+
+读者可能看到旧版本，也可能看到新版本，但它取得的旧对象在读侧临界区结束前不能
+被释放。**宽限期（grace period）**表示发布前已经存在、可能接触旧对象的相关 RCU
+读侧临界区都已经结束；它不要求后来不断进入的新读者全部停止。内核通过各 CPU 和
+任务的静止状态等信息推进宽限期，具体跟踪方式取决于 RCU 类型和内核配置。
+
+### 5.2 核心接口
+
+| 接口 | 作用 |
+|---|---|
+| `rcu_read_lock()` / `rcu_read_unlock()` | 标记普通 RCU 读侧临界区，保证期间取得的受保护对象不被回收 |
+| `rcu_dereference(pointer)` | 读取受 RCU 保护的指针，并提供与发布操作匹配的编译器及体系结构约束 |
+| `rcu_assign_pointer(pointer, value)` | 在新对象完全初始化后发布指针，使读者不会观察到未初始化完成的版本 |
+| `synchronize_rcu()` | 阻塞更新者，直到调用前已经存在的读侧临界区结束 |
+| `call_rcu()` | 注册回调，在宽限期结束后异步执行回收操作 |
+| `kfree_rcu()` | 旧对象只需 `kfree()` 时使用的简化延迟回收接口 |
+
+下面的内核代码骨架让读者无锁读取一份发布后不再原地修改的配置；互斥锁负责避免
+多个更新者互相覆盖，RCU 负责读者与回收者之间的生命周期：
+
+```c
+#include <linux/mutex.h>
+#include <linux/rcupdate.h>
+#include <linux/slab.h>
+
+struct runtime_config {
+    int limit;
+    struct rcu_head rcu;
+};
+
+static struct runtime_config __rcu *active_config;
+static DEFINE_MUTEX(config_update_lock);
+
+int read_limit(void)
+{
+    struct runtime_config *config;
+    int limit = 0;
+
+    rcu_read_lock();
+    config = rcu_dereference(active_config);
+    if (config)
+        limit = config->limit;
+    rcu_read_unlock();
+
+    return limit;
+}
+
+int replace_limit(int new_limit)
+{
+    struct runtime_config *old_config;
+    struct runtime_config *new_config;
+
+    new_config = kmalloc(sizeof(*new_config), GFP_KERNEL);
+    if (!new_config)
+        return -ENOMEM;
+    new_config->limit = new_limit;
+
+    mutex_lock(&config_update_lock);
+    old_config = rcu_dereference_protected(
+        active_config, lockdep_is_held(&config_update_lock));
+    rcu_assign_pointer(active_config, new_config);
+    mutex_unlock(&config_update_lock);
+
+    if (old_config)
+        kfree_rcu(old_config, rcu);
+    return 0;
+}
+```
+
+如果更新者需要立即确认宽限期结束，可以在移除旧对象后调用
+`synchronize_rcu()`，再执行 `kfree(old_config)`；它会阻塞当前调用者。
+`call_rcu()`/`kfree_rcu()` 则把等待和回收放到异步路径。
+
+### 5.3 容易混淆的边界
+
+- **RCU 不负责串行化多个写者。** 两个更新者可能仍需 mutex、spinlock 或其他协议
+  保护复合更新。
+- **RCU 主要保护可达性和生命周期，不自动保护对象内所有可变字段。** 已发布对象
+  通常保持只读；必须原地修改的字段需要原子操作或另外的锁。
+- **`rcu_read_unlock()` 后不能继续使用刚才取得的裸指针。** 若对象需要跨越读侧临界
+  区长期存活，必须在临界区内安全地取得引用计数等额外生命周期保证。
+- **RCU 与读写锁不同。** 读写锁让写者等待读者并原地修改同一份状态；RCU 允许新旧
+  版本暂时并存，把等待推迟到回收阶段。
+- **RCU 与引用计数不同。** RCU 适合保护“查找并取得对象”的短窗口，引用计数适合
+  表示跨越该窗口的长期持有关系，两者经常配合。
+- **RCU 与写时复制 COW 不同。** COW 描述“发生写入时才复制”的共享存储策略；RCU
+  是发布、读取和延迟回收对象的并发协议。
+- 普通 `rcu_read_lock()` 临界区中不能调用可能睡眠的接口；这不等于在
+  `CONFIG_PREEMPT_RCU` 内核中不能被调度器抢占。读者确实需要睡眠时，应评估 SRCU
+  等适合相应上下文的 RCU 类型。
+
+## 6. Linux 内核调度细节
+
+### 6.1 调度对象
 
 Linux 调度 task。用户态线程通常对应一个可调度 task。
 
@@ -5518,7 +5953,7 @@ Linux 调度 task。用户态线程通常对应一个可调度 task。
 
 内存描述符和文件表可能被多个线程共享，因此不能简单说每个 `task_struct` 都独占完整副本。
 
-### 5.2 每 CPU 运行队列
+### 6.2 每 CPU 运行队列
 
 Linux 通常为每个逻辑 CPU 维护 runqueue：
 
@@ -5544,7 +5979,7 @@ flowchart LR
 - 迁移影响 Cache、TLB 和 NUMA；
 - CPU capacity 在大小核系统中不同，负载不能只按任务数量比较。
 
-### 5.3 调度发生的常见时机
+### 6.3 调度发生的常见时机
 
 - 当前任务阻塞；
 - 时间额度用完；
@@ -5556,7 +5991,7 @@ flowchart LR
 
 `sched_yield()` 不保证立即让特定线程运行，也不应作为普通同步机制。
 
-### 5.4 切换成本
+### 6.4 切换成本
 
 任务切换可能涉及：
 
@@ -5570,7 +6005,7 @@ flowchart LR
 
 切换次数只是指标之一。大量上下文切换如果伴随高吞吐和低延迟可能正常；少量切换也不能证明系统高效。
 
-### 5.5 调度类
+### 6.5 调度类
 
 概念上的优先顺序通常包括：
 
@@ -5588,9 +6023,9 @@ flowchart LR
 
 实时任务配置不当可能长期压制普通任务，应设置资源上限并谨慎授权。
 
-## 6. Linux 公平调度：从 CFS 到 EEVDF
+## 7. Linux 公平调度：从 CFS 到 EEVDF
 
-### 6.1 CFS 的历史思想
+### 7.1 CFS 的历史思想
 
 CFS（Completely Fair Scheduler）试图逼近“理想多任务 CPU”。它为普通任务维护虚拟运行时间：
 
@@ -5602,7 +6037,7 @@ vruntime 增量 ≈ 实际运行时间 × 基准权重 / 任务权重
 
 经典 CFS 以 `vruntime` 排序可运行实体，并倾向选择虚拟运行时间较小的任务。
 
-### 6.2 现代 Linux 的 EEVDF
+### 7.2 现代 Linux 的 EEVDF
 
 现代 Linux 公平调度路径已从经典 CFS 选择逻辑逐步转向 **EEVDF（Earliest Eligible Virtual Deadline First）**。内核官方文档说明，Linux 从 6.6 开始过渡到 EEVDF。
 
@@ -5627,7 +6062,7 @@ flowchart TD
 
 因此，把现代 Linux 普通调度完整描述为“红黑树永远选最小 vruntime”已经不够准确。
 
-### 6.3 nice 和权重
+### 7.3 nice 和权重
 
 nice 通常范围：
 
@@ -5641,7 +6076,7 @@ nice 通常范围：
 - 不等同于实时优先级；
 - CPU cgroup 权重、亲和性和可用 CPU 容量也会影响结果。
 
-### 6.4 公平不等于相同运行时间
+### 7.4 公平不等于相同运行时间
 
 公平是按权重、层级和可用 CPU 资源分配：
 
@@ -5650,7 +6085,7 @@ nice 通常范围：
 - 睡眠、唤醒和迁移影响短期延迟；
 - 长期公平也不保证硬实时截止时间。
 
-### 6.5 为什么普通公平调度不适合硬实时？
+### 7.5 为什么普通公平调度不适合硬实时？
 
 因为普通公平调度优化长期份额和交互响应，不提供严格的最坏情况执行与截止时间保证。硬实时需要：
 
@@ -5660,9 +6095,9 @@ nice 通常范围：
 - 实时调度策略；
 - 避免不可控缺页和阻塞。
 
-## 7. io_uring
+## 8. io_uring
 
-### 7.1 基本结构
+### 8.1 基本结构
 
 `io_uring` 使用共享映射的环形队列：
 
@@ -5686,7 +6121,7 @@ flowchart LR
 - SQPOLL 可由内核线程轮询 SQ，在特定条件下降低提交调用；
 - 注册文件和缓冲区可减少重复查找与固定成本。
 
-### 7.2 操作执行方式
+### 8.2 操作执行方式
 
 io_uring 提供统一提交接口，但不同操作可能：
 
@@ -5698,7 +6133,7 @@ io_uring 提供统一提交接口，但不同操作可能：
 
 所以“io_uring 完全不使用线程”是不准确的。
 
-### 7.3 基本伪代码
+### 8.3 基本伪代码
 
 ```cpp
 io_uring ring;
@@ -5730,7 +6165,7 @@ if (io_uring_wait_cqe(&ring, &cqe) == 0) {
 io_uring_queue_exit(&ring);
 ```
 
-### 7.4 Buffer 生命周期
+### 8.4 Buffer 生命周期
 
 请求完成前：
 
@@ -5739,7 +6174,7 @@ io_uring_queue_exit(&ring);
 - 注册缓冲区也有明确注册和注销生命周期；
 - CQE 到达不一定表示应用高级协议已经完成，只表示内核操作完成到对应语义点。
 
-### 7.5 部分完成
+### 8.5 部分完成
 
 读写操作可能：
 
@@ -5752,7 +6187,7 @@ io_uring_queue_exit(&ring);
 
 应用仍需维护状态机。
 
-### 7.6 io_uring 与 epoll
+### 8.6 io_uring 与 epoll
 
 | 对比点 | epoll | io_uring |
 |---|---|---|
@@ -5764,7 +6199,7 @@ io_uring_queue_exit(&ring);
 
 io_uring 也支持 poll 请求，因此两者不是完全互斥。小规模负载、简单网络服务或成熟 epoll 代码不一定因迁移 io_uring 自动变快。
 
-### 7.7 高级特性
+### 8.7 高级特性
 
 - registered buffers；
 - registered files；
@@ -5778,7 +6213,7 @@ io_uring 也支持 poll 请求，因此两者不是完全互斥。小规模负�
 
 高级特性常伴随更严格的资源、权限、内核版本和生命周期要求。
 
-### 7.8 背压
+### 8.8 背压
 
 SQ 和 CQ 都是有限资源。应用必须限制未完成请求：
 
@@ -5796,9 +6231,9 @@ SQ/CQ 拥塞、内存占用、尾延迟和取消成本上升
 - 超时和取消；
 - 负载降级。
 
-## 8. namespace 与 cgroup
+## 9. namespace 与 cgroup
 
-### 8.1 二者分工
+### 9.1 二者分工
 
 ```mermaid
 flowchart LR
@@ -5808,7 +6243,7 @@ flowchart LR
 
 namespace 主要解决“看见什么”，cgroup 主要解决“能使用多少以及如何分配”。
 
-### 8.2 namespace
+### 9.2 namespace
 
 常见 namespace：
 
@@ -5840,7 +6275,7 @@ nsenter -t <pid> -n -m -p
 
 创建 PID namespace 时，通常还需要正确挂载新的 `/proc`，否则工具看到的进程视图可能与 namespace 不一致。
 
-### 8.3 PID namespace
+### 9.3 PID namespace
 
 PID namespace 可以嵌套：
 
@@ -5855,7 +6290,7 @@ PID namespace 可以嵌套：
 - 转发终止信号；
 - 处理子进程生命周期。
 
-### 8.4 Network namespace
+### 9.4 Network namespace
 
 每个 network namespace 可拥有独立的：
 
@@ -5877,7 +6312,7 @@ flowchart LR
 
 是否使用 bridge、NAT、路由、macvlan、ipvlan 或 eBPF 取决于网络方案。
 
-### 8.5 cgroup v2
+### 9.5 cgroup v2
 
 cgroup v2 使用统一层级，并通过控制器管理资源：
 
@@ -5901,7 +6336,7 @@ cgroup 不只是“限制资源”，还用于：
 - 保护；
 - 压力和事件通知。
 
-### 8.6 CPU 配额
+### 9.6 CPU 配额
 
 ```bash
 echo "50000 100000" > cpu.max
@@ -5917,7 +6352,7 @@ echo "50000 100000" > cpu.max
 
 CPU quota 用完后会被 throttle，可能造成周期性延迟尖峰。
 
-### 8.7 内存限制
+### 9.7 内存限制
 
 ```bash
 echo 1G > memory.max
@@ -5935,7 +6370,7 @@ echo 1G > memory.max
 
 `memory.high` 常用于节流和回收压力，`memory.max` 是硬上限。
 
-### 8.8 pids.max
+### 9.8 pids.max
 
 ```bash
 echo 100 > pids.max
@@ -5943,13 +6378,13 @@ echo 100 > pids.max
 
 PIDs 控制器计数的是 task，通常包括线程，不只是传统意义上的进程。线程池或大量线程创建也可能触发限制。
 
-### 8.9 线程化 cgroup
+### 9.9 线程化 cgroup
 
 cgroup v2 默认以进程为主要迁移单位，但支持 threaded cgroup 模式，使某些控制器可以按线程组织。不能绝对表述为“所有线程在任何 cgroup v2 配置下都必须属于同一 cgroup”。
 
-## 9. 容器底层原理
+## 10. 容器底层原理
 
-### 9.1 容器不是独立内核虚拟机
+### 10.1 容器不是独立内核虚拟机
 
 ```mermaid
 flowchart TD
@@ -5976,7 +6411,7 @@ flowchart TD
 - 内核漏洞可能跨越容器边界；
 - 隔离强度通常低于拥有独立客户机内核的虚拟机。
 
-### 9.2 核心机制
+### 10.2 核心机制
 
 - namespace：隔离视图；
 - cgroup：资源组织和控制；
@@ -5991,7 +6426,7 @@ flowchart TD
 
 `chroot` 或 rootfs 本身不是完整安全边界，必须与 namespace、权限和 LSM 等机制组合。
 
-### 9.3 镜像分层和 copy-up
+### 10.3 镜像分层和 copy-up
 
 ```mermaid
 flowchart TB
@@ -6020,7 +6455,7 @@ flowchart TB
 - 大文件 copy-up 延迟；
 - 页缓存与存储空间增加。
 
-### 9.4 容器启动流程
+### 10.4 容器启动流程
 
 ```mermaid
 flowchart TD
@@ -6036,7 +6471,7 @@ flowchart TD
 
 实际顺序和细节取决于 runtime、网络插件和安全配置。
 
-### 9.5 运行时栈
+### 10.5 运行时栈
 
 常见 Docker 路径：
 
@@ -6052,7 +6487,7 @@ flowchart TD
 
 `containerd-shim` 等组件用于解耦容器生命周期和上层守护进程，不能把所有场景都简化成 Docker daemon 直接调用 runc 后永久管理进程。
 
-### 9.6 容器安全
+### 10.6 容器安全
 
 常见强化措施：
 
@@ -7306,6 +7741,49 @@ flush，且不能持有 work handler 完成所需的锁等待它，否则会形�
 Workqueue 与 wait queue 名称相似但用途不同：workqueue 安排函数执行，wait queue
 让任务等待条件并在条件变化时被唤醒。
 
+最小生命周期通常是初始化、提交、在对象销毁前同步取消：
+
+```c
+#include <linux/workqueue.h>
+
+struct demo_device {
+    struct work_struct retry_work;
+    /* work handler 还会访问的其他状态 */
+};
+
+static void retry_work_handler(struct work_struct *work)
+{
+    struct demo_device *device =
+        container_of(work, struct demo_device, retry_work);
+
+    /* 这里运行在普通 workqueue 的进程上下文，可以调用允许睡眠的接口。 */
+    retry_device_operation(device);
+}
+
+static int demo_probe(struct demo_device *device)
+{
+    INIT_WORK(&device->retry_work, retry_work_handler);
+    return 0;
+}
+
+static void request_retry(struct demo_device *device)
+{
+    schedule_work(&device->retry_work);
+}
+
+static void demo_remove(struct demo_device *device)
+{
+    stop_new_requests(device);
+    cancel_work_sync(&device->retry_work);
+    /* 返回后该 work 已不再 pending 或执行，可以释放 device。 */
+}
+```
+
+`schedule_work()` 返回 `false` 表示该 work 已在队列中，不能把它理解成每调用一次就
+累积一个独立任务。若每次事件都必须保留，应把事件写入受同步保护的队列，再让一个
+work item 分批消费。`cancel_work_sync()` 会等待正在执行的 handler 返回，因此调用
+它时不能持有 handler 获取的锁；在 handler 内取消自己也会形成死锁。
+
 ### 3.5 DMA 地址、缓存一致性与所有权
 
 DMA 允许设备直接读写内存，但驱动仍负责分配或映射 Buffer、设置描述符、通知
@@ -7520,7 +7998,177 @@ tracepoint 保留指向已卸载模块代码的函数指针。
 展示一张调用栈或一次波形。
 
 
-# 十七、常见排查
+# 十七、常用 CLI 工具
+
+## 1. 查找命令和阅读帮助
+
+| 工具 | 用途 | 常用入口 |
+|---|---|---|
+| `command -v` | 查看 shell 将执行哪个程序 | `command -v python3` |
+| `type` | 区分外部程序、shell 内建命令、函数和 alias | `type -a ls` |
+| `man` | 阅读手册页 | `man 1 ls`、`man 2 open`、`man 5 proc`、`man 7 signal` |
+| `apropos` / `man -k` | 不知道命令名时按描述搜索手册 | `apropos "process status"` |
+| `--help` | 快速查看选项 | `ip --help` |
+
+手册页数字表示章节，常见的有：`1` 是用户命令，`2` 是系统调用，`3` 是库函数，
+`5` 是配置文件格式，`7` 是概念与协议。因此 `man 1 printf` 和 `man 3 printf`
+说明的不是同一个接口。
+
+Shell 会把前一个命令的标准输出接到管道 `|`，并可把不同输出流重定向到文件：
+
+```bash
+command >output.txt       # 覆盖标准输出
+command >>output.txt      # 追加标准输出
+command 2>error.txt       # 只保存标准错误
+command 2>&1 | less       # 合并标准错误与标准输出，再分页查看
+command | tee output.txt  # 屏幕显示的同时写入文件
+```
+
+重定向由当前 shell 在程序启动前完成，所以 `sudo command >root-file` 只提升了
+`command`，没有提升执行 `>` 的 shell。确实需要以特权身份写入时，可让 `sudo tee`
+接收管道输入。运行命令前应先确认目标路径，尤其不要把未展开或为空的变量交给覆盖、
+递归修改或删除类操作。
+
+## 2. 文件、权限与文本处理
+
+| 工具 | 主要用途 | 示例 |
+|---|---|---|
+| `pwd`、`ls` | 查看当前位置和目录内容 | `ls -lah` |
+| `file`、`stat` | 判断文件类型；查看大小、时间戳、inode 和权限 | `stat app.log` |
+| `find` | 按名称、类型、时间和大小遍历目录树 | `find . -type f -name '*.cpp'` |
+| `rg` / `grep` | 搜索文件内容 | `rg -n --glob '*.cpp' 'epoll_wait' .` |
+| `less`、`head`、`tail` | 分页、查看开头或持续跟踪末尾 | `tail -F app.log` |
+| `sort`、`uniq`、`wc` | 排序、相邻去重/计数、统计行或字节 | `sort names | uniq -c` |
+| `cut`、`paste`、`tr` | 处理规则、简单的列和字符 | `cut -d: -f1 /etc/passwd` |
+| `sed`、`awk` | 流式替换以及按字段计算 | `awk '{sum += $1} END {print sum}' data` |
+| `xargs` | 把标准输入转换成命令参数 | `printf '%s\n' a b | xargs -n1 echo` |
+| `jq` | 查询和变换 JSON | `jq -r '.items[].name' data.json` |
+| `diff` | 比较文件或目录内容 | `diff -u old.conf new.conf` |
+| `chmod`、`chown` | 修改模式位和所有者 | `chmod u+x script.sh` |
+| `getfacl`、`setfacl` | 查看和修改传统模式位之外的 ACL | `getfacl path` |
+| `flock`、`lslocks` | 在脚本中取得文件锁；查看系统当前文件锁 | `flock -n lockfile command`、`lslocks` |
+
+`rg` 默认递归搜索、速度快且会遵循常见忽略文件；最小系统上不一定安装，此时可使用
+`grep -R`。`find` 匹配的是目录项属性，`rg`/`grep` 搜索的是文件内容，两者用途不同。
+
+文件名可能包含空格甚至换行。批量处理时，优先让 `find` 直接执行命令：
+
+```bash
+find logs -type f -name '*.log' -exec wc -l -- '{}' +
+```
+
+需要连接 `xargs` 时使用 NUL 分隔，避免按空白错误拆分文件名：
+
+```bash
+find logs -type f -print0 | xargs -0 wc -l
+```
+
+## 3. 进程、服务与日志
+
+| 工具 | 主要用途 | 示例 |
+|---|---|---|
+| `ps` | 获取某一时刻的进程/线程快照 | `ps -eo pid,ppid,stat,pcpu,pmem,comm` |
+| `pgrep` | 按名称或属性查找 PID | `pgrep -a sshd` |
+| `top` / `htop` | 交互观察 CPU、内存和线程 | `top -H -p <pid>` |
+| `watch` | 周期性重新执行并显示命令 | `watch -n 1 'ps -p <pid> -o pid,stat,pcpu,rss,comm'` |
+| `kill` / `pkill` | 向 PID 或匹配进程发送信号 | `kill -TERM <pid>` |
+| `lsof` | 查看进程打开的文件、Socket 和映射 | `lsof -p <pid>` |
+| `systemctl` | 管理和检查 systemd unit | `systemctl status <service>` |
+| `journalctl` | 查询 systemd journal | `journalctl -u <service> --since today` |
+| `dmesg` | 查看内核 ring buffer | `dmesg --level=err,warn` |
+
+`kill` 的本质是发送信号，并不保证目标立即退出。通常先发送 `SIGTERM`，给进程清理
+资源的机会；只有进程无法正常终止且已经确认影响时才考虑 `SIGKILL`。查找服务失败
+原因时常组合使用：
+
+```bash
+systemctl status <service> --no-pager
+journalctl -u <service> -b --since '10 min ago'
+journalctl -k -b                 # 当前启动周期的内核日志
+```
+
+`ps` 是快照，`top` 是周期采样，journal 是持久化或易失配置决定的结构化日志，
+`dmesg` 则读取内核日志缓冲区；它们的时间范围和数据来源不同。
+
+## 4. 磁盘、文件系统与归档
+
+| 工具 | 主要用途 | 示例 |
+|---|---|---|
+| `df` | 查看已挂载文件系统的空间与 inode 使用量 | `df -hT`、`df -ih` |
+| `du` | 统计目录树中可达文件占用的空间 | `du -xhd1 /var` |
+| `lsblk`、`blkid` | 查看块设备、分区、文件系统和 UUID | `lsblk -f` |
+| `findmnt` | 查看挂载关系和挂载选项 | `findmnt -T /var/lib` |
+| `mount`、`umount` | 挂载和卸载文件系统 | `mount` |
+| `tar` | 打包、查看和解包归档 | `tar -tf backup.tar.gz` |
+| `rsync` | 增量复制本地或远端目录 | `rsync -a --dry-run src/ dst/` |
+
+`df` 从文件系统角度统计整体空间，`du` 遍历当前路径中仍可达的文件。两者差异很大时，
+应检查已删除但仍被进程打开的文件：
+
+```bash
+lsof +L1
+```
+
+`rsync` 中 `src/` 表示复制目录内容，`src` 表示连同目录名复制。正式同步前可先用
+`--dry-run` 核对范围；带删除语义的选项可能移除目标端文件，不能只凭路径名称猜测
+同步方向。
+
+## 5. 网络与远程请求
+
+| 工具 | 主要用途 | 示例 |
+|---|---|---|
+| `ip` | 查看和配置地址、链路、路由与邻居表 | `ip -br addr`、`ip route` |
+| `ss` | 查看 Socket、监听端口和 TCP 状态 | `ss -lntp` |
+| `ping` | 检查 ICMP 可达性和往返时间 | `ping -c 4 192.0.2.1` |
+| `tracepath` / `traceroute` | 观察到目标的路径和可能的 MTU 问题 | `tracepath example.com` |
+| `dig` | 查询 DNS 记录和解析链路 | `dig example.com A` |
+| `curl` | 发起 HTTP 等协议请求并观察响应 | `curl -v https://example.com/` |
+| `nc` | 建立简单 TCP/UDP 客户端或监听端 | `nc -vz example.com 443` |
+| `tcpdump` | 在接口上捕获和过滤数据包 | `tcpdump -i any -nn 'tcp port 443'` |
+
+现代 Linux 通常优先使用 `ip` 和 `ss`，而不是旧的 `ifconfig`、`route` 和
+`netstat`。`ping` 不通可能只是 ICMP 被过滤，不能单独证明目标主机或 TCP 服务不可用；
+应继续检查路由、DNS、目标端口和应用层响应。`tcpdump -nn` 禁用名称解析，能减少
+额外查询并保留原始地址与端口；捕获生产流量时还要限制接口、过滤条件、包长和数量，
+避免生成过大的文件或收集不必要的敏感数据。
+
+## 6. 性能与程序行为
+
+| 工具 | 观察对象 | 示例 |
+|---|---|---|
+| `/usr/bin/time` | 单次命令的耗时、CPU 与最大 RSS | `/usr/bin/time -v ./app` |
+| `free` | 系统内存概览 | `free -h` |
+| `vmstat` | 运行队列、内存、换页、I/O 和 CPU 趋势 | `vmstat 1` |
+| `pidstat` | 按进程/线程观察 CPU、内存、I/O 和切换 | `pidstat -u -r -d -p <pid> 1` |
+| `iostat` | 块设备吞吐、延迟、队列和利用率 | `iostat -xz 1` |
+| `strace` | 跟踪系统调用、信号、耗时和返回值 | `strace -f -tt -T -p <pid>` |
+| `gdb` | 断点、栈、变量、线程和 core dump | `gdb ./app core` |
+| `perf` | 采样调用栈、硬件计数器、调度与锁事件 | `perf top -p <pid>` |
+
+`pidstat` 和 `iostat` 通常由 `sysstat` 软件包提供。性能数据要观察一段时间而不是只看
+第一行，因为部分工具的首次输出是自启动以来的累计平均值。`strace`、`gdb` 和高频
+`perf` 采样都会干扰目标程序，其中 `strace` 对系统调用密集程序的时序影响尤其明显。
+
+## 7. 按问题选择入口
+
+| 现象 | 第一组工具 |
+|---|---|
+| 不知道文件在哪里 | `find`；已安装文件索引时可用 `locate` |
+| 不知道配置或符号在哪个文件 | `rg` / `grep` |
+| 服务启动失败 | `systemctl status` + `journalctl -u` |
+| 端口被谁监听 | `ss -lntp`，再用 `lsof -p` 查看进程资源 |
+| 文件系统空间异常 | `df` + `du` + `lsof +L1` |
+| CPU 持续偏高 | `top` / `pidstat` 定位进程线程，再用 `perf` 采样 |
+| 内存或换页异常 | `free` + `vmstat` + `pidstat -r` |
+| 磁盘请求延迟高 | `iostat -xz` + `pidstat -d` |
+| 程序卡在内核接口附近 | `strace -f -tt -T`，再结合进程栈 |
+| 怀疑丢包、重传或协议不符 | `ss` + `ip` + 有限范围的 `tcpdump` |
+
+这些工具先回答“哪个进程、设备、接口和时间窗口异常”，下一章再按 CPU、内存、
+磁盘、网络和锁等方向继续收敛原因。
+
+
+# 十八、常见排查
 
 性能排查应先确认现象和边界，再选择工具。不要一看到 CPU、内存或 `%util` 某个指标升高就直接下结论。
 
@@ -7800,7 +8448,7 @@ cat /proc/pressure/io
 
 不要同时无依据地调整多个参数，否则会破坏因果关系。
 
-# 十八、常见疑问
+# 十九、常见疑问
 
 ## 1. malloc 一定会立刻分配物理内存吗？
 
@@ -8117,5 +8765,13 @@ page fault 通常发生在 TLB miss 后发现页表条件不满足
 21. [Linux Kernel Documentation: Building External Modules](https://docs.kernel.org/kbuild/modules.html)
 22. [Linux Kernel Documentation: Tracepoints](https://docs.kernel.org/trace/tracepoints.html)
 23. [Linux Kernel Documentation: ftrace](https://docs.kernel.org/trace/ftrace.html)
+24. [Linux Kernel Documentation: What is RCU?](https://docs.kernel.org/RCU/whatisRCU.html)
+25. [Linux man-pages: credentials(7)](https://man7.org/linux/man-pages/man7/credentials.7.html)
+26. [Linux man-pages: capabilities(7)](https://man7.org/linux/man-pages/man7/capabilities.7.html)
+27. [Linux man-pages: fcntl_locking(2)](https://man7.org/linux/man-pages/man2/fcntl_locking.2.html)
+28. [Linux man-pages: timerfd_create(2)](https://man7.org/linux/man-pages/man2/timerfd_create.2.html)
+29. [Linux man-pages: flock(2)](https://man7.org/linux/man-pages/man2/flock.2.html)
+30. [util-linux: flock(1)](https://man7.org/linux/man-pages/man1/flock.1.html)
+31. [Linux man-pages: proc_locks(5)](https://man7.org/linux/man-pages/man5/proc_locks.5.html)
 
 > 内核文档和 man-pages 会持续更新。阅读具体机器行为时，应同时检查发行版内核版本、配置选项和对应源码。
