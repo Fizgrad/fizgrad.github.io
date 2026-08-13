@@ -1,0 +1,271 @@
+{
+  "version": 1,
+  "categories": {
+    "io-multiplexing": {
+      "zh": "I/O 多路复用",
+      "en": "I/O Multiplexing"
+    },
+    "concurrency": {
+      "zh": "并发与同步",
+      "en": "Concurrency"
+    },
+    "network-io": {
+      "zh": "网络与可靠 I/O",
+      "en": "Network I/O"
+    }
+  },
+  "difficulties": {
+    "basic": {
+      "zh": "基础",
+      "en": "Basic"
+    },
+    "intermediate": {
+      "zh": "进阶",
+      "en": "Intermediate"
+    }
+  },
+  "problems": [
+    {
+      "id": "select-ready",
+      "title": {
+        "zh": "用 select 等待多个可读 fd",
+        "en": "Wait for readable file descriptors with select"
+      },
+      "summary": {
+        "zh": "正确构造 fd_set、处理超时和 EINTR，并返回已经就绪的描述符。",
+        "en": "Build fd_set values correctly, handle timeout and EINTR, and return the ready descriptors."
+      },
+      "category": "io-multiplexing",
+      "difficulty": "basic",
+      "concepts": ["select", "fd_set", "FD_SETSIZE", "EINTR", "timeout"],
+      "api": "std::vector<int> wait_readable_select(const std::vector<int>& fds, std::chrono::milliseconds timeout);",
+      "requirements": {
+        "zh": [
+          "timeout 必须非负；负数抛出 std::invalid_argument。",
+          "拒绝负 fd 和不小于 FD_SETSIZE 的 fd。",
+          "每次 select 调用前重新构造 fd_set，并在 EINTR 后按剩余时间继续等待。",
+          "返回去重并按数值升序排列的可读 fd；超时返回空数组。",
+          "系统调用失败时抛出 std::system_error。"
+        ],
+        "en": [
+          "Require a non-negative timeout and throw std::invalid_argument otherwise.",
+          "Reject negative descriptors and descriptors greater than or equal to FD_SETSIZE.",
+          "Rebuild fd_set before every select call and continue with the remaining time after EINTR.",
+          "Return unique readable descriptors in ascending order; return an empty vector on timeout.",
+          "Throw std::system_error when the system call fails."
+        ]
+      },
+      "checks": {
+        "zh": ["单个和多个 pipe 就绪", "超时语义", "重复 fd 去重", "无效 fd 错误路径"],
+        "en": ["Single and multiple ready pipes", "Timeout semantics", "Duplicate descriptor removal", "Invalid descriptor error path"]
+      },
+      "standard": "C++20",
+      "platform": "Linux/POSIX",
+      "timeLimitMs": 3000,
+      "estimatedMinutes": 30,
+      "starter": "challenges/select-ready/starter.cpp",
+      "tests": "challenges/select-ready/tests.cpp",
+      "reference": "challenges/select-ready/reference.cpp"
+    },
+    {
+      "id": "poll-events",
+      "title": {
+        "zh": "用 poll 处理读事件、挂断和无效 fd",
+        "en": "Handle readable, hangup, and invalid descriptors with poll"
+      },
+      "summary": {
+        "zh": "保留 poll 的 revents 语义，处理负 fd、POLLHUP、POLLNVAL 与超时。",
+        "en": "Preserve poll revents semantics while handling negative descriptors, POLLHUP, POLLNVAL, and timeout."
+      },
+      "category": "io-multiplexing",
+      "difficulty": "basic",
+      "concepts": ["poll", "pollfd", "revents", "POLLHUP", "POLLNVAL", "EINTR"],
+      "api": "std::vector<PollResult> wait_poll_events(const std::vector<PollInterest>& interests, std::chrono::milliseconds timeout);",
+      "requirements": {
+        "zh": [
+          "PollInterest 包含 fd 和关注的 events；PollResult 包含 fd 和实际 revents。",
+          "遵循 poll 语义忽略负 fd，并只返回 revents 非零的条目。",
+          "保持输入条目的相对顺序，不吞掉 POLLHUP、POLLERR 或 POLLNVAL。",
+          "在 EINTR 后按剩余时间继续等待；系统调用失败抛出 std::system_error。"
+        ],
+        "en": [
+          "PollInterest contains fd and requested events; PollResult contains fd and observed revents.",
+          "Follow poll semantics by ignoring negative descriptors and return only entries with non-zero revents.",
+          "Preserve input order and do not discard POLLHUP, POLLERR, or POLLNVAL.",
+          "Continue with the remaining time after EINTR and throw std::system_error on failure."
+        ]
+      },
+      "checks": {
+        "zh": ["socketpair 可读", "对端关闭产生挂断事件", "关闭的 fd 产生 POLLNVAL", "超时和输入顺序"],
+        "en": ["Readable socketpair", "Peer close produces a hangup event", "Closed descriptor produces POLLNVAL", "Timeout and input ordering"]
+      },
+      "standard": "C++20",
+      "platform": "Linux/POSIX",
+      "timeLimitMs": 3000,
+      "estimatedMinutes": 30,
+      "starter": "challenges/poll-events/starter.cpp",
+      "tests": "challenges/poll-events/tests.cpp",
+      "reference": "challenges/poll-events/reference.cpp"
+    },
+    {
+      "id": "epoll-ready",
+      "title": {
+        "zh": "用 epoll 完成一次事件收集",
+        "en": "Collect one batch of events with epoll"
+      },
+      "summary": {
+        "zh": "创建 epoll 实例、注册 socket、等待事件并正确释放内核 fd。",
+        "en": "Create an epoll instance, register sockets, wait for events, and release the kernel descriptor correctly."
+      },
+      "category": "io-multiplexing",
+      "difficulty": "intermediate",
+      "concepts": ["epoll_create1", "epoll_ctl", "epoll_wait", "EPOLLRDHUP", "RAII", "EINTR"],
+      "api": "std::vector<EpollResult> wait_epoll_readable(const std::vector<int>& fds, std::chrono::milliseconds timeout);",
+      "requirements": {
+        "zh": [
+          "使用 epoll_create1(EPOLL_CLOEXEC) 创建实例，并注册 EPOLLIN、EPOLLRDHUP、EPOLLHUP、EPOLLERR。",
+          "拒绝负 fd 和重复 fd；注册或等待失败时抛出 std::system_error。",
+          "在 EINTR 后按剩余时间继续等待，返回按 fd 升序排列的事件。",
+          "所有返回路径都必须关闭 epoll fd，不能产生描述符泄漏。"
+        ],
+        "en": [
+          "Create the instance with epoll_create1(EPOLL_CLOEXEC) and register EPOLLIN, EPOLLRDHUP, EPOLLHUP, and EPOLLERR.",
+          "Reject negative or duplicate descriptors and throw std::system_error on registration or wait failure.",
+          "Continue with the remaining time after EINTR and return events sorted by descriptor.",
+          "Close the epoll descriptor on every return path without leaking descriptors."
+        ]
+      },
+      "checks": {
+        "zh": ["单个和多个 socket 就绪", "对端关闭", "重复 fd", "重复调用后的 fd 泄漏"],
+        "en": ["Single and multiple ready sockets", "Peer close", "Duplicate descriptors", "Descriptor leaks across repeated calls"]
+      },
+      "standard": "C++20",
+      "platform": "Linux",
+      "timeLimitMs": 4000,
+      "estimatedMinutes": 45,
+      "starter": "challenges/epoll-ready/starter.cpp",
+      "tests": "challenges/epoll-ready/tests.cpp",
+      "reference": "challenges/epoll-ready/reference.cpp"
+    },
+    {
+      "id": "bounded-queue",
+      "title": {
+        "zh": "实现可关闭的有界阻塞队列",
+        "en": "Implement a closeable bounded blocking queue"
+      },
+      "summary": {
+        "zh": "使用 mutex 与 condition_variable 实现背压、关闭和多生产者多消费者。",
+        "en": "Use mutex and condition_variable to implement backpressure, close semantics, and multiple producers and consumers."
+      },
+      "category": "concurrency",
+      "difficulty": "intermediate",
+      "concepts": ["mutex", "condition_variable", "predicate", "backpressure", "shutdown"],
+      "api": "class BoundedQueue { bool push(int); std::optional<int> pop(); void close(); std::size_t size() const; };",
+      "requirements": {
+        "zh": [
+          "容量必须大于 0；队列满时 push 阻塞，队列空时 pop 阻塞。",
+          "close() 必须幂等并唤醒所有生产者和消费者。",
+          "关闭后 push 返回 false；pop 先排空已有元素，随后返回 std::nullopt。",
+          "所有共享状态都受同一互斥量保护，condition_variable 必须使用谓词等待。"
+        ],
+        "en": [
+          "Capacity must be positive; push blocks while full and pop blocks while empty.",
+          "close() is idempotent and wakes all producers and consumers.",
+          "push returns false after close; pop drains queued items and then returns std::nullopt.",
+          "Protect all shared state with one mutex and use predicate waits with condition_variable."
+        ]
+      },
+      "checks": {
+        "zh": ["FIFO 与容量边界", "生产者和消费者阻塞/唤醒", "close 唤醒等待者", "多生产者多消费者压力测试"],
+        "en": ["FIFO and capacity boundary", "Producer and consumer blocking/wakeup", "close wakes waiters", "Multiple-producer multiple-consumer stress test"]
+      },
+      "standard": "C++20",
+      "platform": "Linux/POSIX threads",
+      "timeLimitMs": 8000,
+      "estimatedMinutes": 60,
+      "starter": "challenges/bounded-queue/starter.cpp",
+      "tests": "challenges/bounded-queue/tests.cpp",
+      "reference": "challenges/bounded-queue/reference.cpp"
+    },
+    {
+      "id": "thread-pool",
+      "title": {
+        "zh": "实现可以安全关闭的固定线程池",
+        "en": "Implement a fixed thread pool with safe shutdown"
+      },
+      "summary": {
+        "zh": "管理 worker 生命周期、任务 Future、异常传播、排空关闭与重复 shutdown。",
+        "en": "Manage worker lifetime, task futures, exception propagation, draining shutdown, and repeated shutdown calls."
+      },
+      "category": "concurrency",
+      "difficulty": "intermediate",
+      "concepts": ["thread", "packaged_task", "future", "condition_variable", "join", "exception propagation"],
+      "api": "class ThreadPool { std::future<int> submit(std::function<int()>); void shutdown(); std::size_t worker_count() const noexcept; };",
+      "requirements": {
+        "zh": [
+          "构造固定数量的 worker，0 个 worker 应抛出 std::invalid_argument。",
+          "submit 返回 future，任务异常必须通过 future 重新抛出。",
+          "shutdown 停止接收新任务、排空已经提交的任务并 join 所有 worker。",
+          "shutdown 必须幂等；析构函数必须安全关闭；关闭后的 submit 抛出 std::runtime_error。"
+        ],
+        "en": [
+          "Create a fixed number of workers and throw std::invalid_argument for zero workers.",
+          "submit returns a future and task exceptions are rethrown through that future.",
+          "shutdown stops new submissions, drains accepted tasks, and joins every worker.",
+          "shutdown is idempotent, destruction shuts down safely, and submit after shutdown throws std::runtime_error."
+        ]
+      },
+      "checks": {
+        "zh": ["返回值与异常传播", "多个 worker 并行执行", "排空关闭", "析构与重复 shutdown"],
+        "en": ["Return values and exception propagation", "Parallel execution by multiple workers", "Draining shutdown", "Destruction and repeated shutdown"]
+      },
+      "standard": "C++20",
+      "platform": "Linux/POSIX threads",
+      "timeLimitMs": 8000,
+      "estimatedMinutes": 75,
+      "starter": "challenges/thread-pool/starter.cpp",
+      "tests": "challenges/thread-pool/tests.cpp",
+      "reference": "challenges/thread-pool/reference.cpp"
+    },
+    {
+      "id": "framed-socket",
+      "title": {
+        "zh": "实现可靠的长度前缀 Socket 收发",
+        "en": "Implement reliable length-prefixed socket I/O"
+      },
+      "summary": {
+        "zh": "处理短读写、EOF、字节序、长度上限和 SIGPIPE，而不是假设一次调用完成全部传输。",
+        "en": "Handle short I/O, EOF, byte order, size limits, and SIGPIPE instead of assuming one call transfers everything."
+      },
+      "category": "network-io",
+      "difficulty": "intermediate",
+      "concepts": ["socketpair", "send", "recv", "short I/O", "network byte order", "MSG_NOSIGNAL"],
+      "api": "void send_frame(int fd, std::string_view payload); std::optional<std::string> receive_frame(int fd, std::size_t max_payload);",
+      "requirements": {
+        "zh": [
+          "协议使用 4 字节无符号大端长度，随后紧跟 payload。",
+          "循环处理短读写和 EINTR；send 使用 MSG_NOSIGNAL 避免 SIGPIPE 终止进程。",
+          "只有在尚未读取任何 header 字节时遇到 EOF 才返回 std::nullopt；截断帧抛出 std::runtime_error。",
+          "在分配 payload 前检查 max_payload 和 uint32_t 长度上限。"
+        ],
+        "en": [
+          "Use a four-byte unsigned big-endian length followed by the payload.",
+          "Loop over short I/O and EINTR; use MSG_NOSIGNAL for send to avoid process termination by SIGPIPE.",
+          "Return std::nullopt only for EOF before any header byte; throw std::runtime_error for a truncated frame.",
+          "Check max_payload and the uint32_t length limit before allocating the payload."
+        ]
+      },
+      "checks": {
+        "zh": ["空帧与普通帧", "分片 header/body", "干净 EOF 与截断 EOF", "超长帧", "大 payload 双向并发"],
+        "en": ["Empty and ordinary frames", "Fragmented header/body", "Clean and truncated EOF", "Oversized frame", "Concurrent large-payload transfer"]
+      },
+      "standard": "C++20",
+      "platform": "Linux/POSIX sockets",
+      "timeLimitMs": 6000,
+      "estimatedMinutes": 60,
+      "starter": "challenges/framed-socket/starter.cpp",
+      "tests": "challenges/framed-socket/tests.cpp",
+      "reference": "challenges/framed-socket/reference.cpp"
+    }
+  ]
+}

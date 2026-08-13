@@ -22,58 +22,56 @@
 - [7. RAII](#7-raii)
 - [8. 智能指针](#8-智能指针)
 - [9. new/delete 与 malloc/free](#9-newdelete-与-mallocfree)
-- [10. 虚函数、虚表、多态](#10-虚函数虚表多态)
-- [11. 构造析构中的虚函数行为](#11-构造析构中的虚函数行为)
-- [12. 重载决议、重写与名字查找](#12-重载决议重写与名字查找)
-- [13. 继承、对象模型与内存布局](#13-继承对象模型与内存布局)
+- [10. 继承与对象内存布局](#10-继承与对象内存布局)
+- [11. 虚函数、虚表、RTTI 与运行期多态](#11-虚函数虚表rtti-与运行期多态)
+- [12. 构造、析构与多态生命周期](#12-构造析构与多态生命周期)
+- [13. 重载决议、重写与名字查找](#13-重载决议重写与名字查找)
 
 ### 容器、算法与泛型
 
-- [14. STL 容器：vector、deque、list](#14-stl-容器vectordequelist)
-- [15. map 与 unordered_map](#15-map-与-unordered_map)
-- [16. 迭代器失效](#16-迭代器失效)
-- [17. STL 算法、迭代器与 lambda](#17-stl-算法迭代器与-lambda)
-- [18. 模板基础](#18-模板基础)
-- [19. 完美转发、万能引用、引用折叠](#19-完美转发万能引用引用折叠)
-- [20. SFINAE、type traits、concepts](#20-sfinaetype-traitsconcepts)
+- [14. STL 容器：结构、复杂度与失效规则](#14-stl-容器结构复杂度与失效规则)
+- [15. STL 算法、迭代器与 lambda](#15-stl-算法迭代器与-lambda)
+- [16. 模板基础](#16-模板基础)
+- [17. 完美转发、万能引用、引用折叠](#17-完美转发万能引用引用折叠)
+- [18. SFINAE、type traits、concepts](#18-sfinaetype-traitsconcepts)
 
 ### 异常与并发
 
-- [21. 异常传播、异常安全与 noexcept](#21-异常传播异常安全与-noexcept)
-- [22. 并发基础：thread、mutex、lock](#22-并发基础threadmutexlock)
-- [23. condition_variable](#23-condition_variable)
-- [24. atomic 与内存模型](#24-atomic-与内存模型)
+- [19. 异常传播、异常安全与 noexcept](#19-异常传播异常安全与-noexcept)
+- [20. 并发基础：thread、mutex、lock](#20-并发基础threadmutexlock)
+- [21. condition_variable](#21-condition_variable)
+- [22. atomic 与内存模型](#22-atomic-与内存模型)
 
 ### 现代库、构建与性能
 
-- [25. C++17/20 常见特性](#25-c1720-常见特性)
-- [26. optional、variant、any、string_view、span](#26-optionalvariantanystring_viewspan)
-- [27. 编译、链接、ODR、inline](#27-编译链接odrinline)
-- [28. static、extern、头文件设计](#28-staticextern头文件设计)
-- [29. ABI 与动态库二进制兼容](#29-abi-与动态库二进制兼容)
-- [30. 性能优化](#30-性能优化)
-- [31. undefined behavior](#31-undefined-behavior)
-- [32. 返回局部对象](#32-返回局部对象)
-- [33. vector<bool>](#33-vectorbool)
+- [23. C++17/20 常见特性](#23-c1720-常见特性)
+- [24. optional、variant、any、string_view、span](#24-optionalvariantanystring_viewspan)
+- [25. 编译、链接、ODR、inline](#25-编译链接odrinline)
+- [26. static、extern、头文件设计](#26-staticextern头文件设计)
+- [27. ABI 与动态库二进制兼容](#27-abi-与动态库二进制兼容)
+- [28. 性能优化](#28-性能优化)
+- [29. undefined behavior](#29-undefined-behavior)
+- [30. 返回局部对象](#30-返回局部对象)
+- [31. vector<bool>](#31-vectorbool)
 
 ### 典型手写实现
 
-- [34. 手写实现：简化 unique_ptr](#34-手写实现简化-unique_ptr)
-- [35. 手写实现：线程安全队列](#35-手写实现线程安全队列)
-- [36. 手写实现：有停止机制的生产者消费者队列](#36-手写实现有停止机制的生产者消费者队列)
-- [37. 手写实现：LRU Cache](#37-手写实现lru-cache)
+- [32. 手写实现：简化 unique_ptr](#32-手写实现简化-unique_ptr)
+- [33. 手写实现：线程安全队列](#33-手写实现线程安全队列)
+- [34. 手写实现：有停止机制的生产者消费者队列](#34-手写实现有停止机制的生产者消费者队列)
+- [35. 手写实现：LRU Cache](#35-手写实现lru-cache)
 
 ### 生命周期、并发进阶与工程化
 
-- [38. 初始化、存储期、求值顺序与对象生命周期](#38-初始化存储期求值顺序与对象生命周期)
-- [39. 成员函数限定、类型转换与类型安全](#39-成员函数限定类型转换与类型安全)
-- [40. 线程生命周期、任务与异步结果](#40-线程生命周期任务与异步结果)
-- [41. 并发进阶：读写锁、原子等待与缓存竞争](#41-并发进阶读写锁原子等待与缓存竞争)
-- [42. 分配器、内存资源与 pmr](#42-分配器内存资源与-pmr)
-- [43. 可调用对象、std::function 与类型擦除](#43-可调用对象stdfunction-与类型擦除)
-- [44. Ranges、expected 与现代接口设计](#44-rangesexpected-与现代接口设计)
-- [45. 库、符号、诊断与工程验证](#45-库符号诊断与工程验证)
-- [46. C++20 协程机制](#46-c20-协程机制)
+- [36. 初始化、存储期、求值顺序与对象生命周期](#36-初始化存储期求值顺序与对象生命周期)
+- [37. 成员函数限定、类型转换与类型安全](#37-成员函数限定类型转换与类型安全)
+- [38. 线程生命周期、任务与异步结果](#38-线程生命周期任务与异步结果)
+- [39. 并发进阶：读写锁、原子等待与缓存竞争](#39-并发进阶读写锁原子等待与缓存竞争)
+- [40. 分配器、内存资源与 pmr](#40-分配器内存资源与-pmr)
+- [41. 可调用对象、std::function 与类型擦除](#41-可调用对象stdfunction-与类型擦除)
+- [42. Ranges、expected 与现代接口设计](#42-rangesexpected-与现代接口设计)
+- [43. 库、符号、诊断与工程验证](#43-库符号诊断与工程验证)
+- [44. C++20 协程机制](#44-c20-协程机制)
 
 # 1. C++ 核心问题
 
@@ -122,34 +120,49 @@ const int b = f(); // 运行期常量
 
 ## 2.2 constexpr
 
-`constexpr` 表示这个变量或函数可以参与编译期求值。
+`constexpr` 用于变量和函数时，约束不同。
+
+用于对象变量时，初始化器必须满足常量表达式规则，否则程序无法通过编译；对象还隐含 `const`：
 
 ```cpp
 constexpr int x = 10;
 int arr[x]; // OK
+
+int read();
+// constexpr int y = read(); // error：初始化器不是常量表达式
 ```
 
-函数也可以是 `constexpr`：
+这表示编译器必须在翻译期间验证并完成 `x` 的常量初始化，不表示 `x` 一定不占运行期存储。程序对它取地址时，仍可能需要一个实际对象：
+
+```cpp
+constexpr int x = 10;
+const int* address = &x;
+```
+
+用于函数时，`constexpr` 表示该函数在参数和实际执行路径都满足常量表达式规则时，可以用于常量求值：
 
 ```cpp
 constexpr int square(int x) {
     return x * x;
 }
 
-constexpr int y = square(5); // 编译期计算
+constexpr int a = square(5);      // 必须常量求值
+static_assert(square(6) == 36);   // 必须常量求值
 ```
 
-但 `constexpr` 函数不一定每次都在编译期执行。
+普通运行期上下文不强制常量求值。即使实参是字面量，编译器的常量折叠也只是优化，不是这里的语言要求：
 
 ```cpp
-int n;
-std::cin >> n;
-int r = square(n); // 运行期执行
+int evaluate(int n) {
+    int b = square(5); // 不强制；编译器可能常量折叠成 25
+    int c = square(n); // n 不是常量表达式，走运行期求值路径
+    return b + c;
+}
 ```
 
-重点：
+决定一次调用是否**必须**常量求值的是使用位置：`constexpr` 变量初始化、`static_assert`、非类型模板实参和数组边界等常量表达式上下文会强制检查；普通表达式不会。
 
-> constexpr 表示“允许编译期求值”，不是“强制编译期求值”。
+> `constexpr` 变量的初始化器必须是常量表达式；`constexpr` 函数只是具备常量求值能力，每次调用是否必须常量求值取决于上下文。
 
 ---
 
@@ -357,24 +370,126 @@ static_assert(std::is_same_v<decltype((value + 1)), int>);          // prvalue
 
 ---
 
-## 4.2 变量名永远是左值表达式
+## 4.2 从编译器角度理解值类别与引用
 
-```cpp
-int&& rr = 10;
+左值、纯右值和将亡值是**表达式在前端语义分析阶段的属性**，不是对象在内存里携带的运行期标签。同一个 `int` 对象可以被不同值类别的表达式指代：`value` 是左值表达式，`static_cast<int&&>(value)` 是指向同一对象的将亡值表达式。
+
+```mermaid
+flowchart LR
+    SOURCE["C++ 表达式"] --> AST["Clang AST<br/>类型 + 值类别"]
+    AST --> SEMANTIC["引用绑定 · 重载决议<br/>临时对象实质化"]
+    SEMANTIC --> IR["LLVM IR<br/>地址、值与已选定的调用"]
+    IR --> MACHINE["目标机器指令"]
 ```
 
-`rr` 的类型是右值引用，但表达式 `rr` 是左值。
+### 前端先根据值类别完成引用绑定
+
+以下两个重载的参数类型不同：
 
 ```cpp
-void f(int&& x) {
-    g(x);            // x 是左值
-    g(std::move(x)); // x 被转成右值
+void take(int&);  // 左值引用
+void take(int&&); // 右值引用
+
+void test(int& value) {
+    take(value);
+    take(static_cast<int&&>(value));
+    take(42);
 }
 ```
 
-高频点：
+非模板引用绑定的基本方向如下，实际规则还会检查 `const`、`volatile`、继承转换和用户定义转换：
 
-> 右值引用变量本身是一个有名字的变量，所以表达式是左值。
+| 形参 | 可以直接绑定的典型表达式 |
+| --- | --- |
+| `T&` | 类型兼容的左值 |
+| `const T&` | 左值、将亡值和纯右值 |
+| `T&&` | 类型兼容的将亡值和纯右值 |
+| `const T&&` | 类型兼容的右值；绑定后只能通过该引用进行 `const` 访问，因此很少用于资源转移 |
+
+对示例执行下面的命令可以查看 Clang AST：
+
+```bash
+clang++ -std=c++20 -Xclang -ast-dump -fsyntax-only value.cpp
+```
+
+删去节点地址和无关包装后，三个实参的核心节点是：
+
+```text
+take(value)
+`- DeclRefExpr 'int' lvalue
+
+take(static_cast<int&&>(value))
+`- CXXStaticCastExpr 'int' xvalue <NoOp>
+   `- DeclRefExpr 'int' lvalue
+
+take(42)
+`- MaterializeTemporaryExpr 'int' xvalue
+   `- IntegerLiteral 'int' 42
+```
+
+前端据此完成三件事：
+
+1. `value` 是 lvalue，选择 `take(int&)`。
+2. `static_cast<int&&>` 只把表达式改为 xvalue，选择 `take(int&&)`；AST 中的 `<NoOp>` 表明它没有修改对象或搬运数据。
+3. `42` 原本是 prvalue。右值引用需要绑定到有身份、有地址的对象，因此 C++17 的临时对象实质化转换产生一个临时 `int`，再让引用绑定到表示该临时对象的 xvalue。
+
+### 进入 LLVM IR 后通常只剩地址
+
+用 `-O0 -S -emit-llvm` 编译上例，忽略调试属性和为形参生成的冗余装载后，核心 IR 类似：
+
+```llvm
+define void @_Z4testRi(ptr %value) {
+    %temporary = alloca i32
+
+    call void @_Z4takeRi(ptr %value)
+    call void @_Z4takeOi(ptr %value)
+
+    store i32 42, ptr %temporary
+    call void @_Z4takeOi(ptr %temporary)
+    ret void
+}
+
+declare void @_Z4takeRi(ptr)
+declare void @_Z4takeOi(ptr)
+```
+
+在 Itanium C++ ABI 的修饰名中，`Ri` 表示 `int&`，`Oi` 表示 `int&&`。两个函数在 LLVM IR 层都接收 `ptr`，但前端已经选择了不同的目标符号。前两次调用甚至传入同一个 `%value` 地址：右值转换没有移动任何数据，只改变了允许匹配的接口。
+
+prvalue `42` 起初没有对象身份；引用绑定使前端在语义上将它实质化为临时对象。未优化 IR 因而分配临时存储、写入 42，再把地址交给右值引用形参。优化器以后可以消除这块存储，但不能改变临时对象的可观察生命周期。
+
+C++ 标准没有规定引用必须实现成指针，也没有规定引用变量必须单独占用存储；上面的 `ptr` 是该目标 ABI 和这段代码的降低结果。关键分界是：值类别与引用绑定由 C++ 前端处理，LLVM 后端通常看不到名为 lvalue 或 xvalue 的运行期类型。
+
+### 右值引用变量的名字仍是左值表达式
+
+引用类型描述“初始化时允许绑定什么”，变量名的值类别描述“此后怎样使用这个表达式”。任何有名字的变量都能被反复定位，因此名字表达式是左值，即使变量的声明类型是右值引用：
+
+```cpp
+void relay(int&& value) {
+    take(value);                     // value 是左值表达式，选择 take(int&)
+    take(static_cast<int&&>(value)); // xvalue，选择 take(int&&)
+}
+```
+
+`std::move(value)` 的核心语义就是这里的 `static_cast<int&&>`：显式恢复右值类别，让后续重载有机会复用资源；真正的数据转移仍由被选中的移动构造、移动赋值或其他 `T&&` 接口完成。
+
+### 引用绑定还决定临时对象生命周期
+
+当引用直接绑定到临时对象时，前端不仅检查类型和值类别，还要安排临时对象的析构位置：
+
+```cpp
+struct Widget {};
+
+void lifetime() {
+    const Widget& left = Widget{};
+    Widget&& right = Widget{};
+
+    // 两个临时 Widget 都存活到各自引用的作用域结束。
+}
+```
+
+Clang AST 会为两次初始化生成 `MaterializeTemporaryExpr`，并记录临时对象分别由变量 `left` 和 `right` 延长生命周期。右值引用也能延长直接绑定临时对象的生命周期，并非只有 `const T&` 可以。
+
+这种延长取决于绑定上下文：临时对象绑定到函数的引用形参时，只存活到包含该调用的完整表达式结束；从函数返回一个指向局部对象的引用，也不会延长局部对象的生命周期。
 
 ---
 
@@ -444,6 +559,75 @@ std::string target = std::move(source);
 `std::move(source)` 的类型是 `const std::string&&`。常见移动构造函数接受 `std::string&&`，不能绑定到 `const` 右值，因此这里通常调用拷贝构造。
 
 移动的本质是允许修改源对象并接管其资源；`const` 对象不能被修改，所以“对 const 使用 move”通常无法获得资源转移效果。
+
+---
+
+## 4.6 `std::exchange` 与 `std::swap`
+
+`std::exchange` 在 `<utility>` 中定义，用一个新值替换对象，同时返回对象被替换前的旧值。其核心逻辑可以近似理解为：
+
+```cpp
+template <class T, class U = T>
+constexpr T exchange(T& object, U&& new_value) {
+    T old_value = std::move(object);
+    object = std::forward<U>(new_value);
+    return old_value;
+}
+```
+
+例如：
+
+```cpp
+#include <utility>
+
+int state = 1;
+int old_state = std::exchange(state, 2);
+
+// old_state == 1
+// state == 2
+```
+
+它和 `std::swap` 的数据流不同：
+
+```cpp
+int left = 1;
+int right = 2;
+
+int old_left = std::exchange(left, right);
+// old_left == 1，left == 2，right == 2
+
+left = 1;
+right = 2;
+std::swap(left, right);
+// left == 2，right == 1
+```
+
+| 操作 | 结果 | 典型用途 |
+| --- | --- | --- |
+| `std::exchange(object, new_value)` | 返回 `object` 的旧值，并用第二个实参替换它；第二个实参不会接收旧值 | 取走资源并把源对象重置为明确状态 |
+| `std::swap(left, right)` | `left` 与 `right` 双向互换，不返回旧值 | 交换两个仍需继续使用的对象 |
+
+当 `new_value` 是左值时，通常由它拷贝赋值给 `object`，自身保持不变；当它是右值时，可能由它移动赋值，因而进入移动后状态。`exchange` 允许两个实参类型不同，只要旧值能构造为 `T`，并且 `T&` 能接受新值；普通 `swap` 则围绕两个对象的双向交换设计。
+
+因此，移动构造中常用 `std::exchange` 一次完成“接管旧资源”和“清空源对象”：
+
+```cpp
+#include <cstdio>
+#include <utility>
+
+class File {
+public:
+    File(File&& other) noexcept
+        : fp_(std::exchange(other.fp_, nullptr)) {}
+
+private:
+    std::FILE* fp_ = nullptr;
+};
+```
+
+这里返回的旧指针进入新对象的 `fp_`，同时 `other.fp_` 被设为 `nullptr`。如果改用 `std::swap(fp_, other.fp_)`，必须先确保 `fp_` 已经处于合适的初始状态，而且表达的重点变成了双方互换，不如 `exchange` 直接。
+
+`std::exchange` 只是普通的非原子工具函数；后文的 `std::atomic<T>::exchange()` 是不可分割的原子读改写操作，还涉及内存序，两者不要混淆。
 
 ---
 
@@ -866,6 +1050,133 @@ std::unique_ptr<int> p = std::make_unique<int>(10);
 4. 使用无状态删除器时通常没有额外运行期所有权开销；有状态删除器可能增大对象尺寸。
 5. `unique_ptr<T[]>` 用于数组，`unique_ptr<T, Deleter>` 可管理文件、句柄等非 `delete` 资源。
 
+### 用 `fclose` 管理 `FILE*`
+
+`FILE*` 由 `std::fopen` 创建，必须交给 `std::fclose`，不能使用 `delete`：
+
+```cpp
+#include <cerrno>
+#include <cstdio>
+#include <memory>
+#include <system_error>
+
+struct FileCloser {
+    void operator()(std::FILE* file) const noexcept {
+        std::fclose(file);
+    }
+};
+
+using File = std::unique_ptr<std::FILE, FileCloser>;
+
+File open_file(const char* path) {
+    std::FILE* raw = std::fopen(path, "rb");
+    if (raw == nullptr) {
+        throw std::system_error(errno, std::generic_category(), path);
+    }
+    return File(raw);
+}
+
+void read_header() {
+    auto file = open_file("config.bin");
+
+    unsigned char header[16];
+    const std::size_t bytes =
+        std::fread(header, 1, sizeof header, file.get());
+    (void)bytes;
+
+    // 正常返回或异常展开时，file 的析构函数都会调用 fclose。
+}
+```
+
+`FileCloser` 是无状态类型，典型实现可以利用空基类优化，使 `File` 的大小与一个普通指针相同。`unique_ptr` 只会为非空指针调用删除器，所以 `FileCloser` 接收到的是有效的非空 `FILE*`；`fopen` 失败时则在建立所有权之前抛出异常。
+
+### 管理 POSIX 文件描述符
+
+POSIX 文件描述符是整数，空值用 `-1` 表示，不能直接当作 `unique_ptr` 默认要求的 `T*`。删除器可以通过嵌套的 `pointer` 类型改变 `unique_ptr` 实际保存的句柄类型：
+
+```cpp
+#include <cerrno>
+#include <fcntl.h>
+#include <memory>
+#include <system_error>
+#include <unistd.h>
+
+struct FileDescriptor {
+    int value = -1;
+
+    FileDescriptor() noexcept = default;
+    FileDescriptor(std::nullptr_t) noexcept {}
+    explicit FileDescriptor(int descriptor) noexcept : value(descriptor) {}
+
+    explicit operator bool() const noexcept {
+        return value != -1;
+    }
+
+    friend bool operator==(FileDescriptor left,
+                           FileDescriptor right) noexcept {
+        return left.value == right.value;
+    }
+
+    friend bool operator!=(FileDescriptor left,
+                           FileDescriptor right) noexcept {
+        return !(left == right);
+    }
+
+    friend bool operator==(FileDescriptor descriptor,
+                           std::nullptr_t) noexcept {
+        return descriptor.value == -1;
+    }
+
+    friend bool operator!=(FileDescriptor descriptor,
+                           std::nullptr_t) noexcept {
+        return !(descriptor == nullptr);
+    }
+
+    friend bool operator==(std::nullptr_t,
+                           FileDescriptor descriptor) noexcept {
+        return descriptor == nullptr;
+    }
+
+    friend bool operator!=(std::nullptr_t,
+                           FileDescriptor descriptor) noexcept {
+        return descriptor != nullptr;
+    }
+};
+
+struct FileDescriptorCloser {
+    using pointer = FileDescriptor;
+
+    void operator()(FileDescriptor descriptor) const noexcept {
+        ::close(descriptor.value);
+    }
+};
+
+struct FileDescriptorTag;
+using UniqueFileDescriptor =
+    std::unique_ptr<FileDescriptorTag, FileDescriptorCloser>;
+
+UniqueFileDescriptor open_file_descriptor(const char* path) {
+    int descriptor = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (descriptor == -1) {
+        throw std::system_error(errno, std::generic_category(), path);
+    }
+    return UniqueFileDescriptor(FileDescriptor(descriptor));
+}
+
+void read_header() {
+    auto descriptor = open_file_descriptor("config.bin");
+
+    unsigned char header[16];
+    const ssize_t bytes =
+        ::read(descriptor.get().value, header, sizeof header);
+    (void)bytes;
+
+    // 离开作用域时自动调用 close。
+}
+```
+
+`FileDescriptorCloser::pointer` 让 `UniqueFileDescriptor` 保存 `FileDescriptor`，而不是 `FileDescriptorTag*`。包装类型把 `-1` 映射为 `nullptr` 语义并提供比较操作，从而满足 `unique_ptr` 对可空指针类型的要求；`FileDescriptorTag` 只提供资源类别，不会被创建或解引用。
+
 ```cpp
 std::unique_ptr<int> p1 = std::make_unique<int>(10);
 // auto p2 = p1; // error
@@ -982,32 +1293,76 @@ struct Node {
 
 ---
 
-## 8.5 make_shared 和 shared_ptr(new T)
+## 8.5 `make_shared`、`allocate_shared` 与直接构造
 
-推荐：
+普通对象通常优先使用：
 
 ```cpp
 auto p = std::make_shared<T>();
 ```
 
-不推荐：
+它通常把 `T` 对象和控制块放进同一次内存分配中，而下面的直接构造通常分别分配对象和控制块：
 
 ```cpp
 std::shared_ptr<T> p(new T);
 ```
 
-原因：
+合并分配减少一次分配并改善局部性，也避免裸指针在复杂表达式中短暂暴露。不过两种布局的释放时机不同：
 
-1. `make_shared` 通常把对象和控制块合并为一次分配。
-2. `shared_ptr(new T)` 通常需要分别分配对象和控制块。
-3. `make_shared` 写法更紧凑，能避免裸指针在复杂表达式中短暂暴露。
-4. 合并分配通常有更好的局部性和更低的分配器开销。
+1. 最后一个 `shared_ptr` 消失时，`T` 的析构函数立即执行。
+2. 控制块要等最后一个相关 `weak_ptr` 也消失后才释放。
+3. 合并分配时，对象所在的整块内存也会随控制块保留；对象很大且弱引用长期存在时，分开分配可能更合适。
 
-但如果需要自定义删除器、必须控制对象和控制块的分配方式，或者对象很大且弱引用可能长期存活，直接构造 `shared_ptr` 或使用 `allocate_shared` 可能更合适。
+### `allocate_shared` 是什么
 
-但 `make_shared` 也有注意点：
+`std::allocate_shared<T>(allocator, args...)` 与 `make_shared<T>(args...)` 具有相同的共享所有权语义，区别是由调用者提供 allocator。典型实现会用该 allocator 的重绑定类型为“控制块 + `T` 对象”取得一块内存，再在其中构造 `T`：
 
-如果存在 `weak_ptr`，即使对象已销毁，控制块还在。如果对象和控制块一次分配，整块内存可能要等 weak_ptr 全部销毁后才释放。
+```cpp
+#include <array>
+#include <cstddef>
+#include <memory>
+#include <memory_resource>
+
+struct Task {
+    Task(int task_id, double task_cost)
+        : id(task_id), cost(task_cost) {}
+
+    int id;
+    double cost;
+};
+
+void build_task() {
+    std::array<std::byte, 1024> storage{};
+    std::pmr::monotonic_buffer_resource resource(
+        storage.data(),
+        storage.size(),
+        std::pmr::null_memory_resource());
+
+    {
+        std::pmr::polymorphic_allocator<Task> allocator(&resource);
+        auto task = std::allocate_shared<Task>(allocator, 7, 1.5);
+        std::weak_ptr<Task> observer = task;
+
+        // Task 和控制块使用 resource 提供的存储。
+        // observer、task 都在 resource 销毁前离开作用域。
+        (void)observer;
+    }
+}
+```
+
+这里的 `polymorphic_allocator` 把分配请求转发给 `monotonic_buffer_resource`，初始缓冲区不足时因上游被设为 `null_memory_resource()` 而抛出 `std::bad_alloc`。`allocate_shared` 会把 allocator 状态保存在控制块需要的实现状态中，以便最后释放控制块；因此 allocator 所引用的 `memory_resource` 必须活到最后一个相关 `shared_ptr` 和 `weak_ptr` 销毁之后。
+
+该 allocator 只控制 `Task` 与控制块使用的存储，不会自动改变 `Task` 成员内部的分配器。例如普通 `std::string` 成员仍使用自己的 allocator；若这些内部动态分配也要来自同一资源，需要让成员本身使用相应的 allocator-aware 类型，例如 `std::pmr::string`，并正确传入资源。
+
+三个接口的边界如下：
+
+| 创建方式 | 对象存储 | 控制块存储 | 自定义删除器 |
+| --- | --- | --- | --- |
+| `make_shared<T>(args...)` | 通常与控制块合并 | 实现选择的默认分配机制 | 不支持传入 |
+| `allocate_shared<T>(alloc, args...)` | 通常与控制块合并 | 调用者提供的 allocator | 不支持传入 |
+| `shared_ptr<T>(raw, deleter, alloc)` | 由 `raw` 的来源决定 | `alloc` 只负责控制块 | 支持 |
+
+最后一种形式中的 allocator 不会替 `raw` 分配或释放对象；对象由传入的 deleter 处理。需要管理 `FILE*`、句柄等采用特殊释放函数的资源时，应使用自定义删除器，而不是 `allocate_shared`。
 
 ---
 
@@ -1153,8 +1508,8 @@ std::shared_ptr<const Config> snapshot() {
 
 需要区分 **new 表达式** 与 **`operator new` 分配函数**：
 
-1. new 表达式先调用合适的 `operator new` 获取原始存储，再在其中构造对象。
-2. delete 表达式先调用析构函数，再调用匹配的 `operator delete` 释放存储。
+1. new 表达式先选择合适的 `operator new` 获取原始存储，再在其中构造对象。
+2. 普通 delete 表达式先调用析构函数，再调用为本次删除选出的 `operator delete` 释放存储。
 3. `malloc/free` 只管理原始字节，不建立或结束 C++ 对象的构造/析构语义。
 
 | 项目 | new/delete 表达式 | `malloc/free` |
@@ -1168,7 +1523,156 @@ std::shared_ptr<const Config> snapshot() {
 
 ---
 
-## 9.2 数组必须 delete[]
+## 9.2 `operator new` 与 `operator delete`
+
+以下是最常见全局分配函数的概念签名；实际声明由 `<new>` 提供，默认定义由 C++ 运行库提供：
+
+```cpp
+#include <new>
+
+void* operator new(std::size_t bytes);
+void operator delete(void* memory) noexcept;
+```
+
+`operator new` 接收所需字节数并返回满足要求的原始存储，不知道稍后要调用哪个构造函数；普通 `operator delete` 接收原始存储地址并释放它，也不会主动调用析构函数。普通 throwing `operator new` 分配失败时应抛出 `std::bad_alloc`。
+
+对一个普通、非数组对象，下面的 new 表达式：
+
+```cpp
+Widget* widget = new Widget(1, 2);
+```
+
+可以概念化为：
+
+```cpp
+void* memory = ::operator new(sizeof(Widget));
+
+try {
+    Widget* widget = ::new (memory) Widget(1, 2);
+    // new 表达式的结果是 widget
+} catch (...) {
+    ::operator delete(memory);
+    throw;
+}
+```
+
+其中 `::new (memory) Widget(1, 2)` 是 placement new：它只在已有存储中构造对象。以上代码用于说明阶段划分，不是 new 表达式的完整标准实现；实际编译器还要处理类专属分配函数、对齐、数组、构造失败匹配和 ABI 信息。
+
+在不考虑虚析构、类专属释放函数和 C++20 destroying delete 的简化场景中，对应的 delete 表达式可以概念化为：
+
+```cpp
+if (widget != nullptr) {
+    widget->~Widget();
+    ::operator delete(widget);
+}
+```
+
+因此，直接调用 `::operator delete(widget)` 会跳过析构；只显式调用 `widget->~Widget()` 又不会释放存储。普通代码应使用完整的 `new/delete` 表达式或智能指针，而不是手动拆开这两个阶段。
+
+C++20 的 destroying delete 是高级定制例外：若类提供类似 `static void operator delete(Trace*, std::destroying_delete_t) noexcept` 的释放函数，delete 表达式会把“调用析构并释放存储”的责任交给该函数。它没有改变普通 `operator delete(void*)` 只负责存储的含义。
+
+### 类专属分配函数
+
+类可以定义自己的分配与释放函数。new 表达式创建该类对象时会优先进行类作用域查找：
+
+```cpp
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <new>
+
+class Trace {
+public:
+    explicit Trace(int value) : value_(value) {
+        std::fprintf(stderr, "construct %d\n", value_);
+    }
+
+    ~Trace() {
+        std::fprintf(stderr, "destroy %d\n", value_);
+    }
+
+    static void* operator new(std::size_t bytes) {
+        if (void* memory = std::malloc(bytes)) {
+            std::fprintf(stderr, "allocate %zu bytes\n", bytes);
+            return memory;
+        }
+        throw std::bad_alloc();
+    }
+
+    static void operator delete(void* memory) noexcept {
+        std::fprintf(stderr, "deallocate\n");
+        std::free(memory);
+    }
+
+private:
+    int value_;
+};
+
+int main() {
+    Trace* trace = new Trace(7);
+    delete trace;
+}
+```
+
+典型输出顺序是：
+
+```text
+allocate 4 bytes
+construct 7
+destroy 7
+deallocate
+```
+
+具体字节数由目标 ABI 的 `sizeof(Trace)` 决定。`Trace::operator new` 和 `Trace::operator delete` 只负责 `Trace` 对象自身的存储；构造和析构仍由 new/delete 表达式插入。写成 `::new Trace(7)` 可以显式绕过类专属查找，要求使用全局分配函数。
+
+### 构造函数抛出时谁释放存储
+
+如果分配成功但构造函数抛出异常，对象没有完成构造，不能对它调用完整对象的析构函数；new 表达式会调用与本次分配形式匹配的 `operator delete` 回收存储：
+
+```cpp
+#include <cstddef>
+#include <cstdio>
+#include <new>
+
+class Failing {
+public:
+    Failing() {
+        throw 42;
+    }
+
+    static void* operator new(std::size_t bytes) {
+        return ::operator new(bytes);
+    }
+
+    static void operator delete(void* memory) noexcept {
+        std::fprintf(stderr, "constructor failed: release storage\n");
+        ::operator delete(memory);
+    }
+};
+
+int main() {
+    try {
+        Failing* value = new Failing;
+        (void)value;
+    } catch (int) {
+    }
+}
+```
+
+这里会执行 `Failing::operator delete`，不会执行 `Failing::~Failing()`；已经构造完成的成员和基类子对象则会按构造回退规则自动析构。所谓“匹配”还包括分配函数的额外参数：对齐 new、数组 new 或自定义 placement new 都需要相应的释放形式，编译器不能随意改用一个签名不匹配的函数。
+
+---
+
+## 9.3 数组必须 delete[]
+
+数组表达式使用对应的数组分配函数：
+
+```cpp
+#include <cstddef>
+
+void* operator new[](std::size_t bytes);
+void operator delete[](void* memory) noexcept;
+```
 
 错误：
 
@@ -1185,9 +1689,11 @@ delete[] p;
 
 因为 `new[]` 和 `delete[]` 必须配对。
 
+`new T[n]` 会构造 `n` 个元素；若中途某个构造函数抛出异常，已经完成构造的元素会按相反顺序析构，再释放数组存储。`delete[]` 同样要按相反顺序析构全部元素，然后调用数组释放函数。实现可能在分配块中保存元素数量等额外信息，通常称为 array cookie，但具体布局不是 C++ 标准接口。
+
 ---
 
-## 9.3 malloc 不构造对象
+## 9.4 malloc 不构造对象
 
 错误：
 
@@ -1212,7 +1718,7 @@ placement new 只构造对象，不负责释放底层存储。显式析构也只
 
 ---
 
-## 9.4 分配失败、对齐与匹配的释放函数
+## 9.5 分配失败、对齐与匹配的释放函数
 
 普通 throwing `new` 分配失败时通常抛出 `std::bad_alloc`。全局分配函数可以借助 `std::set_new_handler` 安装失败处理器：
 
@@ -1227,9 +1733,21 @@ std::set_new_handler(on_allocation_failure);
 
 处理器返回后，分配函数可以再次尝试；处理器也可以抛出异常或终止程序。它不是普通业务内存不足处理方案，因为进程接近耗尽内存时，日志、异常对象和恢复操作本身也可能需要分配。
 
-对于过度对齐类型，new 表达式会选择带 `std::align_val_t` 的分配接口：
+若类型的 `alignof(T)` 大于实现的默认 new 对齐值 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`，它就是过度对齐类型。`std::align_val_t` 是 `<new>` 定义的强类型对齐值，new 表达式用它把 `alignof(T)` 传给对齐版本的分配函数，并在删除时选择对应的释放函数：
 
 ```cpp
+#include <cstddef>
+#include <new>
+
+void* operator new(std::size_t bytes, std::align_val_t alignment);
+void operator delete(void* memory, std::align_val_t alignment) noexcept;
+```
+
+例如下面的 `CacheLine` 在默认 new 对齐小于 64 的实现上属于过度对齐类型：
+
+```cpp
+#include <cstddef>
+
 struct alignas(64) CacheLine {
     std::byte data[64];
 };
@@ -1238,7 +1756,7 @@ auto* line = new CacheLine;
 delete line;
 ```
 
-编译器负责让对应的对齐分配和释放函数匹配。自行定义类专属 `operator new/delete` 时，需要同时考虑普通、数组、对齐和可能的 sized delete 形式，不要把来自一种分配接口的指针交给另一种释放接口。
+这里的分配调用可理解为额外传入 `std::align_val_t{alignof(CacheLine)}`。编译器负责让对应的对齐分配和释放函数匹配。自行定义类专属 `operator new/delete` 时，需要同时考虑普通、数组、对齐和可能的 sized delete 形式，不要把来自一种分配接口的指针交给另一种释放接口。
 
 还有一个容易遗漏的异常路径：
 
@@ -1250,639 +1768,7 @@ Widget* p = new Widget(args...);
 
 ---
 
-# 10. 虚函数、虚表、多态
-
-```mermaid
-flowchart LR
-    P["Base* p"] --> O["实际对象 Derived"]
-    O --> V["vptr"]
-    V --> T["Derived vtable"]
-    T --> F["Derived::foo"]
-    P -. "p->foo()" .-> F
-```
-
-
-## 10.1 虚函数实现原理
-
-C++ 标准规定动态分派的行为，不规定对象里必须有 vptr，也不规定 vtable 的布局。下面使用 Linux 上常见的 Itanium C++ ABI 说明 Clang/LLVM 的典型实现：
-
-1. Clang 按 ABI 为多态类生成 vtable，重写函数占据与基类虚函数相同的逻辑槽位。
-2. 对象中的 vptr 指向其当前动态类型的 vtable address point。
-3. 构造函数负责写入 vptr；构造、析构进入不同子对象阶段时，vptr 也会随之改变。
-4. 虚调用从对象读取 vptr，再从固定槽位读取函数地址，最后执行间接调用。
-
-```cpp
-struct Base {
-    virtual int value() const;
-};
-
-struct Derived final : Base {
-    int value() const override;
-};
-
-int Base::value() const { return 1; }
-int Derived::value() const { return 2; }
-
-int dispatch(const Base& object) {
-    return object.value();
-}
-
-int known_type() {
-    Derived object;
-    return dispatch(object);
-}
-```
-
-可以生成未优化和优化后的 LLVM IR：
-
-```bash
-clang++ -std=c++20 -O0 -S -emit-llvm virtual.cpp -o virtual-O0.ll
-clang++ -std=c++20 -O2 -S -emit-llvm virtual.cpp -o virtual-O2.ll
-```
-
-### vtable 与 vptr 是怎样生成的
-
-上例在 x86-64 Itanium ABI 下会产生类似的 vtable 全局常量。下面删去了链接属性，并给符号补上注释：
-
-```llvm
-@_ZTV7Derived = constant [3 x ptr] [
-    ptr null,                       ; offset-to-top = 0
-    ptr @_ZTI7Derived,              ; Derived 的 RTTI/typeinfo
-    ptr @_ZNK7Derived5valueEv       ; Derived::value() const
-]
-```
-
-这里的 `ptr null` 不是“空的虚函数地址”。Itanium ABI 把 offset-to-top 定义为有符号的 `ptrdiff_t`；这份 LLVM IR 为了把等宽的 vtable 表项放进 `ptr` 数组，用全零的 `ptr null` 表示数值 0。若某个次级 vtable 需要记录 `-8`，Clang 可能写成 `ptr inttoptr (i64 -8 to ptr)`。
-
-`_ZTV7Derived` 是 `Derived` 的 vtable，`_ZTI7Derived` 是 RTTI 描述对象。表的起始地址不一定就是对象保存的地址；这里的 vptr 指向第 3 项形成的 address point，因此“虚函数槽位 0”就是 `Derived::value()`：
-
-```mermaid
-flowchart LR
-    subgraph OBJECT["Derived object"]
-        VPTR["vptr"]
-    end
-
-    subgraph VTABLE["@_ZTV7Derived（vtable 起始位置）"]
-        direction TB
-        OFFSET["表项 0<br/>offset-to-top = 0<br/>LLVM IR：ptr null"]
-        RTTI["表项 1<br/>RTTI：@_ZTI7Derived"]
-        TARGET["表项 2<br/>&Derived::value<br/>address point<br/>相对 vptr：虚函数槽位 0"]
-        OFFSET ~~~ RTTI
-        RTTI ~~~ TARGET
-    end
-
-    VPTR ==>|"保存 address point 的地址"| TARGET
-```
-
-offset-to-top 用于从“保存当前 vptr 的位置”回到最派生完整对象的起始地址：
-
-```text
-完整对象起始地址 = 当前 vptr 所在地址 + offset-to-top
-```
-
-上例只有单继承，`Derived` 的主 vptr 就在完整对象起始位置，所以偏移是 0。多继承时，次要基类子对象可能位于非零偏移；下面假设典型 64 位布局中的 `Right` 子对象位于 `Both + 8`：
-
-```mermaid
-flowchart LR
-    subgraph BOTH["Both complete object"]
-        direction TB
-        LEFT["Left 子对象<br/>位置：top + 0<br/>primary vptr"]
-        RIGHT["Right 子对象<br/>位置：top + 8<br/>secondary vptr"]
-    end
-
-    TOP["Both 完整对象起始地址 top"]
-    LEFT -->|"offset-to-top = 0"| TOP
-    RIGHT -->|"offset-to-top = -8"| TOP
-```
-
-因此，从 `Right*` 执行 `dynamic_cast<void*>` 时，运行时可以读取次级 vtable 中的 `-8`，把当前地址减去 8 字节并得到 `Both` 的起始地址。`+8` 和 `-8` 是这个 ABI 布局示例的结果，不是 C++ 标准规定的固定偏移。
-
-在 x86-64 上，Clang 对该转换生成的核心 IR 如下，省略了空指针分支：
-
-```llvm
-%vptr = load ptr, ptr %right
-%offset_slot = getelementptr i8, ptr %vptr, i64 -16
-%offset_to_top = load i64, ptr %offset_slot
-%top = getelementptr i8, ptr %right, i64 %offset_to_top
-```
-
-`-16` 表示从 address point 向前跨过两个 8 字节表项，定位 offset-to-top 表项；随后加载出的值才是这个 `Right` 子对象对应的 `-8`，最后用它调整 `%right`。
-
-Clang 在构造函数中生成的核心操作可简化为：
-
-```llvm
-%address_point = getelementptr [3 x ptr], ptr @_ZTV7Derived, i64 0, i64 2
-store ptr %address_point, ptr %this
-```
-
-构造 `Derived` 时，`Base` 构造函数先把 vptr 写成 `Base` 的 address point，随后 `Derived` 构造函数再写成 `Derived` 的 address point。这也解释了为什么基类构造函数中的虚调用只会到达基类版本：当时派生类对应的 vptr 尚未建立。层级中存在实际析构过程时，vptr 通常按相反方向切换。
-
-### RTTI/typeinfo 保存什么
-
-RTTI（Run-Time Type Information）是 C++ 的运行期类型识别机制，`std::type_info` 是标准库提供的查询接口；`_ZTI7Derived` 则是 Itanium ABI 为 `Derived` 生成的 typeinfo 全局对象。各个 `Derived` 实例不会复制这份信息：就类型识别而言，每个多态对象通过自身的 vptr 间接找到通常由链接器合并为一份的 typeinfo。
-
-Itanium ABI 使用不同的运行时描述类型表示不同继承结构：
-
-| ABI 描述类型 | 适用结构 | 主要内容 |
-| --- | --- | --- |
-| `__class_type_info` | 没有基类的类 | 类型身份和实现定义的类型名称 |
-| `__si_class_type_info` | 单个 public、非虚基类 | 直接基类的 typeinfo 指针 |
-| `__vmi_class_type_info` | 多继承、虚继承等复杂层级 | 层级标志、基类数量，以及每个基类的 typeinfo、偏移和 public/virtual 标记 |
-
-具体到上面的 `Derived : Base`，`_ZTI7Derived` 通常是一个 `__si_class_type_info` 对象：它包含 typeinfo 元对象自己的运行时描述类 vptr、指向修饰类型名 `_ZTS7Derived` 的指针，以及指向直接基类 `_ZTI4Base` 的 typeinfo 指针。这里的“typeinfo 自己的 vptr”属于 ABI 运行库实现，不是每个 `Derived` 实例中的 vptr。
-
-这些数据足以描述“当前动态类型是谁、目标基类是否存在唯一且可访问的路径、目标子对象位于什么偏移”，但不包含成员变量名称、成员函数列表或源码结构，因此 RTTI 不是反射系统。
-
-RTTI 主要服务于：
-
-1. `typeid(expression)` 返回表示静态类型或动态类型的 `std::type_info`。
-2. `dynamic_cast` 检查向下转换和横向转换是否合法，并把指针调整到目标基类子对象。
-3. `dynamic_cast<void*>` 结合 vtable 中的 offset-to-top 找到最派生对象的起始地址。
-4. 典型 C++ ABI 在异常匹配中也会复用 typeinfo 来比较抛出类型与捕获类型。
-
-普通虚函数分派不读取 RTTI：它只按固定槽位从 vtable 取得函数地址。关闭 RTTI 后，虚函数仍能工作；需要运行期类型识别的 `typeid`、向下或横向 `dynamic_cast` 则不能照常使用。
-
-### 虚调用怎样变成 LLVM IR
-
-`dispatch()` 在 `-O0` 下的核心 IR 可以化简为：
-
-```llvm
-define i32 @dispatch(ptr %object) {
-    %vptr = load ptr, ptr %object
-    %slot = getelementptr ptr, ptr %vptr, i64 0
-    %callee = load ptr, ptr %slot
-    %result = call i32 %callee(ptr %object)
-    ret i32 %result
-}
-```
-
-四条指令分别完成：
-
-1. 从 `Base` 子对象的起始位置读取 vptr。
-2. 根据编译期确定的槽位编号定位表项。
-3. 读取该表项保存的函数地址。
-4. 间接调用函数，并把 `%object` 作为隐藏的 `this` 参数传入。
-
-`Base::value()` 与 `Derived::value()` 使用同一个槽位编号。`dispatch()` 不需要判断对象是什么类型；`Derived` 构造时写入的 vptr 已经让槽位 0 指向 `Derived::value()`。
-
-LLVM IR 没有专门的“虚函数调用”指令。Clang 前端负责依据 C++ ABI 生成 vtable、vptr 写入和槽位访问，LLVM 优化器看到的是全局常量、指针加载和普通的间接 `call`，目标后端再把它降低为相应架构的间接调用指令。
-
-### 去虚化发生在哪里
-
-`dispatch(const Base&)` 面向未知调用者时仍需保留间接调用；但 `known_type()` 中的对象明确是 `final` 的 `Derived`。在 `-O2` 下，优化器可以内联 `dispatch()`、证明目标函数，再内联 `Derived::value()` 并常量折叠：
-
-```llvm
-define i32 @known_type() {
-    ret i32 2
-}
-```
-
-这种变换称为去虚化。`final`、可见的具体对象类型、内联和 LTO 都可能增加去虚化机会，但源码语义不能依赖某次编译一定完成该优化。
-
----
-
-## 10.2 为什么基类析构函数要 virtual
-
-错误：
-
-```cpp
-class Base {
-public:
-    ~Base() {}
-};
-
-class Derived : public Base {
-public:
-    ~Derived() {}
-};
-
-Base* p = new Derived();
-delete p; // UB
-```
-
-如果通过基类指针删除派生类对象，而基类析构函数不是 virtual，会产生未定义行为。
-
-正确：
-
-```cpp
-class Base {
-public:
-    virtual ~Base() = default;
-};
-```
-
-
-
-> 如果类允许通过基类指针销毁派生对象，基类析构函数必须是 `virtual`。另一种设计是把基类析构函数设为 `protected` 且非虚，从接口层禁止通过基类指针执行 `delete`。
-
----
-
-## 10.3 构造函数不能是 virtual
-
-原因：
-
-1. 构造对象时，对象还没有完全形成。
-2. 虚函数依赖对象的动态类型。
-3. 构造函数负责建立对象，包括 vptr。
-4. 所以构造函数不能虚。
-
----
-
-## 10.4 析构函数可以 virtual
-
-析构函数可以是虚函数，而且多态基类通常必须是虚析构。
-
-```cpp
-class Base {
-public:
-    virtual ~Base() = default;
-};
-```
-
----
-
-# 11. 构造析构中的虚函数行为
-
-```mermaid
-flowchart LR
-    A["开始构造 Derived"] --> B["先构造 Base 子对象"]
-    B --> C["Base 构造函数中的虚调用<br/>分派到 Base 版本"]
-    C --> D["再构造 Derived 部分"]
-    D --> E["Derived 完整存活期<br/>虚调用可分派到 Derived"]
-    E --> F["先析构 Derived 部分"]
-    F --> G["Base 析构函数中的虚调用<br/>仍分派到 Base 版本"]
-    G --> H["对象生命周期结束"]
-```
-
-
-高频陷阱：
-
-```cpp
-class Base {
-public:
-    Base() { foo(); }
-    virtual ~Base() { foo(); }
-
-    virtual void foo() {
-        std::cout << "Base::foo\n";
-    }
-};
-
-class Derived : public Base {
-public:
-    void foo() override {
-        std::cout << "Derived::foo\n";
-    }
-};
-
-Derived d;
-```
-
-输出：
-
-```text
-Base::foo
-Base::foo
-```
-
-原因：
-
-1. 构造 Base 部分时，Derived 部分还没构造完成。
-2. 析构 Base 部分时，Derived 部分已经析构完成。
-3. 所以在 Base 构造/析构中调用虚函数，不会动态派发到 Derived。
-
-结论：
-
-> 构造和析构函数中调用虚函数，调用的是当前正在构造或析构的类版本，不会调用派生类版本。
-
----
-
-## 11.1 避免在构造和析构阶段依赖虚分派
-
-构造和析构期间的虚调用不会进入“尚未构造”或“已经析构”的派生部分。如果在构造或析构期间的虚调用最终分派到纯虚函数，行为未定义；即使纯虚函数在类外提供了函数体，也不应依赖这种调用路径。
-
-更稳妥的设计包括：
-
-1. 构造完成后再调用虚函数。
-2. 使用工厂函数执行“两阶段初始化”。
-3. 将基类构造所需行为通过普通参数、策略对象或非虚辅助函数传入。
-
----
-
-## 11.2 对象切片与 RTTI
-
-```cpp
-struct Base {
-    virtual ~Base() = default;
-    virtual void run() const {}
-};
-
-struct Derived : Base {
-    int extra = 42;
-    void run() const override {}
-};
-
-void consume(Base value); // 按值接收会切片
-
-Derived d;
-consume(d); // 只复制 Base 子对象，Derived 部分丢失
-```
-
-需要保留多态时，应使用引用或指针：
-
-```cpp
-void consume(const Base& value);
-```
-
-切片后的新对象就是独立的 `Base`，RTTI 无法恢复已经丢失的 `Derived::extra`。引用或指针仍指向原来的完整对象，因此可以观察动态类型。
-
-### `typeid` 与 `std::type_info`
-
-```cpp
-#include <cstddef>
-#include <typeinfo>
-
-Derived derived;
-Base& reference = derived;
-Base sliced = derived;
-
-const std::type_info& dynamic_info = typeid(reference);
-bool reference_is_derived = (dynamic_info == typeid(Derived)); // true
-bool sliced_is_base = (typeid(sliced) == typeid(Base));         // true
-
-std::size_t hash = dynamic_info.hash_code();
-const char* name = dynamic_info.name(); // 内容由实现决定，可能是修饰后的名称
-```
-
-`typeid(reference)` 的表达式是多态类型的左值，因此查询对象的动态类型 `Derived`；`sliced` 本身已经是 `Base` 对象，所以结果是 `Base`。对非多态表达式，`typeid` 只反映编译期静态类型。`name()` 的格式和 `hash_code()` 的具体值都不应持久化，也不能作为跨编译器、跨进程协议；需要把类型作为关联容器的键时，可以使用 `std::type_index` 包装 `std::type_info`。
-
-若 `base_ptr == nullptr`，表达式 `typeid(*base_ptr)` 在 `Base` 为多态类型时会抛出 `std::bad_typeid`，而不是实际解引用空指针。
-
-### `dynamic_cast` 如何检查和调整指针
-
-向下转换从基类接口恢复更具体的派生类型：
-
-```cpp
-if (auto* derived = dynamic_cast<Derived*>(base_ptr)) {
-    use(*derived);
-}
-```
-
-RTTI 还支持多继承中的横向转换：
-
-```cpp
-struct Drawable {
-    virtual ~Drawable() = default;
-};
-
-struct Serializable {
-    virtual ~Serializable() = default;
-};
-
-struct Asset final : Drawable, Serializable {};
-
-Asset asset;
-Drawable* drawable = &asset;
-
-Serializable* serializable = dynamic_cast<Serializable*>(drawable);
-void* complete_object = dynamic_cast<void*>(drawable);
-
-// serializable 指向 asset 内部的 Serializable 子对象，地址可能经过调整。
-// complete_object 指向最派生的 Asset 对象起始位置。
-```
-
-运行库会根据源对象的 typeinfo 查找目标类型，确认存在唯一的 public 继承路径，再计算目标子对象地址。对指针转换失败返回 `nullptr`；对引用转换失败抛出 `std::bad_cast`。普通的派生类到基类转换通常可由编译器静态完成，不需要这次运行期搜索。
-
-如果工作可以直接通过虚函数接口完成，通常不需要先判断具体类型；频繁向下转换往往意味着基类接口没有表达完整行为。
-
----
-
-# 12. 重载决议、重写与名字查找
-
-## 12.1 overload
-
-重载发生在同一作用域，函数名相同，参数不同。
-
-```cpp
-void f(int);
-void f(double);
-```
-
----
-
-## 12.2 override
-
-重写发生在继承体系中：
-
-```cpp
-class Base {
-public:
-    virtual void f(int);
-};
-
-class Derived : public Base {
-public:
-    void f(int) override;
-};
-```
-
-推荐永远写 `override`，让编译器帮你检查。
-
----
-
-## 12.3 name hiding
-
-派生类中声明同名函数，会隐藏基类所有同名函数。
-
-```cpp
-class Base {
-public:
-    virtual void foo(int);
-};
-
-class Derived : public Base {
-public:
-    void foo(double);
-};
-```
-
-此时：
-
-```cpp
-Derived d;
-d.foo(1); // 调用 Derived::foo(double)
-```
-
-`Base::foo(int)` 被隐藏了。
-
-修复：
-
-```cpp
-class Derived : public Base {
-public:
-    using Base::foo;
-
-    void foo(double);
-};
-```
-
----
-
-## 12.4 重载决议怎样选出一个函数
-
-重载决议不是“看到最像的参数就调用”，而是按阶段完成：
-
-1. 名字查找形成候选函数集合；
-2. 根据参数个数、默认参数、约束等筛出可行函数；
-3. 为每个实参计算隐式转换序列；
-4. 比较所有参数的转换质量，选出唯一的最佳可行函数；
-5. 最后再检查被选函数是否已删除、是否可访问，以及调用本身是否满足其他语义限制。
-
-常见标准转换等级可以简化为：
-
-```text
-精确匹配  >  提升  >  一般转换
-```
-
-不同大类之间通常是：
-
-```text
-标准转换  >  用户定义转换  >  省略号 ...
-```
-
-```cpp
-void pick(int);
-void pick(long);
-void pick(double);
-
-short value = 1;
-pick(value); // short -> int 是整型提升，选择 pick(int)
-```
-
-不能只看“最终都能变成目标类型”。例如从类类型转换到另一个类型时，一条用户定义转换序列最多包含一次用户定义转换；否则转换链可能无限递归，也无法稳定排序。
-
-如果两个候选对不同参数各有优势，通常没有唯一最佳函数：
-
-```cpp
-void mix(int, double);
-void mix(double, int);
-
-// mix(1, 1); // 两个候选各在一个参数上更好，调用有歧义
-```
-
-当转换质量相同时，还会继续比较非模板与模板、模板偏序、约束强弱等规则。不能把“非模板一定胜过模板”当成无条件规则：只有候选在前面的比较中无法分出胜负时，后续规则才参与决胜。
-
-被删除函数仍会参加重载决议：
-
-```cpp
-void consume(int) = delete;
-void consume(double);
-
-// consume(1); // 最佳匹配是已删除的 consume(int)，因此编译失败
-```
-
-这类设计可以显式禁止某些参数类型，而不是让它们悄悄转换到另一个重载。
-
----
-
-## 12.5 隐式转换、转换构造函数与 `explicit`
-
-只要构造函数能用一个实参调用，它就可能定义从实参类型到类类型的隐式转换；这也包括其余参数都有默认值的多参数构造函数。
-
-```cpp
-class Meter {
-public:
-    explicit Meter(double value) : value_(value) {}
-
-private:
-    double value_;
-};
-
-Meter a(1.5);      // 直接初始化，OK
-Meter b{1.5};      // 直接列表初始化，OK
-// Meter c = 1.5;  // copy-initialization 不考虑 explicit 构造函数
-```
-
-转换运算符定义从类类型到其他类型的转换：
-
-```cpp
-class FileHandle {
-public:
-    explicit operator bool() const noexcept {
-        return fd_ >= 0;
-    }
-
-private:
-    int fd_ = -1;
-};
-
-if (handle) { // contextual conversion to bool，允许使用 explicit operator bool
-    // handle 有效
-}
-```
-
-`explicit` 的目的不是禁止显式转换，而是防止转换在参数传递、返回值、赋值和重载决议中悄悄发生。C++20 的 `explicit(condition)` 还能让模板构造函数根据类型条件决定是否允许隐式转换。
-
----
-
-## 12.6 运算符重载、友元与 ADL
-
-运算符重载允许用户类型沿用表达式语法，但不能：
-
-1. 创造新的运算符；
-2. 改变运算符优先级和结合性；
-3. 改变内建运算符的操作数个数；
-4. 让重载后的 `&&`、`||` 获得内建版本的短路求值语义。
-
-对称的二元运算通常适合写成非成员函数，让左右操作数都能参加转换：
-
-```cpp
-class Vec2 {
-public:
-    Vec2(double x, double y) : x_(x), y_(y) {}
-
-    Vec2& operator+=(const Vec2& rhs) {
-        x_ += rhs.x_;
-        y_ += rhs.y_;
-        return *this;
-    }
-
-    friend Vec2 operator+(Vec2 lhs, const Vec2& rhs) {
-        lhs += rhs;
-        return lhs;
-    }
-
-    friend bool operator==(const Vec2&, const Vec2&) = default;
-
-private:
-    double x_;
-    double y_;
-};
-```
-
-这里的 friend 函数在类内定义，但不是成员函数。普通的非限定名字查找不一定找到它；当实参含有 `Vec2` 时，ADL（argument-dependent lookup）会到 `Vec2` 所在的关联作用域查找，因此 `a + b` 能找到该函数。这种写法常称为 hidden friend：运算符只在相关类型参与调用时进入候选集，可以减少无关重载污染。
-
-友元只授予访问权限，不建立继承关系，也不具有传递性。应优先通过公开接口实现运算符，只有确实需要访问内部表示时才使用 friend。
-
----
-
-## 12.7 `nullptr`、`NULL` 与重载
-
-`nullptr` 的类型是 `std::nullptr_t`，可以转换为任意对象指针或成员指针，但不会像整数 `0` 一样参加普通整型重载：
-
-```cpp
-void open(int flags);
-void open(const char* path);
-
-open(0);        // 选择 open(int)
-open(nullptr);  // 选择 open(const char*)
-```
-
-`NULL` 在不同实现中可能只是整数常量宏，因此它在重载场景中不能稳定表达“空指针”。现代 C++ 接口应使用 `nullptr`；如果多个不同指针类型重载同时可行，传入 `nullptr` 仍可能产生歧义，需要显式转换为目标指针类型。
-
----
-
-# 13. 继承、对象模型与内存布局
+# 10. 继承与对象内存布局
 
 ```mermaid
 flowchart TD
@@ -1895,7 +1781,7 @@ flowchart TD
 ```
 
 
-## 13.1 类对象大小由什么决定
+## 10.1 类对象大小由什么决定
 
 C++ 标准规定对象语义和若干布局约束，但不会统一规定普通类、虚表和虚继承的具体内存布局。下面内容描述主流 ABI 的典型实现。
 
@@ -1943,7 +1829,7 @@ int main() {
 
 ---
 
-## 13.2 空类大小
+## 10.2 空类大小
 
 ```cpp
 struct A {};
@@ -1962,7 +1848,7 @@ assert(&a1 != &a2);
 
 ---
 
-## 13.3 空基类优化 EBO
+## 10.3 空基类优化 EBO
 
 ```cpp
 struct Empty {};
@@ -1978,7 +1864,7 @@ struct X : Empty {
 
 ---
 
-## 13.4 对齐示例
+## 10.4 对齐示例
 
 ```cpp
 struct S {
@@ -2021,7 +1907,7 @@ total: 8
 
 ---
 
-## 13.5 成员访问与继承方式
+## 10.5 成员访问与继承方式
 
 成员自身的 `public/protected/private` 和继承列表中的访问说明符解决的是两个不同问题：
 
@@ -2057,11 +1943,48 @@ public:
 };
 ```
 
+连续使用 private 继承时，访问权限按继承链逐层检查。假设 `B` private 继承 `A`，`C` 又 private 继承 `B`：第一次 private 继承已经使 `A` 的 public、protected 成员成为 `B` 的 private 成员，因此 `C` 不能直接访问它们；第二次 private 继承并不会删除这些成员，`C` 对象中仍然包含 `A` 基类子对象。
+
+```cpp
+struct A {
+    void foo() {} // public
+};
+
+struct B : private A {};
+
+struct C : private B {
+    void test() {
+        // foo(); // error：foo 在 B 中已经是 private
+    }
+};
+
+C object;
+// object.foo();               // error
+// A* base = &object;          // error：继承路径不可访问
+```
+
+这不是“彻底无法使用”：中间类可以通过 `using` 调整访问级别，或者用 public/protected 成员函数包装基类能力。后续派生类若还要向外公开，需要在自己这一层再次开放：
+
+```cpp
+struct B : private A {
+protected:
+    using A::foo; // 向 B 的派生类开放
+};
+
+struct C : private B {
+public:
+    using B::foo; // 再向 C 的调用者开放
+};
+
+C object;
+object.foo(); // OK
+```
+
 public 继承通常表达 is-a 和可替换关系；private 继承更接近“借用基类实现”。如果不需要覆盖虚函数、访问 protected 成员或利用 EBO，组合通常比 private 继承更直接。
 
 ---
 
-## 13.6 多继承、菱形继承与虚继承
+## 10.6 多继承、菱形继承与虚继承
 
 普通菱形继承会包含两份共同基类子对象：
 
@@ -2121,7 +2044,7 @@ struct SmartDevice : Input {
 
 ---
 
-## 13.7 多继承中的指针调整与 thunk
+## 10.7 多继承中的指针调整与 thunk
 
 多继承对象中的不同基类子对象可能位于不同偏移：
 
@@ -2152,7 +2075,341 @@ Right* right = &object;
 
 ---
 
-## 13.8 抽象类、纯虚析构、`final` 与协变返回
+# 11. 虚函数、虚表、RTTI 与运行期多态
+
+```mermaid
+flowchart LR
+    P["Base* p"] --> O["实际对象 Derived"]
+    O --> V["vptr"]
+    V --> T["Derived vtable"]
+    T --> F["Derived::foo"]
+    P -. "p->foo()" .-> F
+```
+
+
+## 11.1 虚函数分派原理
+
+C++ 标准规定动态分派的行为，不规定对象里必须有 vptr，也不规定 vtable 的布局。下面使用 Linux 上常见的 Itanium C++ ABI 说明 Clang/LLVM 的典型实现：
+
+1. Clang 按 ABI 为多态类生成 vtable，重写函数占据与基类虚函数相同的逻辑槽位。
+2. 对象中的 vptr 指向其当前动态类型的 vtable address point。
+3. 构造函数负责写入 vptr；构造、析构进入不同子对象阶段时，vptr 也会随之改变。
+4. 虚调用从对象读取 vptr，再从固定槽位读取函数地址，最后执行间接调用。
+
+```cpp
+struct Base {
+    virtual int value() const;
+};
+
+struct Derived final : Base {
+    int value() const override;
+};
+
+int Base::value() const { return 1; }
+int Derived::value() const { return 2; }
+
+int dispatch(const Base& object) {
+    return object.value();
+}
+
+int known_type() {
+    Derived object;
+    return dispatch(object);
+}
+```
+
+可以生成未优化和优化后的 LLVM IR：
+
+```bash
+clang++ -std=c++20 -O0 -S -emit-llvm virtual.cpp -o virtual-O0.ll
+clang++ -std=c++20 -O2 -S -emit-llvm virtual.cpp -o virtual-O2.ll
+```
+
+### vtable 与 vptr 是怎样生成的
+
+上例在 x86-64 Itanium ABI 下会产生类似的 vtable 全局常量。下面删去了链接属性，并给符号补上注释：
+
+```llvm
+@_ZTV7Derived = constant [3 x ptr] [
+    ptr null,                       ; offset-to-top = 0
+    ptr @_ZTI7Derived,              ; Derived 的 RTTI/typeinfo
+    ptr @_ZNK7Derived5valueEv       ; Derived::value() const
+]
+```
+
+第一项是 offset-to-top：从当前基类子对象中保存 vptr 的位置，回到最派生完整对象（整个 `Derived` 或 `Both` 对象）起始地址的有符号字节偏移：
+
+```text
+最派生完整对象起始地址 = 当前 vptr 所在地址 + offset-to-top
+```
+
+上例只有单继承，`Derived` 的主 vptr 位于完整对象起始位置，因此 offset-to-top 为 0。这里的 `ptr null` 不是“空的虚函数地址”：Itanium ABI 将 offset-to-top 定义为 `ptrdiff_t`，而这份 LLVM IR 为了把等宽表项放进 `ptr` 数组，用全零的 `ptr null` 表示数值 0。非零负偏移则可能用 `ptr inttoptr (...)` 编码，下面的多继承示例会展示具体数值。
+
+第二项 `_ZTI7Derived` 指向 `Derived` 的 RTTI/typeinfo，第三项保存 `Derived::value()` 的函数地址。`_ZTV7Derived` 是整个 vtable 的起始符号，但对象中的 vptr 不一定保存这个起始地址；这里它指向第 3 项形成的 address point，因此相对 vptr 的“虚函数槽位 0”就是 `Derived::value()`：
+
+```mermaid
+flowchart LR
+    subgraph OBJECT["Derived object"]
+        VPTR["vptr"]
+    end
+
+    subgraph VTABLE["@_ZTV7Derived（vtable 起始位置）"]
+        direction TB
+        OFFSET["表项 0<br/>offset-to-top = 0<br/>LLVM IR：ptr null"]
+        RTTI["表项 1<br/>RTTI：@_ZTI7Derived"]
+        TARGET["表项 2<br/>&Derived::value<br/>address point<br/>相对 vptr：虚函数槽位 0"]
+        OFFSET ~~~ RTTI
+        RTTI ~~~ TARGET
+    end
+
+    VPTR ==>|"保存 address point 的地址"| TARGET
+```
+
+Clang 在构造函数中写入 vptr 的核心操作可简化为：
+
+```llvm
+%address_point = getelementptr [3 x ptr], ptr @_ZTV7Derived, i64 0, i64 2
+store ptr %address_point, ptr %this
+```
+
+构造 `Derived` 时，`Base` 构造函数先把 vptr 写成 `Base` 的 address point，随后 `Derived` 构造函数再写成 `Derived` 的 address point。这也解释了为什么基类构造函数中的虚调用只会到达基类版本：当时派生类对应的 vptr 尚未建立。层级中存在实际析构过程时，vptr 通常按相反方向切换。
+
+#### 多继承中的 offset-to-top
+
+主 vptr 的 offset-to-top 通常为 0；多继承中的次要基类子对象可能位于非零偏移。下面假设某个 x86-64 Itanium ABI 布局将 `Right` 子对象放在 `Both` 起始地址之后 8 字节：
+
+```mermaid
+flowchart LR
+    subgraph OBJECT_MEMORY["① 对象内存：每个 Both 实例各有一份"]
+        direction TB
+        subgraph LEFT_SUBOBJECT["Left 子对象：地址 top + 0"]
+            LEFT_VPTR["对象字段<br/>primary vptr"]
+        end
+        subgraph RIGHT_SUBOBJECT["Right 子对象：地址 top + 8"]
+            RIGHT_VPTR["对象字段<br/>secondary vptr"]
+        end
+        LEFT_VPTR ~~~ RIGHT_VPTR
+    end
+
+    subgraph VTABLE_MEMORY["② vtable 存储区：程序只读数据，同动态类型对象共享"]
+        direction TB
+        subgraph PRIMARY_VTABLE["Primary vtable"]
+            direction TB
+            PRIMARY_OFFSET["vtable 元数据<br/>相对 address point：[-2]<br/>offset-to-top = 0"]
+            PRIMARY_RTTI["vtable 元数据<br/>相对 address point：[-1]<br/>RTTI：@_ZTI4Both"]
+            PRIMARY_SLOT["vtable 函数槽<br/>相对 address point：[0]<br/>Both::left 对应入口"]
+            PRIMARY_OFFSET ~~~ PRIMARY_RTTI
+            PRIMARY_RTTI ~~~ PRIMARY_SLOT
+        end
+
+        subgraph SECONDARY_VTABLE["Right secondary vtable"]
+            direction TB
+            SECONDARY_OFFSET["vtable 元数据<br/>相对 address point：[-2]<br/>offset-to-top = -8"]
+            SECONDARY_RTTI["vtable 元数据<br/>相对 address point：[-1]<br/>RTTI：@_ZTI4Both"]
+            SECONDARY_SLOT["vtable 函数槽<br/>相对 address point：[0]<br/>Right 虚函数对应入口"]
+            SECONDARY_OFFSET ~~~ SECONDARY_RTTI
+            SECONDARY_RTTI ~~~ SECONDARY_SLOT
+        end
+    end
+
+    LEFT_VPTR ==>|"保存 primary address point 的地址"| PRIMARY_SLOT
+    RIGHT_VPTR ==>|"保存 secondary address point 的地址"| SECONDARY_SLOT
+    RIGHT_VPTR -. "dynamic_cast&lt;void*&gt; 经 vptr 读取 [-2]" .-> SECONDARY_OFFSET
+    SECONDARY_OFFSET --> CALC["对象地址调整<br/>(top + 8) + (-8) = top"]
+
+    classDef objectField fill:#172554,stroke:#60a5fa,color:#eff6ff;
+    classDef tableEntry fill:#3f1d2e,stroke:#f472b6,color:#fdf2f8;
+    classDef calculation fill:#052e16,stroke:#4ade80,color:#f0fdf4;
+    class LEFT_VPTR,RIGHT_VPTR objectField;
+    class PRIMARY_OFFSET,PRIMARY_RTTI,PRIMARY_SLOT,SECONDARY_OFFSET,SECONDARY_RTTI,SECONDARY_SLOT tableEntry;
+    class CALC calculation;
+```
+
+图中区域 ① 才是每个 `Both` 实例实际占用的对象内存，其中只画出了两个基类子对象各自的 vptr 字段，其他数据成员与填充均被省略。区域 ② 是编译器生成的 vtable group，通常位于程序的只读静态数据中并由相同动态类型的对象共享；offset-to-top、RTTI 和虚函数入口都在这里，不是 `Both` 对象的数据成员。
+
+| 图中内容 | 位于哪里 | 是否由每个对象单独保存 |
+| --- | --- | --- |
+| `primary vptr`、`secondary vptr` | `Both` 对象内的 `Left`、`Right` 基类子对象 | 是 |
+| offset-to-top、RTTI 指针 | primary/secondary vtable 的 address point 之前 | 否，同动态类型对象共享 |
+| 虚函数入口 | primary/secondary vtable 的函数槽 | 否，同动态类型对象共享 |
+
+所以对象中并没有嵌入整张 vtable：对象只保存一个或多个 vptr，每个 vptr 再指向共享 vtable 中与该基类子对象对应的 address point。
+
+两个 vptr 保存的都是各自 address point 的地址，即图中的 `[0]` 函数槽位置，而不是 vtable group 的起始地址。运行时可以从 address point 使用负索引访问前面的元数据：`[-1]` 是 RTTI，`[-2]` 是 offset-to-top。
+
+这里的 `-8` 调整的是**对象地址**，不是 vtable 地址：从 `Right*` 执行 `dynamic_cast<void*>` 时，运行时先加载 secondary vptr，再从 address point 的 `[-2]` 读取 `-8`，最后计算 `(top + 8) + (-8)`，得到完整 `Both` 对象的起始地址。该次级 vtable 表项在 LLVM IR 中可能编码为 `ptr inttoptr (i64 -8 to ptr)`。`+8` 和 `-8` 都是这个具体 ABI 布局的结果，不是 C++ 标准规定的固定值。
+
+在 x86-64 上，Clang 对该转换生成的核心 IR 如下，省略了空指针分支：
+
+```llvm
+%vptr = load ptr, ptr %right
+%offset_slot = getelementptr i8, ptr %vptr, i64 -16
+%offset_to_top = load i64, ptr %offset_slot
+%top = getelementptr i8, ptr %right, i64 %offset_to_top
+```
+
+两个负数属于不同的坐标系：
+
+| 数值 | 作用对象 | 含义 |
+| ---: | --- | --- |
+| `-16` | vtable 地址 | 从 address point 向前跨过两个 8 字节表项，找到 offset-to-top 元数据 |
+| 加载得到的 `-8` | 对象地址 | 从 `Right` 子对象地址回到 `Both` 完整对象起始地址 |
+
+因此，`%offset_slot` 使用 `-16` 查表，`%top` 才使用表中加载出的 `-8` 调整 `%right`；两者不能互换。
+
+## 11.2 RTTI/typeinfo 保存什么
+
+RTTI（Run-Time Type Information）是 C++ 的运行期类型识别机制，`std::type_info` 是标准库提供的查询接口；`_ZTI7Derived` 则是 Itanium ABI 为 `Derived` 生成的 typeinfo 全局对象。各个 `Derived` 实例不会复制这份信息：就类型识别而言，每个多态对象通过自身的 vptr 间接找到通常由链接器合并为一份的 typeinfo。
+
+Itanium ABI 使用不同的运行时描述类型表示不同继承结构：
+
+| ABI 描述类型 | 适用结构 | 主要内容 |
+| --- | --- | --- |
+| `__class_type_info` | 没有基类的类 | 类型身份和实现定义的类型名称 |
+| `__si_class_type_info` | 单个 public、非虚基类 | 直接基类的 typeinfo 指针 |
+| `__vmi_class_type_info` | 多继承、虚继承等复杂层级 | 层级标志、基类数量，以及每个基类的 typeinfo、偏移和 public/virtual 标记 |
+
+具体到上面的 `Derived : Base`，`_ZTI7Derived` 通常是一个 `__si_class_type_info` 对象：它包含 typeinfo 元对象自己的运行时描述类 vptr、指向修饰类型名 `_ZTS7Derived` 的指针，以及指向直接基类 `_ZTI4Base` 的 typeinfo 指针。这里的“typeinfo 自己的 vptr”属于 ABI 运行库实现，不是每个 `Derived` 实例中的 vptr。
+
+这些数据足以描述“当前动态类型是谁、目标基类是否存在唯一且可访问的路径、目标子对象位于什么偏移”，但不包含成员变量名称、成员函数列表或源码结构，因此 RTTI 不是反射系统。
+
+RTTI 主要服务于：
+
+1. `typeid(expression)` 返回表示静态类型或动态类型的 `std::type_info`。
+2. `dynamic_cast` 检查向下转换和横向转换是否合法，并把指针调整到目标基类子对象。
+3. `dynamic_cast<void*>` 结合 vtable 中的 offset-to-top 找到最派生对象的起始地址。
+4. 典型 C++ ABI 在异常匹配中也会复用 typeinfo 来比较抛出类型与捕获类型。
+
+普通虚函数分派不读取 RTTI：它只按固定槽位从 vtable 取得函数地址。关闭 RTTI 后，虚函数仍能工作；需要运行期类型识别的 `typeid`、向下或横向 `dynamic_cast` 则不能照常使用。
+
+## 11.3 虚调用怎样变成 LLVM IR
+
+`dispatch()` 在 `-O0` 下的核心 IR 可以化简为：
+
+```llvm
+define i32 @dispatch(ptr %object) {
+    %vptr = load ptr, ptr %object
+    %slot = getelementptr ptr, ptr %vptr, i64 0
+    %callee = load ptr, ptr %slot
+    %result = call i32 %callee(ptr %object)
+    ret i32 %result
+}
+```
+
+四条指令分别完成：
+
+1. 从 `Base` 子对象的起始位置读取 vptr。
+2. 根据编译期确定的槽位编号定位表项。
+3. 读取该表项保存的函数地址。
+4. 间接调用函数，并把 `%object` 作为隐藏的 `this` 参数传入。
+
+`Base::value()` 与 `Derived::value()` 使用同一个槽位编号。`dispatch()` 不需要判断对象是什么类型；`Derived` 构造时写入的 vptr 已经让槽位 0 指向 `Derived::value()`。
+
+LLVM IR 没有专门的“虚函数调用”指令。Clang 前端负责依据 C++ ABI 生成 vtable、vptr 写入和槽位访问，LLVM 优化器看到的是全局常量、指针加载和普通的间接 `call`，目标后端再把它降低为相应架构的间接调用指令。
+
+## 11.4 去虚化发生在哪里
+
+`dispatch(const Base&)` 面向未知调用者时仍需保留间接调用；但 `known_type()` 中的对象明确是 `final` 的 `Derived`。在 `-O2` 下，优化器可以内联 `dispatch()`、证明目标函数，再内联 `Derived::value()` 并常量折叠：
+
+```llvm
+define i32 @known_type() {
+    ret i32 2
+}
+```
+
+这种变换称为去虚化。`final`、可见的具体对象类型、内联和 LTO 都可能增加去虚化机会，但源码语义不能依赖某次编译一定完成该优化。
+
+---
+
+## 11.5 对象切片
+
+```cpp
+struct Base {
+    virtual ~Base() = default;
+    virtual void run() const {}
+};
+
+struct Derived : Base {
+    int extra = 42;
+    void run() const override {}
+};
+
+void consume(Base value); // 按值接收会切片
+
+Derived d;
+consume(d); // 只复制 Base 子对象，Derived 部分丢失
+```
+
+需要保留多态时，应使用引用或指针：
+
+```cpp
+void consume(const Base& value);
+```
+
+切片后的新对象就是独立的 `Base`，RTTI 无法恢复已经丢失的 `Derived::extra`。引用或指针仍指向原来的完整对象，因此可以观察动态类型。
+
+## 11.6 `typeid` 与 `std::type_info`
+
+```cpp
+#include <cstddef>
+#include <typeinfo>
+
+Derived derived;
+Base& reference = derived;
+Base sliced = derived;
+
+const std::type_info& dynamic_info = typeid(reference);
+bool reference_is_derived = (dynamic_info == typeid(Derived)); // true
+bool sliced_is_base = (typeid(sliced) == typeid(Base));         // true
+
+std::size_t hash = dynamic_info.hash_code();
+const char* name = dynamic_info.name(); // 内容由实现决定，可能是修饰后的名称
+```
+
+`typeid(reference)` 的表达式是多态类型的左值，因此查询对象的动态类型 `Derived`；`sliced` 本身已经是 `Base` 对象，所以结果是 `Base`。对非多态表达式，`typeid` 只反映编译期静态类型。`name()` 的格式和 `hash_code()` 的具体值都不应持久化，也不能作为跨编译器、跨进程协议；需要把类型作为关联容器的键时，可以使用 `std::type_index` 包装 `std::type_info`。
+
+若 `base_ptr == nullptr`，表达式 `typeid(*base_ptr)` 在 `Base` 为多态类型时会抛出 `std::bad_typeid`，而不是实际解引用空指针。
+
+## 11.7 `dynamic_cast` 如何检查和调整指针
+
+向下转换从基类接口恢复更具体的派生类型：
+
+```cpp
+if (auto* derived = dynamic_cast<Derived*>(base_ptr)) {
+    use(*derived);
+}
+```
+
+RTTI 还支持多继承中的横向转换：
+
+```cpp
+struct Drawable {
+    virtual ~Drawable() = default;
+};
+
+struct Serializable {
+    virtual ~Serializable() = default;
+};
+
+struct Asset final : Drawable, Serializable {};
+
+Asset asset;
+Drawable* drawable = &asset;
+
+Serializable* serializable = dynamic_cast<Serializable*>(drawable);
+void* complete_object = dynamic_cast<void*>(drawable);
+
+// serializable 指向 asset 内部的 Serializable 子对象，地址可能经过调整。
+// complete_object 指向最派生的 Asset 对象起始位置。
+```
+
+运行库会根据源对象的 typeinfo 查找目标类型，确认存在唯一的 public 继承路径，再计算目标子对象地址。对指针转换失败返回 `nullptr`；对引用转换失败抛出 `std::bad_cast`。普通的派生类到基类转换通常可由编译器静态完成，不需要这次运行期搜索。
+
+如果工作可以直接通过虚函数接口完成，通常不需要先判断具体类型；频繁向下转换往往意味着基类接口没有表达完整行为。
+
+---
+
+## 11.8 抽象类、纯虚析构、`final` 与协变返回
 
 含有未被实现的纯虚函数的类是抽象类，不能直接创建对象：
 
@@ -2195,21 +2452,418 @@ struct Expr : Node {
 
 ---
 
-# 14. STL 容器：vector、deque、list
+# 12. 构造、析构与多态生命周期
+
+## 12.1 构造和析构阶段的虚分派
 
 ```mermaid
 flowchart TD
-    A["选择顺序容器"] --> B{"需要连续存储和高效遍历"}
-    B -->|是| C["vector"]
-    B -->|否| D{"需要头尾高效插入"}
-    D -->|是| E["deque"]
-    D -->|否| F{"需要稳定节点和已知位置 O(1) 插删"}
-    F -->|是| G["list"]
-    F -->|否| C
+    A["开始构造 Derived"] --> B["Base 构造函数体<br/>vptr → Base vtable<br/>foo() → Base::foo"]
+    B --> C["Middle 构造函数体<br/>vptr → Middle vtable<br/>foo() → Middle::foo"]
+    C --> D["Derived 构造函数体<br/>vptr → Derived vtable<br/>foo() → Derived::foo"]
+    D --> E["Derived 完整存活期"]
+    E --> F["Derived 析构函数体<br/>vptr → Derived vtable<br/>foo() → Derived::foo"]
+    F --> G["Middle 析构函数体<br/>vptr → Middle vtable<br/>foo() → Middle::foo"]
+    G --> H["Base 析构函数体<br/>vptr → Base vtable<br/>foo() → Base::foo"]
+    H --> I["对象生命周期结束"]
+```
+
+```cpp
+#include <iostream>
+
+class Base {
+public:
+    Base() { foo(); }
+    virtual ~Base() { foo(); }
+
+    virtual void foo() {
+        std::cout << "Base::foo\n";
+    }
+};
+
+class Middle : public Base {
+public:
+    Middle() { foo(); }
+    ~Middle() override { foo(); }
+
+    void foo() override {
+        std::cout << "Middle::foo\n";
+    }
+};
+
+class Derived : public Middle {
+public:
+    Derived() { foo(); }
+    ~Derived() override { foo(); }
+
+    void foo() override {
+        std::cout << "Derived::foo\n";
+    }
+};
+
+int main() {
+    Derived object;
+}
+```
+
+输出：
+
+```text
+Base::foo
+Middle::foo
+Derived::foo
+Derived::foo
+Middle::foo
+Base::foo
+```
+
+构造从基类向最派生类推进。执行 `Base` 构造函数体时，`Middle` 和 `Derived` 部分尚未建立，虚调用到达 `Base::foo()`；进入 `Middle` 构造函数体后，当前阶段的 vptr 指向 `Middle` 的 vtable，因此调用 `Middle::foo()`；进入 `Derived` 构造函数体后才调用 `Derived::foo()`。
+
+析构按相反顺序收缩动态类型。首先执行 `Derived` 析构函数体并调用 `Derived::foo()`，随后进入 `Middle` 析构阶段并调用 `Middle::foo()`，最后进入 `Base` 析构阶段并调用 `Base::foo()`。这不是关闭了虚分派，而是虚分派的有效动态类型被限制为当前仍处于生命周期内的那一层。
+
+结论：
+
+> 构造和析构函数中的虚调用只会分派到当前正在构造或析构的类，或者它已经完成构造且尚未开始析构的基类，不会越过当前生命周期边界调用更派生的版本。
+
+---
+
+## 12.2 避免在构造和析构阶段依赖虚分派
+
+构造和析构期间的虚调用不会进入“尚未构造”或“已经析构”的派生部分。如果在构造或析构期间的虚调用最终分派到纯虚函数，行为未定义；即使纯虚函数在类外提供了函数体，也不应依赖这种调用路径。
+
+更稳妥的设计包括：
+
+1. 构造完成后再调用虚函数。
+2. 使用工厂函数执行“两阶段初始化”。
+3. 将基类构造所需行为通过普通参数、策略对象或非虚辅助函数传入。
+
+---
+
+## 12.3 构造函数为什么不能是 virtual
+
+原因：
+
+1. 构造对象时，对象还没有完全形成。
+2. 虚函数依赖对象的动态类型。
+3. 构造函数负责建立对象，包括 vptr。
+4. 所以构造函数不能虚。
+
+---
+
+## 12.4 多态基类的虚析构
+
+错误：
+
+```cpp
+class Base {
+public:
+    ~Base() {}
+};
+
+class Derived : public Base {
+public:
+    ~Derived() {}
+};
+
+Base* p = new Derived();
+delete p; // UB
+```
+
+如果通过基类指针删除派生类对象，而基类析构函数不是 virtual，会产生未定义行为。
+
+正确：
+
+```cpp
+class Base {
+public:
+    virtual ~Base() = default;
+};
 ```
 
 
+
+> 如果类允许通过基类指针销毁派生对象，基类析构函数必须是 `virtual`。另一种设计是把基类析构函数设为 `protected` 且非虚，从接口层禁止通过基类指针执行 `delete`。
+
+---
+
+# 13. 重载决议、重写与名字查找
+
+## 13.1 overload
+
+重载发生在同一作用域，函数名相同，参数不同。
+
+```cpp
+void f(int);
+void f(double);
+```
+
+---
+
+## 13.2 override
+
+重写发生在继承体系中：
+
+```cpp
+class Base {
+public:
+    virtual void f(int);
+};
+
+class Derived : public Base {
+public:
+    void f(int) override;
+};
+```
+
+推荐永远写 `override`，让编译器帮你检查。
+
+---
+
+## 13.3 name hiding
+
+派生类中声明同名函数，会隐藏基类所有同名函数。
+
+```cpp
+class Base {
+public:
+    virtual void foo(int);
+};
+
+class Derived : public Base {
+public:
+    void foo(double);
+};
+```
+
+此时：
+
+```cpp
+Derived d;
+d.foo(1); // 调用 Derived::foo(double)
+```
+
+`Base::foo(int)` 被隐藏了。
+
+修复：
+
+```cpp
+class Derived : public Base {
+public:
+    using Base::foo;
+
+    void foo(double);
+};
+```
+
+---
+
+## 13.4 重载决议怎样选出一个函数
+
+重载决议不是“看到最像的参数就调用”，而是按阶段完成：
+
+1. 名字查找形成候选函数集合；
+2. 根据参数个数、默认参数、约束等筛出可行函数；
+3. 为每个实参计算隐式转换序列；
+4. 比较所有参数的转换质量，选出唯一的最佳可行函数；
+5. 最后再检查被选函数是否已删除、是否可访问，以及调用本身是否满足其他语义限制。
+
+常见标准转换等级可以简化为：
+
+```text
+精确匹配  >  提升  >  一般转换
+```
+
+不同大类之间通常是：
+
+```text
+标准转换  >  用户定义转换  >  省略号 ...
+```
+
+```cpp
+void pick(int);
+void pick(long);
+void pick(double);
+
+short value = 1;
+pick(value); // short -> int 是整型提升，选择 pick(int)
+```
+
+不能只看“最终都能变成目标类型”。例如从类类型转换到另一个类型时，一条用户定义转换序列最多包含一次用户定义转换；否则转换链可能无限递归，也无法稳定排序。
+
+如果两个候选对不同参数各有优势，通常没有唯一最佳函数：
+
+```cpp
+void mix(int, double);
+void mix(double, int);
+
+// mix(1, 1); // 两个候选各在一个参数上更好，调用有歧义
+```
+
+当转换质量相同时，还会继续比较非模板与模板、模板偏序、约束强弱等规则。不能把“非模板一定胜过模板”当成无条件规则：只有候选在前面的比较中无法分出胜负时，后续规则才参与决胜。
+
+被删除函数仍会参加重载决议：
+
+```cpp
+void consume(int) = delete;
+void consume(double);
+
+// consume(1); // 最佳匹配是已删除的 consume(int)，因此编译失败
+```
+
+这类设计可以显式禁止某些参数类型，而不是让它们悄悄转换到另一个重载。
+
+---
+
+## 13.5 隐式转换、转换构造函数与 `explicit`
+
+只要构造函数能用一个实参调用，它就可能定义从实参类型到类类型的隐式转换；这也包括其余参数都有默认值的多参数构造函数。
+
+```cpp
+class Meter {
+public:
+    explicit Meter(double value) : value_(value) {}
+
+private:
+    double value_;
+};
+
+Meter a(1.5);      // 直接初始化，OK
+Meter b{1.5};      // 直接列表初始化，OK
+// Meter c = 1.5;  // copy-initialization 不考虑 explicit 构造函数
+```
+
+转换运算符定义从类类型到其他类型的转换：
+
+```cpp
+class FileHandle {
+public:
+    explicit operator bool() const noexcept {
+        return fd_ >= 0;
+    }
+
+private:
+    int fd_ = -1;
+};
+
+if (handle) { // contextual conversion to bool，允许使用 explicit operator bool
+    // handle 有效
+}
+```
+
+`explicit` 的目的不是禁止显式转换，而是防止转换在参数传递、返回值、赋值和重载决议中悄悄发生。C++20 的 `explicit(condition)` 还能让模板构造函数根据类型条件决定是否允许隐式转换。
+
+---
+
+## 13.6 运算符重载、友元与 ADL
+
+运算符重载允许用户类型沿用表达式语法，但不能：
+
+1. 创造新的运算符；
+2. 改变运算符优先级和结合性；
+3. 改变内建运算符的操作数个数；
+4. 让重载后的 `&&`、`||` 获得内建版本的短路求值语义。
+
+对称的二元运算通常适合写成非成员函数，让左右操作数都能参加转换：
+
+```cpp
+class Vec2 {
+public:
+    Vec2(double x, double y) : x_(x), y_(y) {}
+
+    Vec2& operator+=(const Vec2& rhs) {
+        x_ += rhs.x_;
+        y_ += rhs.y_;
+        return *this;
+    }
+
+    friend Vec2 operator+(Vec2 lhs, const Vec2& rhs) {
+        lhs += rhs;
+        return lhs;
+    }
+
+    friend bool operator==(const Vec2&, const Vec2&) = default;
+
+private:
+    double x_;
+    double y_;
+};
+```
+
+这里的 friend 函数在类内定义，但不是成员函数。普通的非限定名字查找不一定找到它；当实参含有 `Vec2` 时，ADL（argument-dependent lookup）会到 `Vec2` 所在的关联作用域查找，因此 `a + b` 能找到该函数。这种写法常称为 hidden friend：运算符只在相关类型参与调用时进入候选集，可以减少无关重载污染。
+
+友元也可以只在类内声明，再像普通非成员函数一样在类外定义：
+
+```cpp
+#include <iostream>
+
+class Box {
+public:
+    explicit Box(int value) : value_(value) {}
+
+private:
+    int value_;
+
+    friend void inspect(const Box&); // 类内声明友元并授予访问权限
+};
+
+void inspect(const Box& box) {       // 类外定义，不再写 friend
+    std::cout << box.value_ << '\n'; // 可以访问私有成员
+}
+```
+
+`friend` 只写在类定义内部的友元声明中，用于授予访问权限；类外的 `inspect` 仍是普通的命名空间作用域非成员函数。类外定义时再次写 `friend` 是语法错误。类内的友元声明也不是成员函数声明，不需要写 `Box::inspect`。
+
+如果友元声明是该函数的首次声明，函数属于包围这个类的命名空间，但在出现匹配的命名空间作用域声明前，普通名字查找通常看不到它，仍可能由 ADL 找到。需要在 ADL 之外提前使用时，可以先提供命名空间作用域声明：
+
+```cpp
+class Box;
+void inspect(const Box&);
+
+class Box {
+    friend void inspect(const Box&);
+};
+```
+
+友元只授予访问权限，不建立继承关系，也不具有传递性。应优先通过公开接口实现运算符，只有确实需要访问内部表示时才使用 friend。
+
+---
+
+## 13.7 `nullptr`、`NULL` 与重载
+
+`nullptr` 的类型是 `std::nullptr_t`，可以转换为任意对象指针或成员指针，但不会像整数 `0` 一样参加普通整型重载：
+
+```cpp
+void open(int flags);
+void open(const char* path);
+
+open(0);        // 选择 open(int)
+open(nullptr);  // 选择 open(const char*)
+```
+
+`NULL` 在不同实现中可能只是整数常量宏，因此它在重载场景中不能稳定表达“空指针”。现代 C++ 接口应使用 `nullptr`；如果多个不同指针类型重载同时可行，传入 `nullptr` 仍可能产生歧义，需要显式转换为目标指针类型。
+
+---
+
+# 14. STL 容器：结构、复杂度与失效规则
+
+```mermaid
+flowchart TD
+    A["选择容器"] --> B{"按位置保存元素，还是按 key 查找"}
+    B -->|按位置| C{"需要连续内存"}
+    C -->|是| V["vector"]
+    C -->|否| D{"需要高效头尾操作"}
+    D -->|是| Q["deque"]
+    D -->|否| L["list：稳定节点和已知位置 O(1) 插删"]
+    B -->|按 key| K{"需要有序遍历或范围查询"}
+    K -->|是| M["map"]
+    K -->|否| U["unordered_map：平均 O(1) 查找"]
+```
+
+容器的失效规则来自底层存储方式：连续数组可能整体换地址，分段数组还依赖 block 控制表，链表和树通常只重新连接节点，哈希表则可能更换 buckets。下面把结构、复杂度和失效规则放在一起说明。
+
 ## 14.1 vector
+
+### 存储结构与复杂度
 
 底层：连续动态数组。
 
@@ -2226,46 +2880,7 @@ flowchart TD
 2. 扩容会搬迁元素。
 3. 扩容导致迭代器、指针、引用失效。
 
----
-
-## 14.2 list
-
-底层：双向链表。
-
-优点：
-
-1. 已知位置插入删除 O(1)。
-2. 插入删除通常不影响其他元素迭代器。
-
-缺点：
-
-1. 不支持随机访问。
-2. 每个节点额外存前后指针。
-3. 缓存不友好。
-4. 实际遍历性能通常差。
-
----
-
-## 14.3 deque
-
-底层：分段连续数组。
-
-优点：
-
-1. 支持随机访问。
-2. 头尾插入删除 O(1)。
-3. 比 vector 更适合双端队列。
-
-缺点：
-
-1. 不完全连续。
-2. 中间插入删除代价高。
-3. 迭代器结构更复杂。
-4. 缓存局部性通常不如 vector。
-
----
-
-## 14.4 vector 扩容
+### 扩容流程
 
 ```mermaid
 sequenceDiagram
@@ -2298,7 +2913,7 @@ sequenceDiagram
 
 ---
 
-## 14.5 vector 扩容时移动还是拷贝
+### 扩容时移动还是拷贝
 
 如果类型的移动构造是 `noexcept`，vector 通常优先移动。
 
@@ -2316,7 +2931,7 @@ struct A {
 
 ---
 
-## 14.6 `reserve` 与 `resize`
+### `reserve`、`resize` 与 `shrink_to_fit`
 
 ```cpp
 std::vector<int> values;
@@ -2332,11 +2947,116 @@ values.resize(100);  // size 变为 100，实际构造 100 个元素
 
 不要在只预留空间后直接使用 `operator[]` 写入尚不存在的元素。
 
+
+### 迭代器、引用与指针何时失效
+
+`vector` 把元素连续存放，迭代器通常可以理解为依赖元素地址的位置描述。扩容会申请另一段连续内存并搬迁全部元素，因此旧地址全部失效；未扩容的中间插入或删除会移动操作位置之后的元素，因此只有操作位置之前的迭代器、引用和指针能够保持有效。
+
+`push_back`：
+
+1. 如果不扩容，end 迭代器失效。
+2. 如果扩容，所有迭代器、引用、指针失效。
+
+`erase`：
+
+1. 被删元素及其之后的迭代器失效。
+2. 返回下一个有效迭代器。
+
+正确删除：
+
+```cpp
+for (auto it = v.begin(); it != v.end(); ) {
+    if (*it == 3) {
+        it = v.erase(it);
+    } else {
+        ++it;
+    }
+}
+```
+
+
 ---
 
-# 15. map 与 unordered_map
+## 14.2 deque
 
-## 15.1 map
+### 存储结构与复杂度
+
+底层：分段连续数组。
+
+优点：
+
+1. 支持随机访问。
+2. 头尾插入删除 O(1)。
+3. 比 vector 更适合双端队列。
+
+缺点：
+
+1. 不完全连续。
+2. 中间插入删除代价高。
+3. 迭代器结构更复杂。
+4. 缓存局部性通常不如 vector。
+
+
+### 分段结构为什么使失效规则更复杂
+
+`deque` 通常不是一段连续内存，而是由多个固定大小的 block 组成，再用一张内部控制表保存各个 block 的地址。这里的控制表有时也被实现称为 map，但它不是 `std::map`：
+
+```text
+内部控制表
++---------+     +------------------+
+| block * | --> | element element  |
++---------+     +------------------+
+| block * | --> | element element  |
++---------+     +------------------+
+| block * | --> | element element  |
++---------+     +------------------+
+```
+
+典型的 deque 迭代器不仅记录元素位置，还要记录当前 block 及其在控制表中的位置。理解这两层结构后，失效规则就比较直观：
+
+1. 在头部或尾部插入时，可以在边缘 block 的空位构造元素，或者增加一个新 block，不需要搬迁已有元素；但控制表可能扩容。无论本次是否真的扩容，标准都规定所有迭代器失效，而指向已有元素的引用和指针仍然有效。
+2. 在中间插入时，为了腾出位置，实现通常把靠近插入点一侧的元素向头部或尾部移动。元素位置发生变化，因此所有迭代器、引用和指针都失效。
+3. 删除第一个但不是最后一个元素时，只使指向被删除元素的迭代器、引用和指针失效；删除最后一个元素时，它们失效之外，旧的 `end()` 也失效。
+4. 在中间删除时，实现通常把元素向较近的一端移动来填补空洞。标准规定此时旧的 `end()` 以及指向所有元素的迭代器、引用和指针都失效。
+
+简化来看，头尾操作主要调整 block 边界或控制表，所以未被删除的原有元素地址可以保持不变；中间操作需要移动元素，所以影响范围更大。具体 block 大小、控制表增长策略和迭代器字段属于标准库实现细节，不能依赖。
+
+> 对 `deque` 不要用一句“和 vector 类似”概括。长期保存迭代器之前，应按具体操作查标准库契约；修改后优先使用操作返回的新迭代器。
+
+
+---
+
+## 14.3 list
+
+### 存储结构与复杂度
+
+底层：双向链表。
+
+优点：
+
+1. 已知位置插入删除 O(1)。
+2. 插入删除通常不影响其他元素迭代器。
+
+缺点：
+
+1. 不支持随机访问。
+2. 每个节点额外存前后指针。
+3. 缓存不友好。
+4. 实际遍历性能通常差。
+
+
+### 为什么节点结构能保持迭代器稳定
+
+`list` 的每个元素位于独立节点中，节点通常包含前驱指针、元素和后继指针。迭代器定位的是节点，而不是“从连续内存起点算出的下标”。
+
+插入只需要创建新节点并修改相邻节点的链接，已有节点地址不变，因此不会使指向其他元素的迭代器、引用和指针失效。删除会销毁目标节点，所以只使指向被删除元素的迭代器、引用和指针失效。
+
+
+---
+
+## 14.4 map
+
+### 存储结构与复杂度
 
 `std::map` 通常基于红黑树。
 
@@ -2355,9 +3075,19 @@ values.resize(100);  // size 变为 100，实际构造 100 个元素
 2. 需要 lower_bound / upper_bound。
 3. 对最坏复杂度敏感。
 
+
+### 为什么树旋转通常不使迭代器失效
+
+`map` 通常把每个键值对存放在独立的红黑树节点中。插入后的重新着色和旋转改变的是父子链接与颜色，不需要搬迁已有键值对对象，因此插入不会使已有迭代器、引用和指针失效。
+
+删除会销毁对应节点，所以只使指向被删除元素的迭代器、引用和指针失效。树在删除后的再平衡同样只是重新连接仍然存活的节点。
+
+
 ---
 
-## 15.2 unordered_map
+## 14.5 unordered_map（Hash Map）
+
+### Bucket、负载因子与 rehash
 
 `std::unordered_map` 基于哈希表。
 
@@ -2369,15 +3099,32 @@ values.resize(100);  // size 变为 100，实际构造 100 个元素
 4. rehash 会导致迭代器失效。
 5. 需要 hash 和相等比较。
 
+哈希表内部维护一组 bucket，通常根据 key 的哈希值选择 bucket；发生哈希冲突的元素会落入同一个 bucket。负载因子描述 bucket 的拥挤程度：
+
+```text
+load_factor = size / bucket_count
+```
+
+一次插入如果会使负载因子超过 `max_load_factor()`，容器会自动 rehash；调用 `rehash()` 或 `reserve()` 也可以主动触发。rehash 的目的不是消除所有冲突，而是增加 bucket 数量、降低平均每个 bucket 中的元素数量，避免冲突持续增多而使查找逐渐接近线性扫描。
+
+rehash 的简化流程是：
+
+1. 准备数量更多的新 buckets。
+2. 根据新的 bucket 数量，重新计算每个已有元素应归属的 bucket。
+3. 把元素重新挂接到对应 bucket，替换旧的 bucket 组织结构。
+
+因此 rehash 需要遍历已有元素，并会改变迭代器遍历所依赖的 bucket 位置。已有元素对象本身不必被搬走，所以 rehash 会使迭代器失效，但不会使指向已有元素的引用和指针失效。未触发 rehash 的插入不会使已有元素的迭代器、引用和指针失效；删除只使指向被删除元素的迭代器、引用和指针失效。
+
+可以在已知大致元素数量时调用 `reserve(expected_size)`，提前准备足够的 buckets，减少插入过程中的重复 rehash。需要区分：**迭代器失效不等于元素对象搬迁或引用必然失效。**
+
 适合：
 
 1. 高频查找。
 2. 不要求顺序。
 3. key 哈希质量较好。
 
----
 
-## 15.3 自定义 key
+### 自定义 key
 
 ```cpp
 struct Point {
@@ -2405,94 +3152,32 @@ std::unordered_map<Point, int, PointHash> mp;
 1. hash 函数。
 2. 相等比较。
 
----
+两者必须满足：如果两个 key 被相等比较判定为相等，它们的哈希值也必须相同；否则查找可能进入不同 bucket，无法找到逻辑上相等的 key。
 
-# 16. 迭代器失效
-
-```mermaid
-flowchart TD
-    A["容器发生修改"] --> B{"容器类型"}
-    B -->|vector| C{"是否扩容或移动后续元素"}
-    C -->|扩容| D["全部迭代器、指针、引用失效"]
-    C -->|erase| E["被删位置及其后失效"]
-    B -->|list 或 map| F["通常只使被删除节点失效"]
-    B -->|unordered_map| G{"是否 rehash"}
-    G -->|是| H["全部迭代器失效"]
-    G -->|否| I["通常只影响被删元素"]
-```
-
-
-## 16.1 vector
-
-`push_back`：
-
-1. 如果不扩容，end 迭代器失效。
-2. 如果扩容，所有迭代器、引用、指针失效。
-
-`erase`：
-
-1. 被删元素及其之后的迭代器失效。
-2. 返回下一个有效迭代器。
-
-正确删除：
-
-```cpp
-for (auto it = v.begin(); it != v.end(); ) {
-    if (*it == 3) {
-        it = v.erase(it);
-    } else {
-        ++it;
-    }
-}
-```
 
 ---
 
-## 16.2 list
+## 14.6 失效规则速查
 
-插入删除不会影响其他元素的迭代器。
+| 容器与操作 | 旧迭代器 | 旧引用和指针 |
+| --- | --- | --- |
+| `vector` 发生重新分配 | 全部失效 | 全部失效 |
+| `vector` 未重新分配地插入或删除 | 操作位置及其后失效 | 操作位置及其后失效 |
+| `deque` 在头尾插入 | 全部失效 | 指向原有元素的仍有效 |
+| `deque` 在中间插入或删除 | 全部失效 | 全部失效 |
+| `list`、`map` 插入 | 原有迭代器仍有效 | 仍有效 |
+| `list`、`map` 删除 | 仅指向被删元素的失效 | 仅指向被删元素的失效 |
+| `unordered_map` 插入且未 rehash | 原有迭代器仍有效 | 仍有效 |
+| `unordered_map` rehash | 全部失效 | 指向原有元素的仍有效 |
+| `unordered_map` 删除 | 仅指向被删元素的失效 | 仅指向被删元素的失效 |
 
-删除元素本身的迭代器失效。
-
----
-
-## 16.3 map
-
-插入通常不影响已有迭代器。
-
-删除只影响被删元素的迭代器。
-
----
-
-## 16.4 unordered_map
-
-插入可能触发 rehash。
-
-1. rehash 会使所有迭代器失效。
-2. rehash 不会使指向已有元素的引用和指针失效；这是标准容器语义，不只是实现习惯。
-3. 删除只使指向被删除元素的迭代器、引用和指针失效。
-4. 可以使用 `reserve()` 和 `max_load_factor()` 提前控制 rehash 风险。
-
-需要区分：**迭代器失效不等于元素对象搬迁或引用必然失效。**
+`end()` 也是迭代器。例如 `vector::push_back()` 即使没有扩容，旧的 `end()` 也会失效；`deque` 删除最后一个元素时，旧的 `end()` 同样失效。实际代码应先依据具体操作判断，再决定能否长期保存迭代器、引用或指针。
 
 ---
 
-## 16.5 deque
+# 15. STL 算法、迭代器与 lambda
 
-`deque` 的失效规则比 `vector` 和 `list` 更复杂：
-
-1. 在头部或尾部插入通常会使所有迭代器失效，但不会使指向既有元素的引用和指针失效。
-2. 在中间插入会使所有迭代器、引用和指针失效。
-3. 在头部或尾部删除时，通常只有被删除元素的引用和迭代器失效，但过去的 `end()` 也可能变化。
-4. 在中间删除会使相关迭代器、引用和指针广泛失效。
-
-> 对 `deque` 不要用一句“和 vector 类似”概括。长期保存迭代器之前，应按具体操作查标准库契约；修改后优先使用操作返回的新迭代器。
-
----
-
-# 17. STL 算法、迭代器与 lambda
-
-## 17.1 remove 不是真删除
+## 15.1 remove 不是真删除
 
 ```cpp
 std::remove(v.begin(), v.end(), 3);
@@ -2516,7 +3201,7 @@ std::erase(v, 3);
 
 ---
 
-## 17.2 lambda 捕获
+## 15.2 lambda 捕获
 
 ```cpp
 [=]     // 默认按值捕获被使用的局部自动变量
@@ -2565,7 +3250,7 @@ auto counter = [value = 0]() mutable {
 
 ---
 
-## 17.3 捕获 this 的风险
+## 15.3 捕获 this 的风险
 
 ```cpp
 class A {
@@ -2603,7 +3288,7 @@ public:
 
 ---
 
-## 17.4 迭代器分类决定能做什么
+## 15.4 迭代器分类决定能做什么
 
 迭代器不是统一能力的“泛化指针”。算法会根据迭代器类别约束可用操作和复杂度：
 
@@ -2633,7 +3318,7 @@ nodes.sort();                            // list 自己利用节点结构排序
 
 ---
 
-## 17.5 泛型 lambda、初始化捕获与递归
+## 15.5 泛型 lambda、初始化捕获与递归
 
 泛型 lambda 的 `auto` 参数会让闭包类型的调用运算符成为函数模板：
 
@@ -2671,7 +3356,7 @@ int result = factorial(factorial, 5);
 
 ---
 
-## 17.6 并行算法执行策略
+## 15.6 并行算法执行策略
 
 C++17 的部分标准算法接受执行策略：
 
@@ -2694,9 +3379,9 @@ std::for_each(std::execution::par,
 
 ---
 
-# 18. 模板基础
+# 16. 模板基础
 
-## 18.1 模板什么时候实例化
+## 16.1 模板什么时候实例化
 
 模板不是普通函数。模板本身是生成代码的蓝图。
 
@@ -2718,7 +3403,7 @@ add<double>(1.0, 2.0);
 
 ---
 
-## 18.2 为什么模板通常放头文件
+## 16.2 为什么模板通常放头文件
 
 因为编译器实例化模板时需要看到完整定义。
 
@@ -2741,7 +3426,7 @@ template int add<int>(int, int);
 
 ---
 
-## 18.3 模板特化
+## 16.3 模板特化
 
 通用模板：
 
@@ -2774,7 +3459,7 @@ struct TypeName<T*> {
 
 ---
 
-## 18.4 两阶段名字查找与 dependent name
+## 16.4 两阶段名字查找与 dependent name
 
 模板定义中的名字分为不依赖模板参数的名字和 dependent name：
 
@@ -2826,7 +3511,7 @@ struct Derived : T {
 
 ---
 
-## 18.5 模板参数推导与非推导上下文
+## 16.5 模板参数推导与非推导上下文
 
 模板参数推导从函数形参类型和实参类型建立匹配，不会为了“猜出 T”而任意执行用户定义转换：
 
@@ -2857,7 +3542,7 @@ append(out, 1); // T 由第一个参数确定为 long，第二个参数再执行
 
 ---
 
-## 18.6 可变参数模板与折叠表达式
+## 16.6 可变参数模板与折叠表达式
 
 参数包可以表示任意数量的类型或值，`sizeof...` 返回包中元素个数：
 
@@ -2883,7 +3568,7 @@ auto sum(T... values) {
 
 ---
 
-## 18.7 CTAD 与 deduction guide
+## 16.7 CTAD 与 deduction guide
 
 C++17 的 class template argument deduction 允许从构造实参推导类模板参数：
 
@@ -2914,7 +3599,7 @@ deduction guide 只参与类型推导，不是构造函数，也不负责实际�
 
 ---
 
-## 18.8 函数模板偏序
+## 16.8 函数模板偏序
 
 函数模板不能偏特化，但多个重载模板之间可以比较谁更特殊：
 
@@ -2929,11 +3614,27 @@ int value = 0;
 inspect(&value); // 选择 T* 版本
 ```
 
+类模板不能重载，因此需要用偏特化描述 `T*` 等一类类型；函数模板本身可以重载，所以上面的 `inspect(T*)` 已经承担了同样职责。C++ 不允许再写函数模板偏特化，以免“先比较重载还是先选择偏特化”形成两套相互竞争的规则：
+
+```cpp
+template <typename T>
+void inspect<T*>(T*); // error：函数模板不能偏特化
+```
+
+函数模板可以全特化某个确定组合：
+
+```cpp
+template <>
+void inspect<int>(int); // inspect(T) 在 T = int 时的全特化
+```
+
+全特化不是独立重载，不会直接加入候选集。编译器先通过重载决议选中某个主模板，再查看该主模板是否有适用的全特化；要描述“所有指针”或其他一组参数类型，应使用重载、Concepts 或 `requires`。
+
 比较的核心不是“源码看起来更长”，而是一个模板能够接受的参数集合是否比另一个更窄。加入 Concepts 后，还要结合约束的偏序；不能仅凭 requires 表达式在逻辑上似乎更严格，就假定编译器能推导出这种包含关系。
 
 ---
 
-## 18.9 CRTP 与静态多态
+## 16.9 CRTP 与静态多态
 
 CRTP（Curiously Recurring Template Pattern，奇异递归模板模式）的基本形式是：派生类把自己的类型作为模板参数传给基类。
 
@@ -3050,7 +3751,7 @@ CRTP、Mixin、策略类和 Concepts 容易混在一起：CRTP 描述“派生�
 
 ---
 
-# 19. 完美转发、万能引用、引用折叠
+# 17. 完美转发、万能引用、引用折叠
 
 ```mermaid
 flowchart TD
@@ -3064,7 +3765,7 @@ flowchart TD
 ```
 
 
-## 19.1 万能引用 / 转发引用
+## 17.1 万能引用 / 转发引用
 
 ```cpp
 template <typename T>
@@ -3092,7 +3793,7 @@ T 推导为 `int`，`T&&` 是 `int&&`。
 
 ---
 
-## 19.2 引用折叠规则
+## 17.2 引用折叠规则
 
 核心规则：
 
@@ -3107,7 +3808,7 @@ T 推导为 `int`，`T&&` 是 `int&&`。
 
 ---
 
-## 19.3 std::forward 与 std::move
+## 17.3 std::forward 与 std::move
 
 `std::move(x)`：
 
@@ -3137,7 +3838,7 @@ void wrapper(T&& arg) {
 
 ---
 
-## 19.4 emplace_back 是否一定更快
+## 17.4 emplace_back 是否一定更快
 
 ```cpp
 v.push_back(T(args...));
@@ -3162,7 +3863,7 @@ v.push_back(std::move(obj));   // 已经有对象
 
 ---
 
-# 20. SFINAE、type traits、concepts
+# 18. SFINAE、type traits、concepts
 
 ```mermaid
 flowchart LR
@@ -3173,8 +3874,35 @@ flowchart LR
     E --> F["接口更清楚，错误诊断更直接"]
 ```
 
+## 18.1 本章用到的标准库工具
 
-## 20.1 SFINAE 是什么
+Type traits 是 `<type_traits>` 中的一组编译期类型查询和类型变换工具。查询通常得到布尔常量，变换通常产生一个新类型；它们本身不会自动筛选重载，需要交给 SFINAE、`if constexpr` 或 Concept 使用。
+
+标准库常用 `_v` 和 `_t` 后缀提供简写：
+
+```cpp
+std::is_integral_v<T>       // std::is_integral<T>::value
+std::remove_cvref_t<T>      // typename std::remove_cvref<T>::type
+```
+
+本章出现的工具如下：
+
+| API | 头文件 | 目的 |
+| --- | --- | --- |
+| `std::true_type`、`std::false_type` | `<type_traits>` | 用类型表示编译期的 true/false，并提供静态成员 `value` |
+| `std::is_integral_v<T>` | `<type_traits>` | 判断 `T` 是否为整数类型 |
+| `std::enable_if_t<B, T>` | `<type_traits>` | `B` 为 true 时产生类型 `T`；为 false 时没有 `type`，可触发 SFINAE |
+| `std::remove_cvref_t<T>` | `<type_traits>` | 同时移除引用以及顶层 `const`/`volatile` |
+| `std::declval<T>()` | `<utility>` | 在不构造对象的情况下组成一个 `T` 类型表达式，只能用于 `decltype` 等不求值上下文 |
+| `std::same_as<T, U>` | `<concepts>` | 约束两个类型完全相同 |
+| `std::convertible_to<From, To>` | `<concepts>` | 约束 `From` 能以符合要求的方式转换为 `To` |
+
+`decltype`、`if constexpr` 和 `requires` 是语言机制，不是标准库 API。四者的分工可以简化为：trait 回答“类型具有什么性质”，SFINAE 从候选集中移除替换失败的模板，`if constexpr` 在已经选中的模板体内选择实现，而 Concept 直接约束模板接口。
+
+---
+
+
+## 18.2 SFINAE 是什么
 
 SFINAE：Substitution Failure Is Not An Error。
 
@@ -3188,7 +3916,8 @@ SFINAE：Substitution Failure Is Not An Error。
 
 ```cpp
 template <typename T>
-auto has_size_impl(int) -> decltype(std::declval<T>().size(), std::true_type{});
+auto has_size_impl(int)
+    -> decltype(std::declval<const T&>().size(), std::true_type{});
 
 template <typename T>
 std::false_type has_size_impl(...);
@@ -3203,9 +3932,11 @@ using has_size = decltype(has_size_impl<T>(0));
 2. 如果 `T` 有 `.size()`，第一个函数合法，返回 true_type。
 3. 如果 `T` 没有 `.size()`，替换失败，不报错，选择第二个函数，返回 false_type。
 
+这里不会真的调用 `declval` 或 `size()`：`decltype` 是不求值上下文。逗号表达式先要求左侧的 `.size()` 合法，再把整个返回类型确定为右侧的 `std::true_type`。
+
 ---
 
-## 20.2 enable_if
+## 18.3 enable_if
 
 ```cpp
 template <typename T>
@@ -3217,9 +3948,11 @@ print(T x) {
 
 只有当 `T` 是整数类型时，这个模板才参与重载决议。
 
+这里 `std::is_integral_v<T>` 提供布尔条件；条件为 true 时 `std::enable_if_t<..., void>` 得到返回类型 `void`，条件为 false 时该类型不存在，于是函数模板在替换阶段退出候选集。
+
 ---
 
-## 20.3 if constexpr
+## 18.4 if constexpr
 
 C++17 更推荐：
 
@@ -3238,7 +3971,7 @@ void print(const T& x) {
 
 ---
 
-## 20.4 concepts
+## 18.5 concepts
 
 C++20 concepts：
 
@@ -3267,7 +4000,7 @@ void print_size(const T& t) {
 
 ---
 
-## 20.5 `requires` 表达式的四类要求
+## 18.6 `requires` 表达式的四类要求
 
 `requires` 不只检查“某个表达式能否编译”，还可以表达类型、返回类型和额外布尔约束：
 
@@ -3284,11 +4017,13 @@ concept Sequence = requires(T value, const T const_value) {
 };
 ```
 
+`std::convertible_to<std::size_t>` 允许 `size()` 的结果转换为 `std::size_t`；`*value.begin()` 通常得到引用，所以先用 `std::remove_cvref_t` 去掉 cv/ref，再用 `std::same_as` 检查它是否正好是 `value_type`。
+
 requires expression 在约束替换过程中得到 false 时，通常使候选不满足约束，而不是像函数体内的普通错误那样立即终止整个编译。但不依赖模板参数、对所有可能实参都无效的代码仍可能使程序本身不合法。
 
 ---
 
-## 20.6 约束包含关系与受约束重载
+## 18.7 约束包含关系与受约束重载
 
 当两个重载的普通转换质量相同，编译器可以通过 constraint subsumption 选择约束更强的版本：
 
@@ -3319,7 +4054,7 @@ void walk(T); // 对 ReverseCursor 更受约束
 
 ---
 
-# 21. 异常传播、异常安全与 noexcept
+# 19. 异常传播、异常安全与 noexcept
 
 ```mermaid
 flowchart TD
@@ -3331,7 +4066,7 @@ flowchart TD
 ```
 
 
-## 21.1 C++ 异常 vs 错误码
+## 19.1 C++ 异常 vs 错误码
 
 异常优点：
 
@@ -3361,7 +4096,7 @@ flowchart TD
 
 ---
 
-## 21.2 异常安全保证
+## 19.2 异常安全保证
 
 ### 基本保证
 
@@ -3381,7 +4116,7 @@ void f() noexcept;
 
 ---
 
-## 21.3 析构函数为什么不应该抛异常
+## 19.3 析构函数为什么不应该抛异常
 
 如果异常传播过程中发生栈展开，局部对象会析构。
 
@@ -3401,7 +4136,7 @@ void f() noexcept;
 
 ---
 
-## 21.4 noexcept 的作用
+## 19.4 noexcept 的作用
 
 `noexcept` 表示函数承诺异常不会逃出该函数。
 
@@ -3414,7 +4149,7 @@ void f() noexcept;
 
 ---
 
-## 21.5 移动构造为什么要 noexcept
+## 19.5 移动构造为什么要 noexcept
 
 vector 扩容时需要搬迁元素。
 
@@ -3432,7 +4167,7 @@ struct A {
 
 ---
 
-## 21.6 异常对象、匹配与重抛
+## 19.6 异常对象、匹配与重抛
 
 `throw expression` 会用表达式初始化一个独立的异常对象。处理器按类型匹配它；派生类型处理器应写在基类处理器之前，否则前面的基类引用会先捕获所有派生异常。
 
@@ -3469,7 +4204,7 @@ try {
 
 ---
 
-## 21.7 栈展开与构造失败
+## 19.7 栈展开与构造失败
 
 找到匹配处理器的过程中会发生 stack unwinding：从抛出点到处理器之间已经完整构造的自动对象按相反顺序析构。这正是 RAII 能在异常路径释放锁、文件和内存的基础。
 
@@ -3494,7 +4229,7 @@ void update() {
 
 ---
 
-## 21.8 function-try-block
+## 19.8 function-try-block
 
 普通函数的 function-try-block 可以覆盖整个函数体；构造函数的版本还能捕获成员初始化列表中抛出的异常：
 
@@ -3514,7 +4249,7 @@ function-try-block 主要用于异常翻译和诊断，不应代替成员自身�
 
 ---
 
-## 21.9 异常边界
+## 19.9 异常边界
 
 异常只能穿越双方共同遵守的 C++ ABI 和运行时约定。以下位置应建立明确边界并在边界内捕获：
 
@@ -3528,7 +4263,7 @@ function-try-block 主要用于异常翻译和诊断，不应代替成员自身�
 
 ---
 
-# 22. 并发基础：thread、mutex、lock
+# 20. 并发基础：thread、mutex、lock
 
 ```mermaid
 flowchart TD
@@ -3541,7 +4276,7 @@ flowchart TD
 ```
 
 
-## 22.1 数据竞争
+## 20.1 数据竞争
 
 多个线程同时访问同一内存位置，至少一个是写，并且没有同步，就发生数据竞争。
 
@@ -3583,7 +4318,7 @@ void f() {
 
 ---
 
-## 22.2 mutex 手动 lock/unlock 的问题
+## 20.2 mutex 手动 lock/unlock 的问题
 
 错误：
 
@@ -3606,7 +4341,7 @@ RAII 保证离开作用域自动解锁。
 
 ---
 
-## 22.3 lock_guard、unique_lock、scoped_lock
+## 20.3 lock_guard、unique_lock、scoped_lock
 
 | 类型        | 特点                                                             |
 | ----------- | ---------------------------------------------------------------- |
@@ -3632,7 +4367,7 @@ std::scoped_lock lock(m1, m2);
 
 ---
 
-## 22.4 死锁
+## 20.4 死锁
 
 典型死锁：
 
@@ -3657,7 +4392,7 @@ lock(m1);
 
 ---
 
-# 23. condition_variable
+# 21. condition_variable
 
 ```mermaid
 sequenceDiagram
@@ -3678,7 +4413,7 @@ sequenceDiagram
 ```
 
 
-## 23.1 wait 为什么要配合谓词
+## 21.1 wait 为什么要配合谓词
 
 条件变量本身不保存“事件”，真正的条件必须保存在受互斥锁保护的共享状态中。需要谓词的原因包括：
 
@@ -3715,7 +4450,7 @@ while (!ready) {
 
 ---
 
-## 23.2 producer/consumer 正确写法
+## 21.2 producer/consumer 正确写法
 
 ```cpp
 std::mutex m;
@@ -3747,7 +4482,7 @@ void producer() {
 
 ---
 
-# 24. atomic 与内存模型
+# 22. atomic 与内存模型
 
 ```mermaid
 sequenceDiagram
@@ -3763,7 +4498,7 @@ sequenceDiagram
 ```
 
 
-## 24.1 atomic 和 mutex 的区别
+## 22.1 atomic 和 mutex 的区别
 
 `std::atomic<T>`：
 
@@ -3827,7 +4562,7 @@ struct Accounts {
 
 ---
 
-## 24.2 memory_order_relaxed
+## 22.2 memory_order_relaxed
 
 只保证原子性，不保证同步顺序。
 
@@ -3839,7 +4574,7 @@ counter.fetch_add(1, std::memory_order_relaxed);
 
 ---
 
-## 24.3 release/acquire
+## 22.3 release/acquire
 
 release 用于发布数据：
 
@@ -3878,7 +4613,7 @@ void consumer() {
 
 ---
 
-## 24.4 acq_rel
+## 22.4 acq_rel
 
 用于读改写操作，例如：
 
@@ -3890,7 +4625,7 @@ flag.exchange(true, std::memory_order_acq_rel);
 
 ---
 
-## 24.5 seq_cst
+## 22.5 seq_cst
 
 最强内存序。
 
@@ -3916,7 +4651,7 @@ x.store(1, std::memory_order_seq_cst);
 
 ---
 
-## 24.6 happens-before、synchronizes-with 与修改顺序
+## 22.6 happens-before、synchronizes-with 与修改顺序
 
 判断普通内存访问是否合法，核心不是“两个线程是否同时执行”，而是冲突访问之间是否存在 **happens-before** 关系。
 
@@ -3931,7 +4666,7 @@ x.store(1, std::memory_order_seq_cst);
 
 ---
 
-## 24.7 compare_exchange、伪失败与 ABA
+## 22.7 compare_exchange、伪失败与 ABA
 
 原子比较交换常用于无锁算法：
 
@@ -3952,7 +4687,7 @@ CAS 能保证单次比较交换原子性，但不能自动解决 ABA 问题：�
 
 ---
 
-## 24.8 volatile 不是线程同步工具
+## 22.8 volatile 不是线程同步工具
 
 C++ 中 `volatile` 主要用于表达某些需要观察实际读写的对象，例如内存映射 I/O。它不提供：
 
@@ -3965,7 +4700,7 @@ C++ 中 `volatile` 主要用于表达某些需要观察实际读写的对象，�
 
 ---
 
-## 24.9 原子操作与 fence
+## 22.9 原子操作与 fence
 
 带 acquire/release 的原子读写既操作值，又携带排序语义；fence 只建立排序约束，不保存业务值：
 
@@ -3993,7 +4728,7 @@ if (ready.load(std::memory_order_relaxed)) {
 
 ---
 
-## 24.10 `atomic_ref`
+## 22.10 `atomic_ref`
 
 C++20 的 `std::atomic_ref<T>` 给一个已经存在的对象提供原子访问视图，而不改变该对象的声明类型：
 
@@ -4023,9 +4758,9 @@ void finish_one() {
 
 ---
 
-# 25. C++17/20 常见特性
+# 23. C++17/20 常见特性
 
-## 25.1 auto 类型推导
+## 23.1 auto 类型推导
 
 `auto` 会丢掉顶层 const 和引用。
 
@@ -4057,7 +4792,7 @@ decltype(auto) result = (x); // x 为左值时推导为引用
 
 ---
 
-## 25.2 decltype
+## 23.2 decltype
 
 ```cpp
 int x = 10;
@@ -4073,7 +4808,7 @@ decltype((x)) b = x; // int&
 
 ---
 
-## 25.3 move-only 类型
+## 23.3 move-only 类型
 
 只能移动，不能拷贝的类型。
 
@@ -4092,7 +4827,7 @@ std::fstream
 
 ---
 
-## 25.4 structured binding
+## 23.4 structured binding
 
 ```cpp
 std::pair<int, std::string> p{1, "hello"};
@@ -4109,7 +4844,7 @@ auto& [rid, rname] = p; // 引用
 
 ---
 
-## 25.5 if initializer
+## 23.5 if initializer
 
 ```cpp
 if (auto it = mp.find(key); it != mp.end()) {
@@ -4119,7 +4854,7 @@ if (auto it = mp.find(key); it != mp.end()) {
 
 ---
 
-## 25.6 `enum class`
+## 23.6 `enum class`
 
 传统未限定枚举会把枚举名注入外层作用域，并且通常可以隐式转换为整数：
 
@@ -4146,7 +4881,7 @@ auto raw = static_cast<std::uint8_t>(color);
 
 ---
 
-## 25.7 三路比较 `operator<=>`
+## 23.7 三路比较 `operator<=>`
 
 C++20 的三路比较可以集中定义相等和排序关系：
 
@@ -4175,9 +4910,9 @@ auto order = nan <=> 1.0; // unordered
 
 ---
 
-# 26. optional、variant、any、string_view、span
+# 24. optional、variant、any、string_view、span
 
-## 26.1 optional
+## 24.1 optional
 
 表示“可能有值，也可能没有值”。
 
@@ -4204,7 +4939,7 @@ if (id) {
 
 ---
 
-## 26.2 variant
+## 24.2 variant
 
 类型安全的 union。
 
@@ -4231,7 +4966,7 @@ std::visit([](auto&& value) {
 
 ---
 
-## 26.3 any
+## 24.3 any
 
 可以存任意类型。
 
@@ -4260,7 +4995,7 @@ auto s = std::any_cast<std::string>(a);
 
 ---
 
-## 26.4 `std::string` 的存储与失效规则
+## 24.4 `std::string` 的存储与失效规则
 
 `std::string` 拥有字符序列，并保证字符连续存储。`size()` 表示保存的字符数量，不依赖第一个 `\0` 的位置：
 
@@ -4301,7 +5036,7 @@ SSO 是实现策略，不是标准接口契约：
 
 ---
 
-## 26.5 string_view
+## 24.5 string_view
 
 非拥有字符串视图。
 
@@ -4342,7 +5077,7 @@ std::string getName() {
 
 ---
 
-## 26.6 span
+## 24.6 span
 
 `std::span<T>` 是连续内存的非拥有视图。
 
@@ -4374,7 +5109,7 @@ process(v);
 
 ---
 
-# 27. 编译、链接、ODR、inline
+# 25. 编译、链接、ODR、inline
 
 ```mermaid
 flowchart LR
@@ -4386,7 +5121,7 @@ flowchart LR
 ```
 
 
-## 27.1 编译流程
+## 25.1 编译流程
 
 大致流程：
 
@@ -4402,7 +5137,7 @@ flowchart LR
 
 ---
 
-## 27.2 声明与定义
+## 25.2 声明与定义
 
 声明告诉编译器“有这个东西”。
 
@@ -4421,7 +5156,7 @@ class B {};   // 定义
 
 ---
 
-## 27.3 ODR
+## 25.3 ODR
 
 ODR：One Definition Rule，单一定义规则。
 
@@ -4464,7 +5199,7 @@ int consumer_capacity() { return queue_capacity(); }
 
 ---
 
-## 27.4 头文件定义全局变量的问题
+## 25.4 头文件定义全局变量的问题
 
 错误：
 
@@ -4496,7 +5231,7 @@ inline int g_value = 10;
 
 ---
 
-## 27.5 inline 的现代意义
+## 25.5 inline 的现代意义
 
 `inline` 不只是建议编译器内联。
 
@@ -4520,9 +5255,9 @@ inline constexpr int max_size = 1024;
 
 ---
 
-# 28. static、extern、头文件设计
+# 26. static、extern、头文件设计
 
-## 28.1 函数内 static 局部变量
+## 26.1 函数内 static 局部变量
 
 ```cpp
 int next_id() {
@@ -4542,7 +5277,7 @@ int next_id() {
 
 ---
 
-## 28.2 全局 static
+## 26.2 全局 static
 
 ```cpp
 static int g = 10;
@@ -4554,7 +5289,7 @@ static int g = 10;
 
 ---
 
-## 28.3 static 函数
+## 26.3 static 函数
 
 ```cpp
 static void helper() {}
@@ -4572,7 +5307,7 @@ void helper() {}
 
 ---
 
-## 28.4 类 static 成员
+## 26.4 类 static 成员
 
 ```cpp
 class A {
@@ -4605,7 +5340,7 @@ public:
 
 ---
 
-# 29. ABI 与动态库二进制兼容
+# 27. ABI 与动态库二进制兼容
 
 ```mermaid
 flowchart LR
@@ -4619,7 +5354,7 @@ flowchart LR
 ```
 
 
-## 29.1 ABI 是什么
+## 27.1 ABI 是什么
 
 ABI：Application Binary Interface。
 
@@ -4636,7 +5371,7 @@ ABI：Application Binary Interface。
 
 ---
 
-## 29.2 为什么 C++ ABI 更脆弱
+## 27.2 为什么 C++ ABI 更脆弱
 
 C++ 比 C 更容易出 ABI 问题，因为 C++ 有：
 
@@ -4650,7 +5385,7 @@ C++ 比 C 更容易出 ABI 问题，因为 C++ 有：
 
 ---
 
-## 29.3 哪些修改会破坏 ABI
+## 27.3 哪些修改会破坏 ABI
 
 可能破坏 ABI 的修改：
 
@@ -4664,7 +5399,7 @@ C++ 比 C 更容易出 ABI 问题，因为 C++ 有：
 
 ---
 
-## 29.4 如何降低动态库 ABI 风险
+## 27.4 如何降低动态库 ABI 风险
 
 常见策略：
 
@@ -4694,7 +5429,7 @@ Pimpl 能稳定公开对象的主要布局，但也会增加一次间接访问�
 
 ---
 
-# 30. 性能优化
+# 28. 性能优化
 
 ```mermaid
 flowchart TD
@@ -4708,7 +5443,7 @@ flowchart TD
 ```
 
 
-## 30.1 先测量再优化
+## 28.1 先测量再优化
 
 不要凭感觉优化。
 
@@ -4729,7 +5464,7 @@ flowchart TD
 
 ---
 
-## 30.2 vector 为什么通常比 list 遍历快
+## 28.2 vector 为什么通常比 list 遍历快
 
 虽然 list 插入删除 O(1)，但遍历时：
 
@@ -4742,7 +5477,7 @@ vector 连续存储，CPU cache 友好，遍历通常更快。
 
 ---
 
-## 30.3 缓存局部性
+## 28.3 缓存局部性
 
 CPU 访问内存不是只加载一个字节，而是加载一个 cache line。
 
@@ -4759,7 +5494,7 @@ for (int x : v) {
 
 ---
 
-## 30.4 分支预测
+## 28.4 分支预测
 
 CPU 会预测分支方向。
 
@@ -4775,7 +5510,7 @@ if (data[i] > threshold) {
 
 ---
 
-## 30.5 虚函数性能
+## 28.5 虚函数性能
 
 虚函数调用成本：
 
@@ -4796,7 +5531,7 @@ d.foo(); // 容易去虚化
 
 ---
 
-## 30.6 内存分配
+## 28.6 内存分配
 
 频繁 new/delete 可能慢：
 
@@ -4816,7 +5551,7 @@ d.foo(); // 容易去虚化
 
 ---
 
-## 30.7 常见代码优化
+## 28.7 常见代码优化
 
 原代码：
 
@@ -4857,9 +5592,9 @@ v.push_back(std::move(s));
 
 ---
 
-# 31. undefined behavior
+# 29. undefined behavior
 
-## 31.1 什么是 UB
+## 29.1 什么是 UB
 
 Undefined Behavior，未定义行为。
 
@@ -4877,7 +5612,7 @@ Undefined Behavior，未定义行为。
 
 ---
 
-## 31.2 常见 UB
+## 29.2 常见 UB
 
 ### 空指针解引用
 
@@ -4946,7 +5681,7 @@ values.push_back(4); // 可能扩容
 
 ---
 
-## 31.3 `i = i++` 是不是 UB
+## 29.3 `i = i++` 是不是 UB
 
 需要区分语言版本：
 
@@ -4962,9 +5697,9 @@ int old = i++; // 明确保留旧值
 
 ---
 
-# 32. 返回局部对象
+# 30. 返回局部对象
 
-## 32.1 返回值安全
+## 30.1 返回值安全
 
 ```cpp
 T make1() {
@@ -4979,7 +5714,7 @@ T make1() {
 
 ---
 
-## 32.2 返回临时对象安全
+## 30.2 返回临时对象安全
 
 ```cpp
 T make2() {
@@ -4991,7 +5726,7 @@ T make2() {
 
 ---
 
-## 32.3 返回局部对象右值引用危险
+## 30.3 返回局部对象右值引用危险
 
 ```cpp
 T&& make3() {
@@ -5017,7 +5752,7 @@ T make3() {
 
 ---
 
-# 33. `vector<bool>`
+# 31. `vector<bool>`
 
 `std::vector<bool>` 是标准库对 bool 的特殊化。
 
@@ -5042,7 +5777,7 @@ boost::dynamic_bitset
 
 ---
 
-# 34. 手写实现：简化 unique_ptr
+# 32. 手写实现：简化 unique_ptr
 
 ```cpp
 template <typename T>
@@ -5122,7 +5857,7 @@ private:
 
 ---
 
-# 35. 手写实现：线程安全队列
+# 33. 手写实现：线程安全队列
 
 ```mermaid
 sequenceDiagram
@@ -5208,7 +5943,7 @@ private:
 
 ---
 
-# 36. 手写实现：有停止机制的生产者消费者队列
+# 34. 手写实现：有停止机制的生产者消费者队列
 
 ```mermaid
 flowchart TD
@@ -5317,7 +6052,7 @@ private:
 
 ---
 
-# 37. 手写实现：LRU Cache
+# 35. 手写实现：LRU Cache
 
 ```mermaid
 flowchart LR
@@ -5330,7 +6065,7 @@ flowchart LR
 ```
 
 
-## 37.1 思路
+## 35.1 思路
 
 要求 get/put 平均 O(1)。
 
@@ -5343,7 +6078,7 @@ flowchart LR
 
 ---
 
-## 37.2 实现
+## 35.2 实现
 
 ```cpp
 #include <cstddef>
@@ -5427,9 +6162,9 @@ private:
 
 ---
 
-# 38. 初始化、存储期、求值顺序与对象生命周期
+# 36. 初始化、存储期、求值顺序与对象生命周期
 
-## 38.1 初始化形式先分清
+## 36.1 初始化形式先分清
 
 初始化不是一种单一动作。相似的标点可能进入不同规则，最终决定是否清零、是否允许 `explicit` 构造函数、是否检查窄化以及怎样进行重载决议。
 
@@ -5467,7 +6202,7 @@ Point p{1, 2};
 
 ---
 
-## 38.2 四类存储期
+## 36.2 四类存储期
 
 对象的“作用域”和“生命周期”不是同一概念。作用域决定名字在哪里可见，存储期决定对象存储大致存在多久。
 
@@ -5482,7 +6217,7 @@ Point p{1, 2};
 
 ---
 
-## 38.3 构造顺序
+## 36.3 构造顺序
 
 一个派生类对象的构造顺序是：
 
@@ -5509,7 +6244,7 @@ private:
 
 ---
 
-## 38.4 静态初始化顺序
+## 36.4 静态初始化顺序
 
 同一翻译单元内，具有有序动态初始化的对象通常按定义顺序初始化；跨翻译单元的动态初始化顺序通常不应依赖。
 
@@ -5545,7 +6280,7 @@ Config& config() {
 
 ---
 
-## 38.5 临时对象与生命周期延长
+## 36.5 临时对象与生命周期延长
 
 临时对象通常在包含它的完整表达式结束时销毁，但绑定到某些引用时可以延长生命周期：
 
@@ -5569,7 +6304,7 @@ const std::string& ref = identity(std::string("hello"));
 
 ---
 
-## 38.6 `explicit`、委托构造与继承构造
+## 36.6 `explicit`、委托构造与继承构造
 
 单参数构造函数如果允许隐式转换，可能产生意外匹配：
 
@@ -5601,7 +6336,7 @@ public:
 
 ---
 
-## 38.7 花括号初始化与 `initializer_list`
+## 36.7 花括号初始化与 `initializer_list`
 
 花括号初始化可以阻止许多数值窄化：
 
@@ -5642,7 +6377,7 @@ Options options{.threads = 8, .tracing = true};
 
 ---
 
-## 38.8 most vexing parse
+## 36.8 most vexing parse
 
 C++ 语法在一段文本既可能是声明又可能是表达式时，会优先按声明解释：
 
@@ -5671,7 +6406,7 @@ std::vector<int> values(first, last);
 
 ---
 
-## 38.9 求值顺序与 sequenced-before
+## 36.9 求值顺序与 sequenced-before
 
 运算符的优先级和结合性决定表达式如何分组，不等于子表达式按什么时间顺序求值：
 
@@ -5714,9 +6449,9 @@ record(first, second);
 
 ---
 
-# 39. 成员函数限定、类型转换与类型安全
+# 37. 成员函数限定、类型转换与类型安全
 
-## 39.1 `const` 成员函数
+## 37.1 `const` 成员函数
 
 ```cpp
 class Buffer {
@@ -5753,7 +6488,7 @@ private:
 
 ---
 
-## 39.2 引用限定符
+## 37.2 引用限定符
 
 成员函数可以按对象值类别重载：
 
@@ -5777,7 +6512,7 @@ private:
 
 ---
 
-## 39.3 四种显式转换
+## 37.3 四种显式转换
 
 ### `static_cast`
 
@@ -5821,7 +6556,7 @@ const int fixed = 1;
 
 ---
 
-## 39.4 严格别名、对齐与对象表示
+## 37.4 严格别名、对齐与对象表示
 
 编译器通常假设不相关类型的指针不会指向同一对象。通过错误类型访问对象可能违反严格别名规则：
 
@@ -5851,7 +6586,7 @@ std::uint32_t bits = std::bit_cast<std::uint32_t>(f);
 
 ---
 
-## 39.5 trivial、standard-layout 与 aggregate
+## 37.5 trivial、standard-layout 与 aggregate
 
 旧资料常把“POD”当成可以随意按字节处理的类型。现代 C++ 更适合拆开讨论不同性质：
 
@@ -5884,7 +6619,7 @@ std::memcpy(&restored, bytes.data(), sizeof restored);
 
 ---
 
-## 39.6 原始存储、对象生命周期与 `std::launder`
+## 37.6 原始存储、对象生命周期与 `std::launder`
 
 一段对齐且足够大的字节区域只是存储，不一定已经存在目标类型对象。C++20 可以用 `std::construct_at` 和 `std::destroy_at` 清楚表达生命周期：
 
@@ -5915,7 +6650,7 @@ C++23 的 `std::start_lifetime_as` 为部分隐式生命周期类型提供了更
 
 ---
 
-## 39.7 union 的活跃成员
+## 37.7 union 的活跃成员
 
 union 的成员共享存储，同一时刻通常只有一个成员处于活跃生命周期：
 
@@ -5938,7 +6673,7 @@ value.integer = 42;
 
 ---
 
-## 39.8 数组退化、数组引用与多维数组
+## 37.8 数组退化、数组引用与多维数组
 
 内建数组在多数表达式中会退化为指向首元素的指针，长度信息随之丢失：
 
@@ -5974,7 +6709,7 @@ int (*row)[4] = matrix;
 
 ---
 
-## 39.9 端序与协议表示
+## 37.9 端序与协议表示
 
 对象的内存表示不等于网络或文件格式。C++20 的 `std::endian` 可以描述平台原生端序，C++23 的 `std::byteswap` 可以辅助整数换序，但协议仍应明确字段宽度和目标字节序：
 
@@ -5986,9 +6721,9 @@ std::uint32_t value = read_u32_be(bytes); // 协议函数明确“大端 32 位�
 
 ---
 
-# 40. 线程生命周期、任务与异步结果
+# 38. 线程生命周期、任务与异步结果
 
-## 40.1 `std::thread`
+## 38.1 `std::thread`
 
 ```cpp
 std::thread worker([] {
@@ -6037,7 +6772,7 @@ private:
 
 ---
 
-## 40.2 `std::jthread` 与停止请求
+## 38.2 `std::jthread` 与停止请求
 
 C++20 的 `std::jthread` 析构时会请求停止并自动 join：
 
@@ -6053,7 +6788,7 @@ std::jthread worker([](std::stop_token token) {
 
 ---
 
-## 40.3 `promise` 与 `future`
+## 38.3 `promise` 与 `future`
 
 `std::promise<T>` 用于设置结果，`std::future<T>` 用于取得结果或异常：
 
@@ -6077,7 +6812,7 @@ worker.join();
 
 ---
 
-## 40.4 `std::async`
+## 38.4 `std::async`
 
 ```cpp
 auto future = std::async(std::launch::async, compute);
@@ -6094,7 +6829,7 @@ auto future = std::async(compute);
 
 ---
 
-## 40.5 `packaged_task`
+## 38.5 `packaged_task`
 
 `std::packaged_task` 把可调用对象包装为一个可执行任务，并把结果连接到 future：
 
@@ -6120,7 +6855,7 @@ std::cout << future.get();
 
 ---
 
-## 40.6 线程池设计要点
+## 38.6 线程池设计要点
 
 一个基础线程池通常包含：
 
@@ -6187,9 +6922,9 @@ void worker_loop() {
 
 ---
 
-# 41. 并发进阶：读写锁、原子等待与缓存竞争
+# 39. 并发进阶：读写锁、原子等待与缓存竞争
 
-## 41.1 `shared_mutex`
+## 39.1 `shared_mutex`
 
 读多写少时可以使用共享互斥量：
 
@@ -6218,7 +6953,7 @@ void update(Data value) {
 
 ---
 
-## 41.2 C++20 原子等待
+## 39.2 C++20 原子等待
 
 C++20 为原子对象提供 `wait/notify_one/notify_all`：
 
@@ -6241,7 +6976,7 @@ void producer() {
 
 ---
 
-## 41.3 伪共享
+## 39.3 伪共享
 
 两个线程即使更新不同变量，只要变量落在同一缓存行，也可能反复争夺缓存行所有权：
 
@@ -6268,7 +7003,7 @@ struct alignas(std::hardware_destructive_interference_size) Counter {
 
 ---
 
-## 41.4 无锁、锁自由与等待自由
+## 39.4 无锁、锁自由与等待自由
 
 这些术语不能混用：
 
@@ -6280,9 +7015,9 @@ struct alignas(std::hardware_destructive_interference_size) Counter {
 
 ---
 
-# 42. 分配器、内存资源与 `pmr`
+# 40. 分配器、内存资源与 `pmr`
 
-## 42.1 为什么需要自定义分配策略
+## 40.1 为什么需要自定义分配策略
 
 频繁的小对象分配可能带来：
 
@@ -6296,7 +7031,7 @@ struct alignas(std::hardware_destructive_interference_size) Counter {
 
 ---
 
-## 42.2 arena 的基本思想
+## 40.2 arena 的基本思想
 
 arena 从较大的内存块中线性分配对象，最后统一释放：
 
@@ -6384,7 +7119,7 @@ int main() {
 
 ---
 
-## 42.3 `std::pmr`
+## 40.3 `std::pmr`
 
 C++17 的多态内存资源把容器类型和运行期分配策略解耦：
 
@@ -6414,9 +7149,9 @@ values.reserve(100);
 
 ---
 
-# 43. 可调用对象、`std::function` 与类型擦除
+# 41. 可调用对象、`std::function` 与类型擦除
 
-## 43.1 可调用对象
+## 41.1 可调用对象
 
 C++ 中可调用对象包括：
 
@@ -6441,7 +7176,7 @@ void invoke_twice(F&& function) {
 
 ---
 
-## 43.2 函数指针、成员指针与 `std::invoke`
+## 41.2 函数指针、成员指针与 `std::invoke`
 
 普通函数指针只保存兼容函数的入口：
 
@@ -6483,7 +7218,7 @@ std::invoke(data_member, &worker);
 
 ---
 
-## 43.3 `std::function`
+## 41.3 `std::function`
 
 `std::function<R(Args...)>` 是拥有型类型擦除包装器：
 
@@ -6509,7 +7244,7 @@ std::function<int(int)> function = [](int value) {
 
 ---
 
-## 43.4 move-only 回调
+## 41.4 move-only 回调
 
 `std::function` 自身是可复制的，因此它保存的目标也必须满足相应的可复制要求，不能直接保存捕获 `unique_ptr` 的 move-only lambda。C++23 另外提供了 `std::move_only_function`，并没有改变 `std::function` 自身的复制语义。
 
@@ -6528,7 +7263,7 @@ auto task = [ptr = std::make_unique<int>(1)]() mutable {
 
 ---
 
-## 43.5 回调生命周期
+## 41.5 回调生命周期
 
 异步回调最常见的错误不是类型，而是捕获对象已经销毁：
 
@@ -6542,9 +7277,9 @@ register_callback([this] {
 
 ---
 
-# 44. Ranges、`expected` 与现代接口设计
+# 42. Ranges、`expected` 与现代接口设计
 
-## 44.1 Ranges
+## 42.1 Ranges
 
 C++20 Ranges 把范围和算法组合得更自然：
 
@@ -6595,7 +7330,7 @@ std::ranges::sort(users, std::ranges::less{}, &User::id);
 
 ---
 
-## 44.2 `std::expected`
+## 42.2 `std::expected`
 
 当失败是正常业务分支、调用方应显式处理错误时，C++23 的 `std::expected<T, E>` 可以表达“值或错误”：
 
@@ -6615,7 +7350,7 @@ parse_config(std::string_view text);
 
 ---
 
-## 44.3 API 所有权表达
+## 42.3 API 所有权表达
 
 参数和返回值应直接表达所有权：
 
@@ -6679,9 +7414,9 @@ private:
 
 ---
 
-# 45. 库、符号、诊断与工程验证
+# 43. 库、符号、诊断与工程验证
 
-## 45.1 静态库与动态库
+## 43.1 静态库与动态库
 
 静态库通常在链接期把所需目标代码合入最终程序；动态库通常在装载期或运行期由动态链接器映射和解析。
 
@@ -6706,7 +7441,7 @@ source -> object files
 
 ---
 
-## 45.2 GOT、PLT 与位置无关代码
+## 43.2 GOT、PLT 与位置无关代码
 
 在 ELF 平台的典型实现中：
 
@@ -6726,7 +7461,7 @@ ldd app
 
 ---
 
-## 45.3 编译警告与静态分析
+## 43.3 编译警告与静态分析
 
 建议在项目中启用严格警告，并把新代码警告视为需要处理的问题：
 
@@ -6746,7 +7481,7 @@ ldd app
 
 ---
 
-## 45.4 Sanitizer
+## 43.4 Sanitizer
 
 ### AddressSanitizer
 
@@ -6783,7 +7518,7 @@ Sanitizer 不是形式证明，也不能覆盖所有执行路径。应结合单�
 
 ---
 
-## 45.5 基准测试原则
+## 43.5 基准测试原则
 
 可靠的微基准需要：
 
@@ -6800,7 +7535,7 @@ Sanitizer 不是形式证明，也不能覆盖所有执行路径。应结合单�
 
 ---
 
-## 45.6 C 与 C++ ABI 边界
+## 43.6 C 与 C++ ABI 边界
 
 `extern "C"` 为名字声明 C language linkage。在常见工具链上，它会采用与 C 接口匹配的符号命名和调用约定，从而避免 C++ 重载产生的 name mangling：
 
@@ -6859,7 +7594,7 @@ extern "C" int engine_run(engine_handle* handle) noexcept {
 
 ---
 
-## 45.7 头文件、宏与 C++20 Modules
+## 43.7 头文件、宏与 C++20 Modules
 
 传统头文件通过文本包含工作，同一份声明会在每个翻译单元重新预处理和解析。头文件至少需要 include guard：
 
@@ -6930,7 +7665,7 @@ Modules 不会自动提供稳定 ABI，也不是动态库打包格式。构建�
 
 ---
 
-# 46. C++20 协程机制
+# 44. C++20 协程机制
 
 有栈协程与无栈协程的调度模型在 [Linux 系统专题](post.html?slug=os_review) 中介绍。本章只讨论 C++20 的语言机制：编译器如何把一个函数改写为可暂停状态机，以及返回对象如何拥有这段状态。
 
@@ -6950,7 +7685,7 @@ C++ 协程不是线程、调度器或异步 I/O 库。函数体中出现 `co_awa
 返回 task/generator 等拥有型对象
 ```
 
-## 46.1 `promise_type` 与 coroutine frame
+## 44.1 `promise_type` 与 coroutine frame
 
 返回类型通过 `promise_type` 定义协程与调用者之间的协议。准确地说，编译器从 `std::coroutine_traits<返回类型, 参数类型...>::promise_type` 取得 promise 类型；普通返回类型通常直接提供嵌套的 `promise_type`。一个典型 promise 需要回答：
 
@@ -6978,7 +7713,7 @@ Task use_later(const std::string& text) {
 
 ---
 
-## 46.2 `co_await` 的 awaiter 协议
+## 44.2 `co_await` 的 awaiter 协议
 
 一个 awaiter 提供三个核心操作：
 
@@ -7014,7 +7749,7 @@ struct ScheduleAwaiter {
 
 ---
 
-## 46.3 一个最小 generator
+## 44.3 一个最小 generator
 
 下面的 generator 使用 `co_yield` 逐个产生值。它采用 lazy start：创建 generator 时先挂起，每次 `next()` 才恢复到下一个产出点。
 
@@ -7130,7 +7865,7 @@ while (numbers.next()) {
 
 ---
 
-## 46.4 task、continuation 与异常
+## 44.4 task、continuation 与异常
 
 异步 task 通常不是让调用方主动循环 `resume()`，而是记录等待它的 continuation：
 
@@ -7184,7 +7919,7 @@ struct PromiseExcerpt {
 
 ---
 
-## 46.5 销毁、取消与恢复线程
+## 44.5 销毁、取消与恢复线程
 
 销毁一个处于挂起状态的 handle 会销毁协程帧中的 promise、参数副本和仍存活的局部对象，但不会自动取消已经提交给内核、事件循环或设备队列的外部操作。安全取消需要协议配合：
 

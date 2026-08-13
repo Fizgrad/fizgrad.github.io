@@ -10,6 +10,7 @@ David 的个人主页,托管在 GitHub Pages:https://fizgrad.github.io
 - GitHub Pages 项目区:可直接访问的在线 Demo 卡片
 - 更多仓库区:其他开源项目,链接到 GitHub
 - 中英双语切换,自动记忆语言偏好
+- Systems Lab：系统编程练习、DeepSeek 静态评审与 Linux 本地测试
 - 粒子连线背景、卡片悬浮渐变描边、滚动渐入动画
 - 响应式布局,支持 `prefers-reduced-motion`
 
@@ -23,6 +24,8 @@ David 的个人主页,托管在 GitHub Pages:https://fizgrad.github.io
 index.html              页面主结构
 assets/css/style.css    样式
 assets/js/main.js       i18n 字典、项目数据、卡片渲染、动画背景
+systems-lab.html        系统编程练习与 AI 评审页面
+tools/systems-lab/      题目契约、本地 runner、测试与参考实现
 ```
 
 ## 本地预览

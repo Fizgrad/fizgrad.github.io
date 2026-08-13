@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Linux 与 C++ 系统编程练习、AI 静态评审和本地验证" />
+  <title>Systems Lab - Fizgrad</title>
+  <link rel="icon" href="assets/img/avatar.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/systems-lab.css" />
+</head>
+<body class="systems-lab-body">
+  <div class="grid-overlay" aria-hidden="true"></div>
+  <a class="skip-link" href="#lab-main" data-i18n="skip">跳到主内容</a>
+
+  <header class="nav scrolled">
+    <a href="./" class="nav-logo">&lt;fizgrad/&gt;</a>
+    <nav class="nav-links">
+      <a href="./#tools" data-i18n-aria="homeAria" aria-label="返回主页">
+        <span class="nav-back-full" data-i18n="home">← 主页</span>
+        <span class="nav-back-short" aria-hidden="true">←</span>
+      </a>
+      <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
+    </nav>
+  </header>
+
+  <main id="lab-main" class="systems-lab-page">
+    <section class="lab-hero" aria-labelledby="lab-title">
+      <div>
+        <h1 id="lab-title" data-i18n="title">Systems Lab</h1>
+      </div>
+    </section>
+
+    <div id="load-error" class="lab-alert lab-alert-error" role="alert" hidden></div>
+
+    <div class="lab-shell" id="lab-shell" hidden>
+      <aside class="lab-sidebar" aria-label="题目列表" data-i18n-aria="problemNavAria">
+        <div class="lab-sidebar-head">
+          <div>
+            <p class="lab-kicker" data-i18n="exerciseSet">练习集</p>
+            <h2 data-i18n="chooseProblem">选择题目</h2>
+          </div>
+          <span id="problem-count" class="lab-count">0</span>
+        </div>
+
+        <label class="lab-field lab-filter">
+          <span data-i18n="category">领域</span>
+          <select id="category-filter">
+            <option value="all" data-i18n="allCategories">全部领域</option>
+          </select>
+        </label>
+        <label class="lab-field lab-filter">
+          <span data-i18n="difficulty">难度</span>
+          <select id="difficulty-filter">
+            <option value="all" data-i18n="allDifficulties">全部难度</option>
+          </select>
+        </label>
+
+        <div id="problem-list" class="lab-problem-list"></div>
+      </aside>
+
+      <div class="lab-workspace">
+        <section class="lab-panel lab-problem" aria-labelledby="problem-title">
+          <div class="lab-problem-heading">
+            <div>
+              <p class="lab-kicker" id="problem-index">01 / 06</p>
+              <h2 id="problem-title"></h2>
+            </div>
+            <div id="problem-meta" class="lab-meta"></div>
+          </div>
+          <p id="problem-summary" class="lab-summary"></p>
+          <div id="concept-list" class="lab-concepts"></div>
+
+          <h3 data-i18n="requiredApi">要求实现的 API</h3>
+          <pre class="lab-code-contract"><code id="problem-api"></code></pre>
+
+          <div class="lab-contract-grid">
+            <div>
+              <h3 data-i18n="requirements">行为要求</h3>
+              <ol id="problem-requirements" class="lab-requirements"></ol>
+            </div>
+            <div>
+              <h3 data-i18n="publicChecks">公开检查项</h3>
+              <ul id="problem-checks" class="lab-checks"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="lab-panel" aria-labelledby="solution-title">
+          <div class="lab-section-head">
+            <div>
+              <p class="lab-kicker" data-i18n="submission">提交内容</p>
+              <h2 id="solution-title" data-i18n="solution">C++ 实现</h2>
+            </div>
+            <span id="code-count" class="lab-muted">0 chars</span>
+          </div>
+          <textarea id="solution-code" class="lab-editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="C++ 实现" data-i18n-aria="solutionAria"></textarea>
+          <div class="lab-actions lab-editor-actions">
+            <button id="reset-code" class="lab-button lab-button-quiet" type="button" data-i18n="resetStarter">恢复起始代码</button>
+            <button id="copy-code" class="lab-button lab-button-quiet" type="button" data-i18n="copyCode">复制代码</button>
+            <button id="download-code" class="lab-button lab-button-quiet" type="button" data-i18n="downloadCode">下载 solution.cpp</button>
+          </div>
+        </section>
+
+        <section class="lab-panel lab-local" aria-labelledby="local-title">
+          <div class="lab-section-head">
+            <div>
+              <p class="lab-kicker" data-i18n="runtimeEvidence">运行期证据</p>
+              <h2 id="local-title" data-i18n="localVerification">Linux 本地验证</h2>
+            </div>
+            <a class="lab-button lab-button-quiet" href="tools/systems-lab/install.sh" download="systems-lab-linux.sh" data-i18n="downloadRunner">下载 Linux 测评脚本</a>
+          </div>
+          <div class="lab-command-row">
+            <code id="local-command"></code>
+            <button id="copy-command" class="lab-icon-button" type="button" data-i18n-aria="copyCommandAria" aria-label="复制命令">⧉</button>
+          </div>
+          <label class="lab-field">
+            <span data-i18n="localOutput">本地测试输出（可选）</span>
+            <textarea id="local-output" rows="5" spellcheck="false" data-i18n-ph="localOutputPlaceholder" placeholder="粘贴 practice.py 的输出，AI 会将其作为补充证据，并与源代码区分。"></textarea>
+          </label>
+        </section>
+
+        <section class="lab-panel lab-judge" aria-labelledby="judge-title">
+          <div class="lab-section-head">
+            <div>
+              <p class="lab-kicker">DeepSeek</p>
+              <h2 id="judge-title" data-i18n="aiReview">AI 代码评审</h2>
+            </div>
+          </div>
+
+          <div class="lab-alert lab-alert-info">
+            <span data-i18n="privacyNotice">代码、题目契约和你粘贴的测试输出会由浏览器直接发送给 DeepSeek；本站不会保存 Key 或提交内容。</span>
+          </div>
+
+          <div class="lab-judge-grid">
+            <label class="lab-field">
+              <span>DeepSeek API Key</span>
+              <input id="api-key" type="password" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" />
+            </label>
+            <label class="lab-field">
+              <span data-i18n="model">模型</span>
+              <select id="judge-model">
+                <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+              </select>
+            </label>
+          </div>
+          <details class="lab-prompt-details">
+            <summary data-i18n="showPrompt">查看完整判题提示词</summary>
+            <pre id="judge-prompt" tabindex="0"></pre>
+          </details>
+
+          <div id="judge-error" class="lab-alert lab-alert-error" role="alert" hidden></div>
+          <div class="lab-actions lab-submit-actions">
+            <button id="judge-submit" class="lab-button lab-button-primary" type="button" data-i18n="startReview">开始 AI 评审</button>
+            <button id="judge-cancel" class="lab-button lab-button-quiet" type="button" data-i18n="cancel" hidden>取消</button>
+            <span id="judge-status" class="lab-status" aria-live="polite"></span>
+          </div>
+        </section>
+
+        <section id="review-result" class="lab-panel lab-result" aria-labelledby="result-title" hidden>
+          <div id="result-content"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer lab-footer">
+    <p>&copy; <span id="year"></span> Fizgrad</p>
+    <a href="./#tools" class="back-top" data-i18n="backHome">← 返回主页</a>
+  </footer>
+
+  <script src="assets/js/systems-lab.js"></script>
+</body>
+</html>

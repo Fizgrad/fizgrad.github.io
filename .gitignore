@@ -12,5 +12,12 @@ Thumbs.db
 # Logs
 *.log
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Local server temp
 /tmp/
+
+# Systems Lab local submissions and build workspaces
+/systems-lab-work/

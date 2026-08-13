@@ -399,6 +399,41 @@
     grid.innerHTML = "";
     grid.appendChild(buildReaderCard());
     grid.appendChild(buildChatCard());
+    grid.appendChild(buildSystemsLabCard());
+  }
+
+  function buildSystemsLabCard() {
+    var card = el("article", { class: "card reader-card" });
+    card.style.setProperty("--card-glow", "#22d3ee");
+
+    var top = el("div", { class: "card-top" }, [
+      el("div", { class: "card-icon" }, "SL"),
+      arrow()
+    ]);
+
+    var title = el("h3", { class: "card-title" }, "Systems Lab");
+    var desc = el("p", { class: "card-desc" }, lang === "en"
+      ? "Practice Linux system calls, concurrency, and reliable I/O with DeepSeek static review and reproducible local tests."
+      : "练习 Linux 系统调用、并发与可靠 I/O，支持 DeepSeek 静态评审和可复现的本地测试。");
+
+    var tags = el("div", { class: "card-tags" }, [
+      el("span", { class: "tag" }, "C++20"),
+      el("span", { class: "tag" }, "Linux"),
+      el("span", { class: "tag" }, "AI Review")
+    ]);
+
+    var link = el("a", {
+      class: "card-link",
+      href: "systems-lab.html",
+      "aria-label": "Systems Lab"
+    });
+
+    card.appendChild(top);
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(tags);
+    card.appendChild(link);
+    return card;
   }
 
   function buildChatCard() {
