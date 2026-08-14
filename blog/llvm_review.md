@@ -358,7 +358,36 @@ flowchart LR
     PHI --> U[后续 User 使用统一 SSA 值]
 ```
 
-Lowering 时通常在前驱边插入 copy。若某条边同时连接多个后继或某个后继拥有多个前驱，插入 copy 可能会改变其他路径语义，这类边称为 **critical edge**。编译器可能先拆分 critical edge，再放置 copy。
+Lowering 时通常在前驱边插入 copy。若一条 CFG 边 `P → M` 的源块 `P` 有多个后继，
+同时目标块 `M` 有多个前驱，这条边称为 **critical edge**。
+
+```mermaid
+flowchart LR
+    subgraph BEFORE["拆分前"]
+        direction TB
+        P1["P<br/>后继：M、X"] -->|"critical edge<br/>P → M"| M1["M<br/>前驱：P、Q"]
+        P1 --> X1["X"]
+        Q1["Q"] --> M1
+        NP["copy 放在 P 末尾<br/>会在 P → X 路径也执行"] -.-> P1
+        M1 -.-> NM["copy 放在 M 开头<br/>会在 Q → M 路径也执行"]
+    end
+
+    SPLIT["拆分 P → M"]
+
+    subgraph AFTER["拆分后"]
+        direction TB
+        P2["P<br/>后继：P_to_M、X"] --> S["P_to_M<br/>COPY v_x = v_a"]
+        S --> M2["M<br/>前驱：P_to_M、Q"]
+        P2 --> X2["X"]
+        Q2["Q"] --> M2
+    end
+
+    BEFORE --> SPLIT --> AFTER
+```
+
+拆边后新增块 `P_to_M` 只有一个前驱和一个后继。copy 放在这个新块中，只会在原来的
+`P → M` 路径上执行：它既不会出现在 `P → X` 路径上，也不会出现在 `Q → M` 路径上。
+因此编译器可以先拆分 critical edge，再安全地放置 edge-specific copy。
 
 多个 `phi` 需要按照 parallel copy 语义同时完成。寄存器分配器会尝试通过 coalescing 给源值和目标值分配同一物理寄存器，从而消除 copy；若存在交换环，则需要临时寄存器或 spill slot 打破环。
 
@@ -779,9 +808,10 @@ flowchart LR
 ```mermaid
 flowchart TD
     M[ModulePass] --> CG[CGSCCPass]
-    CG --> F[FunctionPass]
+    M --> F[FunctionPass]
+    CG --> F
     F --> L[LoopPass]
-    F --> MF[MachineFunctionPass]
+    F -.进入代码生成.-> MF[MachineFunctionPass]
     M -.跨模块.-> M1[全局优化]
     CG -.调用图.-> C1[内联和跨函数属性推导]
     F -.单函数.-> F1[标量与 CFG 优化]
@@ -789,15 +819,21 @@ flowchart TD
     MF -.机器层.-> MF1[目标相关优化]
 ```
 
+`Module → Function` 和 `Module → CGSCC → Function` 都是合法路径：不依赖调用图的
+函数优化可以直接逐函数运行，需要维护调用图的优化则先进入 CGSCC 层；Loop 是 Function
+内部更细的处理单元。`MachineFunction` 属于 LLVM IR 降低之后的机器代码层，不是
+Module、CGSCC、Function、Loop 之外的第五层 LLVM IR。
+
 官方 Pass 文档说明 LLVM 的优化以 Pass 实现，pass 可以遍历程序的一部分来收集信息或转换程序。
 
 
 
 ## 5.2 Legacy PM 和 New PM
 
-这是理解 Pass Manager 的重点。
-
-当前官方 New Pass Manager 文档说明：LLVM 仍有两个 pass manager；中端优化使用 New PM，目标相关代码生成后端使用 Legacy PM。
+LLVM 中仍能看到 Legacy Pass Manager 和 New Pass Manager 两套接口。中端 LLVM IR
+优化已经使用 New PM；目标相关代码生成长期使用 Legacy PM，当前源码也已经提供
+`MachineFunctionPassManager` 等 New PM 基础设施，但代码生成流水线尚未全部迁移。
+因此，“中端使用 New PM、后端仍在迁移”比“New PM 只处理 Function”更准确。
 
 ### Legacy PM 特点
 
@@ -831,178 +867,137 @@ LLVM New Pass Manager（NPM）是 LLVM 新一代 Pass 框架，用于替代 Lega
 * 通过 `AnalysisManager` 缓存分析结果
 * 通过 `PreservedAnalyses` 精确控制分析失效
 
+#### 1. Pass 粒度由 `run()` 决定
 
-#### 1. New PM Pass 基本形式
+下面是一个 Function Pass，但 Function 只是示例所选择的处理粒度：
 
 ```cpp
 struct MyPass : public PassInfoMixin<MyPass> {
-
   PreservedAnalyses run(
       Function &F,
       FunctionAnalysisManager &AM) {
-
-      // 修改 IR
-
-      return PreservedAnalyses::all();
+    // 检查或修改 F
+    return PreservedAnalyses::all();
   }
 };
 ```
 
-结构：
+New PM 通过 `run()` 的参数判断 Pass 处理哪一种 IR 单元。中端常见入口如下：
+
+```cpp
+// 整个 LLVM Module
+PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+
+// 调用图中的一个强连通分量
+PreservedAnalyses run(LazyCallGraph::SCC &C,
+                      CGSCCAnalysisManager &AM,
+                      LazyCallGraph &CG,
+                      CGSCCUpdateResult &UR);
+
+// 一个 Function
+PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+
+// Function 中的一个 Loop
+PreservedAnalyses run(Loop &L,
+                      LoopAnalysisManager &AM,
+                      LoopStandardAnalysisResults &AR,
+                      LPMUpdater &U);
+```
+
+四种入口分别对应 `ModulePassManager`、`CGSCCPassManager`、
+`FunctionPassManager` 和 `LoopPassManager`。CGSCC Pass 可能改变调用图，Loop Pass
+也可能删除或重排当前循环，所以它们除 Analysis Manager 外还会收到图或遍历更新器，
+供 Pass 把结构变化通知给框架。
+
+- `LazyCallGraph &CG`：提供完整调用图。当前 SCC 只是调用图的一部分，内联或删除调用边时
+  还需要修改 SCC 之外的图结构。
+- `CGSCCUpdateResult &UR`：把 SCC 的分裂、合并、失效以及需要重新访问的 SCC 通知给
+  CGSCC Pass Manager，避免它继续遍历已经失效的 SCC。
+- `LoopStandardAnalysisResults &AR`：集中提供循环变换常用的函数级分析结果，例如
+  `DominatorTree`、`LoopInfo`、`ScalarEvolution`、别名分析和目标信息。
+- `LPMUpdater &U`：循环被删除、新增子循环或兄弟循环、需要重新运行 pipeline 时，用它更新
+  Loop Pass Manager 的 worklist。
+
+Function Pass 即使修改函数内部 CFG，当前处理的 `Function` 通常仍然存在；Loop Pass 和
+CGSCC Pass 却可能改变正在遍历的循环树或 SCC 划分。因此后两者需要额外参数同时提供
+上层结构信息，并维护 Pass Manager 后续应该访问哪些单元。
+
+#### 2. `PassInfoMixin` 与 `AnalysisManager`
+
+`PassInfoMixin<MyPass>` 使用 CRTP 提供默认名称和 pipeline 打印等通用能力，
+不决定 Pass 的处理粒度；真正决定粒度的是 `run()` 的参数。
 
 ```mermaid
 flowchart TD
-
 PM[PassManager]
-
 PM --> Pass[MyPass]
-
-Pass --> Mixin[PassInfoMixin<MyPass>]
-
-Mixin --> Info[Pass 类型信息]
+Pass --> Mixin[PassInfoMixin 提供类型信息]
+Pass --> Run[run 参数决定 IR 粒度]
+Run --> AM[对应的 AnalysisManager]
 ```
 
-#### 2. PassInfoMixin
-
-`PassInfoMixin<T>` 是一个 Mixin，用于给 Pass 添加元信息。
-
-> Mixin是一种面向对象设计思想，它的核心不是表达“继承关系”，而是向一个类注入某种独立的能力。传统继承主要描述 is-a 关系，例如 Dog : Animal 表示“狗是一种动物”；而 Mixin 更关注 has-a capability，表示“这个类具有某种能力”。因此，Mixin 通常设计成小而独立的功能模块，例如序列化能力、比较能力、日志能力等，然后通过继承或模板组合的方式混入到目标类中。
-
-> CRTP（Curiously Recurring Template Pattern，奇异递归模板模式）是一种 C++ 模板技巧：让派生类把自己的类型作为模板参数传给基类，使基类能够在编译期获取派生类信息，从而实现静态多态，避免虚函数开销。把“运行时动态绑定”提前到“编译期静态绑定”。
-
-作用：
-
-* 提供 Pass 名称
-* 提供类型识别
-* 支持 Pass 注册
-
-它不是优化逻辑，只是让 LLVM 认识这个 Pass。
-
-
-#### 3. run() 参数
-
-```cpp
-PreservedAnalyses run(
-    Function &F,
-    FunctionAnalysisManager &AM)
-```
-
-##### Function &F
-
-当前处理的函数：
-
-```text
-Module
- |
- +-- Function foo
- +-- Function bar
-```
-
-Function Pass 会逐个处理 Function。
-
-##### FunctionAnalysisManager &AM
-
-管理 Analysis 结果。
-
-例如：
+每种 IR 单元都有对应的 Analysis Manager。例如 Function Pass 可以从
+`FunctionAnalysisManager` 按需取得：
 
 * DominatorTree
 * LoopInfo
 * AliasAnalysis
 
-Analysis 结果会缓存，避免重复计算。
+Analysis Manager 以 IR 单元为键缓存结果。Pass 修改 IR 后，再通过
+`PreservedAnalyses` 告诉它哪些缓存仍然有效；具体失效规则放在下一节讨论。
 
-#### 4. PreservedAnalyses
+#### 3. 用 adaptor 连接不同粒度
 
-Pass 修改 IR 后，需要告诉 LLVM：
-
-> 已经缓存的 Analysis 哪些仍然有效？
-
-例如：
+一个 Pass Manager 只能直接接收与自己粒度相同的 Pass。要在 Module pipeline 中运行
+Function Pass 或 Loop Pass，需要使用 adaptor 完成逐层遍历：
 
 ```cpp
-return PreservedAnalyses::all();
+LoopPassManager LPM;
+LPM.addPass(LoopRotatePass());
+
+FunctionPassManager FPM;
+FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
+
+ModulePassManager MPM;
+MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
 ```
 
-表示IR 没有影响分析结果，所有缓存继续使用
+执行时，`ModuleToFunctionPassAdaptor` 遍历 Module 中的 Function；进入一个 Function
+后，`FunctionToLoopPassAdaptor` 再按照 Loop Pass Manager 的遍历规则处理其中的循环。
+因此下面这种写法粒度不匹配：
 
 ```cpp
-return PreservedAnalyses::none();
+ModulePassManager MPM;
+MPM.addPass(LoopRotatePass()); // 错误：Module PM 不能直接接收 Loop Pass
 ```
 
-表示IR 大幅修改，所有 Analysis 失效，重新计算
+New PM 提供的主要层级适配器包括：
 
-部分保留：
+```text
+Module   -> Function : createModuleToFunctionPassAdaptor
+Module   -> CGSCC    : createModuleToPostOrderCGSCCPassAdaptor
+CGSCC    -> Function : createCGSCCToFunctionPassAdaptor
+Function -> Loop     : createFunctionToLoopPassAdaptor
+```
+
+如果先把多个 Function Pass 放入同一个 `FunctionPassManager`，再整体适配到 Module，
+框架会对一个 Function 连续运行这些 Pass 后再访问下一个 Function。这通常比为每个 Pass
+分别遍历整个 Module 有更好的缓存局部性。
+
+#### 4. MachineFunction 的边界
+
+`MachineFunction` 保存目标相关的 Machine IR，不属于前面的 LLVM IR 四层结构。当前 LLVM
+已经有采用 New PM 接口的机器层 Pass，其入口形式为：
 
 ```cpp
-PA.preserve<DominatorTreeAnalysis>();
+PreservedAnalyses run(
+    MachineFunction &MF,
+    MachineFunctionAnalysisManager &AM);
 ```
 
-表示DominatorTree 仍有效，其他 Analysis 失效
-
-
-
-流程：
-
-```mermaid
-flowchart TD
-
-Pass[Transform Pass]
-
-Pass --> Modify[修改 IR]
-
-Modify --> PA[PreservedAnalyses]
-
-PA --> Keep[保留有效 Analysis]
-
-PA --> Invalidate[删除失效 Analysis]
-
-Invalidate --> Recompute[重新计算]
-```
-
-
-### 为什么 New PM 更高效？
-
-Legacy PM：
-
-```mermaid
-flowchart TD
-
-PassA[Pass A 修改 IR]
-
-PassA --> Recompute[重新计算所有 Analysis]
-
-PassB[Pass B]
-
-```
-
-问题：
-
-* 分析重复计算
-* Pass 耦合严重
-
-New PM：
-
-```mermaid
-flowchart TD
-
-PassA[Pass A]
-
-PassA --> PA[PreservedAnalyses]
-
-PA --> Cache[复用有效 Analysis]
-
-Cache --> PassB[Pass B]
-```
-
-优势：
-
-* 减少重复分析
-* 提高优化 pipeline 效率
-
-一句话：
-
-> New PM 的核心思想是：Pass 修改 IR 后，通过 `PreservedAnalyses` 精确告诉 LLVM 哪些分析结果可以继续复用，从而避免重复计算。
+不过，存在 `MachineFunctionPassManager` 不等于整条目标代码生成 pipeline 已经完成迁移。
+官方 New PM 文档仍将目标相关后端列为迁移中的范围；阅读具体后端代码时仍会同时遇到
+Legacy PM 和 New PM 接口。
 
 
 
@@ -1058,13 +1053,16 @@ flowchart TD
 
 ## 5.4 Pass 粒度选择
 
-| Pass 类型             | 适合场景                             |
-| ------------------- | -------------------------------- |
-| ModulePass          | 全模块分析、全局变量、跨函数优化                 |
-| CGSCCPass           | 调用图 SCC 级别优化，比如 inliner          |
-| FunctionPass        | 单函数优化，比如 InstCombine、SimplifyCFG |
-| LoopPass            | 循环优化，比如 LICM、LoopUnroll          |
-| MachineFunctionPass | 后端 MachineInstr 优化               |
+原则是选择能够取得所需信息的最小粒度：粒度越小，遍历和 analysis 失效的影响范围通常也越小；
+一旦需要观察或修改更大的结构，就应提升到相应层级。
+
+| Pass 类型             | 适合场景                                  |
+| ------------------- | ------------------------------------- |
+| ModulePass          | 全局变量、跨函数分析和全模块变换，例如 GlobalDCE        |
+| CGSCCPass           | 依赖调用图 SCC 的变换，例如 inliner              |
+| FunctionPass        | 单函数内的数据流和 CFG 变换，例如 InstCombine       |
+| LoopPass            | 单个循环及其嵌套关系，例如 LICM、LoopRotate         |
+| MachineFunctionPass | MachineInstr、寄存器和目标相关信息上的机器层优化        |
 
 思考题：
 
