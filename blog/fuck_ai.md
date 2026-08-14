@@ -3465,6 +3465,9 @@ Eager Execution 每执行一条框架语句就立即调度对应运算，便于�
 
 IR（Intermediate Representation，中间表示）保存某一抽象层级的运算和类型；Lowering 把高层操作逐步转换为更接近硬件的操作。算子融合减少中间张量和 Kernel Launch，却可能增加寄存器压力、降低并行度，因此需要成本模型。Tiling 把大张量拆成适合寄存器、共享内存和缓存的块；Layout 决定逻辑索引如何映射到物理地址，错误布局会产生非合并访存或额外转置。
 
+MLIR 如何用 Operation、Dialect、Rewrite、Bufferization 和 Dialect Conversion 承载这条
+多层 Lowering 链路，见[MLIR：多层中间表示与渐进式 Lowering](post.html?slug=mlir)。
+
 内存规划根据张量生命周期复用 Buffer，并在计算与通信之间安排拷贝。静态形状便于提前选 Tile 和分配内存，动态形状则可能需要 Shape Guard、多个编译版本或通用但较慢的回退 Kernel。推理引擎还负责请求调度、KV Cache 和分布式通信，AI Compiler 主要优化图与 Kernel；二者协作但不是同一层系统。
 
 CFG、数据流、融合、布局、Tiling、GPU 映射和成本模型在[编译器与高性能系统算法](post.html?slug=compiler_algorithms)中继续展开。

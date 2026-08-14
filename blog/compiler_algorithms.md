@@ -1545,6 +1545,9 @@ flowchart LR
 
 这不是所有系统都必须照搬的固定 Pass 列表，而是信息逐渐具体化的方向：高层保留 shape、layout 和算子语义，低层逐渐固定线程映射、地址空间、同步和目标指令。
 
+MLIR 的 Operation/Region 结构、Dialect、ODS、Rewrite、Dialect Conversion 与
+Bufferization 机制在[MLIR：多层中间表示与渐进式 Lowering](post.html?slug=mlir)中完整展开。
+
 [MLIR GPU dialect][mlir-gpu] 提供 `gpu.module`、`gpu.func`、线程/块 ID、barrier 和 GPU address space 等中层抽象，再根据目标降低到不同后端。常见路径可以概括为：
 
 | 目标 | 可能的中间路径 | 最终交给什么处理 |

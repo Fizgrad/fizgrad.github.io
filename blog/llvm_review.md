@@ -1,6 +1,6 @@
 # LLVM 编译器基础设施
 
-## 1. LLVM 是什么？
+# 1. LLVM 是什么？
 
 LLVM 不是单纯的“编译器”，而是一套 **模块化编译器基础设施**。它把传统编译器拆成若干可复用组件：
 
@@ -21,11 +21,13 @@ Clang 官方文档把 Clang 描述为 C、C++、Objective-C 编译器，覆盖�
 
 > LLVM 的核心价值是把编译器前端、中端、后端解耦。前端只需要把语言翻译成 LLVM IR，中端基于 IR 做平台无关优化，后端负责把 IR lowering 成目标机器代码。这样同一套优化框架可以服务 C/C++、Rust、Swift、Julia 等语言，也可以支持 x86、AArch64、RISC-V、AMDGPU 等后端。
 
+需要在降低到 LLVM IR 前保留张量、结构化循环、布局和异构并行等多层语义时，可以使用
+MLIR。它与 LLVM IR 的边界、Dialect、Rewrite、Bufferization 和渐进式 Lowering 见
+[MLIR：多层中间表示与渐进式 Lowering](post.html?slug=mlir)。
 
+# 2. LLVM 整体架构
 
-## 2. LLVM 整体架构
-
-### 2.1 前端 Frontend
+## 2.1 前端 Frontend
 
 前端负责理解源语言。
 
@@ -67,7 +69,7 @@ Clang 文档把前端明确拆成 Lexer、Preprocessor、Parser、Sema 和 LLVM 
 
 
 
-### 2.2 中端 Middle-end
+## 2.2 中端 Middle-end
 
 中端处理 LLVM IR，主要做平台无关优化。
 
@@ -95,7 +97,7 @@ LLVM 官方 Pass 文档把 pass 分为 analysis pass 和 transform pass：analys
 
 
 
-### 2.3 后端 Backend
+## 2.3 后端 Backend
 
 后端把 LLVM IR 转成目标机器代码。
 
@@ -117,7 +119,7 @@ LLVM 后端有 target-independent code generator 和 target-specific backend 两
 
 
 
-### 2.4 整体链路图：从源码到机器码
+## 2.4 整体链路图：从源码到机器码
 
 不要把 LLVM 记成孤立名词，而应当能把一段 C/C++ 代码沿着下面这条链路讲到底：
 

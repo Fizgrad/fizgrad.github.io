@@ -7,6 +7,13 @@
     "descriptionEn": "CFGs, data flow, SSA, register allocation, GPU kernel mapping, and CPU/GPU performance algorithms."
   },
   {
+    "title": "MLIR：多层中间表示与渐进式 Lowering",
+    "titleEn": "MLIR: Multi-Level IR and Progressive Lowering",
+    "slug": "mlir",
+    "description": "Operation、Dialect、ODS、Rewrite、Bufferization 与 CPU/GPU Lowering",
+    "descriptionEn": "Operations, dialects, ODS, rewriting, bufferization, and CPU/GPU lowering."
+  },
+  {
     "title": "算法与数据结构",
     "titleEn": "Algorithms and Data Structures",
     "slug": "algorithms_review",

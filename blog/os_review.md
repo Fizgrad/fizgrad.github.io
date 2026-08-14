@@ -3246,6 +3246,27 @@ inode 表示文件系统对象的元数据和数据定位信息，通常包括�
 - 数据块或 extent 信息；
 - 扩展属性等。
 
+Linux 并不是只用 inode 表示普通文件。VFS 中可出现在目录树里的主要文件类型都由
+inode 表示，并通过 `i_mode` 中的类型位区分：
+
+| 文件类型 | 类型标志 | inode 主要关联的内容 |
+|---|---|---|
+| 普通文件 | `S_IFREG` | 文件数据和普通文件操作 |
+| 目录 | `S_IFDIR` | 名称到 inode 的目录项集合 |
+| 符号链接 | `S_IFLNK` | 目标路径 |
+| 字符设备 | `S_IFCHR` | 设备号及字符设备驱动 |
+| 块设备 | `S_IFBLK` | 设备号及块设备 |
+| FIFO | `S_IFIFO` | 命名管道端点 |
+| Unix Socket | `S_IFSOCK` | 文件系统中的 Socket 名称 |
+
+因此 `/dev/null` 这类“设备节点”仍是字符设备类型的 inode，不是与 inode 并列的另一
+种 VFS node。这里还要区分几个层次：`dentry` 表示“父目录 + 名称”到 inode 的路径
+解析关系，`struct file` 表示一次打开实例，`super_block` 表示一个已挂载的文件系统
+实例。ext4 extent tree node、Btrfs B-tree node 等则是具体文件系统内部的数据结构，
+也可能叫 node，但不属于与 VFS inode 并列的通用文件类型。Linux 通常也不用一个
+统一的 `vnode` 结构代替这些对象，而是把相关职责拆分给 inode、dentry 和
+`struct file`。
+
 **文件的逻辑大小不一定等于实际占用的磁盘空间。**
 
 > **稀疏文件**可以包含未分配数据块的文件空洞，读取空洞通常得到全零数据，因此其逻辑大小可能远大于实际磁盘占用。 不支持保留空洞的复制方式可能把空洞写成真实的零数据块，从而增加磁盘占用。
@@ -3792,7 +3813,7 @@ fd 当前可能可以进行 read/write
 - 返回后会修改传入的集合，下一轮必须重建；
 - 超时结构也可能被修改，不能盲目复用。
 
-修正后的简单示例：
+读取标准输入的简单示例：
 
 ```cpp
 #include <cerrno>
@@ -4333,8 +4354,8 @@ epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event);
 
 这里需要区分两类标志：
 
-* **文件描述符标志（descriptor flags）**保存在当前进程的 fd 表项中，只作用于某一个 fd。Linux 中最常见的是 `FD_CLOEXEC`，表示进程成功执行 `execve()` 后自动关闭该 fd。它可通过 `fcntl(fd, F_GETFD/F_SETFD)` 查询和修改。
-* **文件状态标志（file status flags）**保存在 open file description 中，例如 `O_APPEND`、`O_NONBLOCK`。多个通过 `dup()` 或 `fork()` 指向同一 open file description 的 fd 通常共享这些标志和文件偏移。
+- **文件描述符标志（descriptor flags）**：保存在当前进程的 fd 表项中，只作用于某一个 fd。Linux 中最常见的是 `FD_CLOEXEC`，表示进程成功执行 `execve()` 后自动关闭该 fd。它可通过 `fcntl(fd, F_GETFD/F_SETFD)` 查询和修改。
+- **文件状态标志（file status flags）**：保存在 open file description 中，例如 `O_APPEND`、`O_NONBLOCK`。多个通过 `dup()` 或 `fork()` 指向同一 open file description 的 fd 通常共享这些标志和文件偏移。
 
 因此，两个 fd 即使指向同一个 open file description，也可以具有不同的 `FD_CLOEXEC`；但修改其中一个 fd 对应的 `O_NONBLOCK` 等文件状态标志，通常会影响其他指向同一 open file description 的 fd。
 
@@ -5847,7 +5868,7 @@ flowchart TD
 ```
 
 读者可能看到旧版本，也可能看到新版本，但它取得的旧对象在读侧临界区结束前不能
-被释放。**宽限期（grace period）**表示发布前已经存在、可能接触旧对象的相关 RCU
+被释放。**宽限期（grace period）**：发布前已经存在、可能接触旧对象的相关 RCU
 读侧临界区都已经结束；它不要求后来不断进入的新读者全部停止。内核通过各 CPU 和
 任务的静止状态等信息推进宽限期，具体跟踪方式取决于 RCU 类型和内核配置。
 
@@ -8773,5 +8794,6 @@ page fault 通常发生在 TLB miss 后发现页表条件不满足
 29. [Linux man-pages: flock(2)](https://man7.org/linux/man-pages/man2/flock.2.html)
 30. [util-linux: flock(1)](https://man7.org/linux/man-pages/man1/flock.1.html)
 31. [Linux man-pages: proc_locks(5)](https://man7.org/linux/man-pages/man5/proc_locks.5.html)
+32. [Linux Kernel Documentation: Virtual File System](https://docs.kernel.org/filesystems/vfs.html)
 
 > 内核文档和 man-pages 会持续更新。阅读具体机器行为时，应同时检查发行版内核版本、配置选项和对应源码。
