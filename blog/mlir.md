@@ -77,7 +77,7 @@ mnemonic。它使用两个 `i32` Value，并产生一个新的 `i32` Value `%sum
 | Name | 唯一标识操作，例如 `arith.addi` |
 | Operands | 该操作使用的 SSA Value |
 | Results | 该操作新产生的 SSA Value |
-| Attributes / Properties | 编译期已知的配置和元数据 |
+| Attributes / Properties | 编译期已知的固有配置或额外注解 |
 | Regions | 嵌套的控制流或图结构 |
 | Successors | CFG Region 中可能跳转到的 Block |
 | Location | 源位置或转换过程中保留的来源信息 |
@@ -177,7 +177,7 @@ builtin.module
 Lowering 可以逐层展开其中一部分，而不用一次把整个程序压平。例如先把张量算子转成
 `scf.for`，仍保留函数和模块；之后再把 `scf` 转成 `cf`，最后才进入 LLVM Dialect。
 
-# 3. Type、Attribute 与 Location
+# 3. Type、Attribute、Property 与 Location
 
 ## 3.1 常见 Type
 
@@ -203,8 +203,9 @@ memref<4x?xf32>
 
 ## 3.2 Attribute、Property 与 SSA Value
 
-Attribute 是 IR 中不可变的编译期数据，例如整数、字符串、数组、类型、仿射映射和
-符号引用：
+先区分运行期数据和编译期配置。Attribute 和 Property 都表示编译期间直接记录在 IR
+中的数据，Pass 可以改写它们，但它们不是程序运行时沿 def-use chain 传递的值；后者
+必须使用 SSA Value：
 
 ```mlir
 %c4 = arith.constant 4 : index
@@ -215,13 +216,90 @@ Attribute 是 IR 中不可变的编译期数据，例如整数、字符串、数
 def-use chain 流动的 SSA Value。二者不能因为都写着“常量”就混为一谈：Attribute
 配置 Operation，Value 则参与程序的数据依赖。
 
-Property 也是 Operation 的固有配置，但它按照该 Operation 预先定义的 C++ 结构直接
-存储，可以按需序列化成 Attribute；Attribute 则是由 `MLIRContext` uniquing 的不可变
-值。通用打印形式通常用 `<{...}>` 表示 Properties，用 `{...}` 表示其余 Attribute。
-两者都不同于运行期流动的 SSA Value，ODS 可以分别约束并生成访问接口。
+Attribute 与 Property 的区别也不是“Attribute 只是元数据，Property 才影响语义”。
+二者都可以是 Operation 语义的一部分，主要区别在于存储模型和使用范围：
 
-静态 tile size 可以直接存为 Attribute；运行期才知道的 tile size 必须由 SSA Value
-表达。这个边界会直接影响 Pass 能做多少静态推理。
+| 对比项 | Attribute | Property |
+|---|---|---|
+| 内存表示 | `Attribute` 是值语义句柄，底层存储通常由 `MLIRContext` uniquing | 保存在该 Operation 固定类型的 Properties storage 中 |
+| 可变方式 | Attribute 值本身通常不可变；修改字段意味着换成另一个 Attribute | 每个 Operation 拥有自己的值，可通过生成的 setter 修改 |
+| 复用范围 | 是通用 MLIR 对象，可以共享、嵌套进 Array/Dictionary，也可以被 Type 引用 | 只属于声明它的 Operation，不是可脱离 Operation 复用的一类 IR 对象 |
+| C++ 类型 | `IntegerAttr`、`StringAttr`、`AffineMapAttr` 或自定义 Attribute | 可以直接使用 `int64_t`、枚举、`SmallVector` 或 Operation 定义的结构 |
+| 文本与字节码 | Attribute 自己具有统一的解析、打印和存储模型 | 必须能够转换成 Attribute 以支持 generic form，并提供复制、比较、哈希和序列化逻辑；ODS 可以生成这些代码 |
+| 适合内容 | 可复用的结构化编译期值，或附加到 Operation 的开放式注解 | Operation 固定且固有的配置，尤其是适合直接用 C++ 类型保存的字段 |
+
+这里还要区分 **Attribute 值** 和 **Operation 的 attribute dictionary**。现代 MLIR
+Operation 的存储在概念上接近：
+
+```text
+Operation
+├── 固定布局的 Properties storage
+│   ├── Attribute-backed 固有字段，例如 StringAttr
+│   └── 原生 Property 字段，例如 int64_t 或 enum
+└── discardable attribute dictionary
+    └── 其他 Dialect 附加的注解
+```
+
+固有字段决定 Operation 自己的含义并由该 Operation 验证。它既可以保存一个 Attribute
+句柄，也可以是非 Attribute-backed 的原生 Property。Discardable attribute 的含义由
+外部 Dialect 定义，可以附加到兼容的 Operation 上，而不需要成为该 Operation 固定
+Properties 结构的一部分。
+
+例如：
+
+```mlir
+module @kernel attributes {test.note = "hot"} {}
+```
+
+使用 `--mlir-print-op-generic` 后，其核心结构是：
+
+```mlir
+"builtin.module"() <{sym_name = "kernel"}> ({
+^bb0:
+}) {test.note = "hot"} : () -> ()
+```
+
+`sym_name` 是 `builtin.module` 固有的字段，保存在 Properties storage 中，但字段值仍然
+是一个 `StringAttr`；`test.note` 则是额外附加的 discardable attribute。由此可以看出，
+`<{...}>` 表示的是 generic form 中的 properties dictionary，并不意味着其中每个值都
+是原生 C++ Property；固有的 Attribute-backed 字段也会出现在这里。后面的 `{...}`
+才是 discardable attribute dictionary。自定义打印语法可以把二者改写或省略，因此
+不能只凭一对括号判断 C++ 存储类型。
+
+ODS 可以在同一个 Operation 中同时声明 Attribute-backed 字段和原生 Property：
+
+```tablegen
+let arguments = (ins
+  AnyTensor:$input,
+  AffineMapAttr:$layout,
+  DefaultValuedProp<I64Prop, "1">:$stages
+);
+```
+
+生成的存储在概念上接近：
+
+```cpp
+struct Properties {
+  AffineMapAttr layout; // 指向 MLIRContext 中 uniqued 的 Attribute
+  int64_t stages = 1;   // 当前 Operation 自己的原生 Property
+};
+```
+
+`layout` 和 `stages` 都是 Operation 的固有语义，差别只是前者采用通用 Attribute 表示，
+后者采用直接的 C++ 存储。Property 默认仍会参与 Operation 的比较和哈希，也必须能在文本、
+字节码以及 clone 过程中正确保存，不能用来偷偷存放临时分析缓存或悬空 C++ 指针。
+
+选择时可以按下面的顺序判断：
+
+1. 运行时才知道，或者需要参与 def-use chain：使用 SSA Value；
+2. Operation 固定拥有的简单配置，希望直接使用 C++ 类型：使用 Property；
+3. 需要复用、嵌套或使用现有 MLIR Attribute API 的编译期对象：使用 Attribute-backed 字段；
+4. 由外部 Dialect 附加、不是 Operation 固定结构的注解：使用 discardable attribute；
+5. 只在某个 Pass 执行期间存在的推导结果：放进 Analysis，而不是写入 Property。
+
+例如静态 tile size 可以使用 Attribute 或 Property；运行期才知道的 tile size 必须使用
+SSA Value。具体选择 Attribute 还是 Property，要看它是否需要 Attribute 的通用组合能力，
+以及直接使用 C++ 存储是否更适合该 Operation 的固定接口。
 
 ## 3.3 Location
 
@@ -411,7 +489,7 @@ ODS 描述的是 Operation 契约，不会自动完成：
 
 | 名称 | 含义 |
 |---|---|
-| `mlir::Operation` | 运行期统一 IR 节点，保存操作数、结果、属性和 Region |
+| `mlir::Operation` | 运行期统一 IR 节点，保存操作数、结果、Properties、discardable attributes 和 Region |
 | `toy::AddOp` | 对特定 Operation 的轻量类型化 C++ wrapper |
 | ODS/TableGen 定义 | 用声明式方式生成 wrapper、约束和注册代码 |
 
@@ -461,7 +539,7 @@ Pattern driver 可能缓存匹配状态或维护 worklist，因此 Pattern 内�
 
 ## 7.2 原地修改与替换
 
-当 Operation 的结果和结构保持不变，只更新 Attribute、Operand 或 Location 时，可以
+当 Operation 的结果和结构保持不变，只更新 Attribute、Property、Operand 或 Location 时，可以
 使用 `modifyOpInPlace`。如果结果数量或类型变化，应创建新的 Operation 并替换旧结果。
 这一区分能让 driver 正确维护 use-list、监听器和失效状态。
 
@@ -887,7 +965,7 @@ Lowering 维护成本。自定义 Dialect 更适合承载标准 Dialect 暂时�
 
 定义每个 Operation 前先写清：
 
-- Operand、Result、Attribute 和 Region 分别是什么；
+- Operand、Result、Attribute、Property 和 Region 分别是什么；
 - 动态 Shape 如何表达；
 - 是否有副作用、别名或资源读写；
 - 哪些关系能静态验证；
