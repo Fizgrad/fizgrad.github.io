@@ -1399,6 +1399,13 @@ Grid
           → Thread
 ```
 
+`Kernel launch` 是 host 端把一个设备函数作为“并行入口”提交给 GPU 的动作。它主要包含两层含义：
+
+- 调度含义：由 `grid` 和 `block` 决定有多少执行实例（blocks / threads）需要创建并发运行；
+- 参数含义：将线程索引、边界和设备参数映射到内核代码可见的 `blockIdx`、`threadIdx` 等。
+
+`Kernel launch` 一般是异步返回的：host 发起后立刻继续运行，GPU 与 CPU 并发执行；只有在同步点（如显式 `cudaDeviceSynchronize` 或事件/流依赖）才必须等待完成。
+
 先把它当作一个“模型契约”理解：它描述了编译器在做并行划分时必须守住的语义边界。
 
 1. Host 侧发起 `Kernel launch`，确定 grid/block 配置，调用是异步返回；
