@@ -1399,13 +1399,36 @@ Grid
           → Thread
 ```
 
-需要区分：
+先把它当作一个“模型契约”理解：它描述了编译器在做并行划分时必须守住的语义边界。
 
-- 线程是逻辑执行实例；
-- warp 是常见硬件调度粒度；
-- block 内线程可用 shared memory 和 barrier 协作；
-- 不同 block 一般不能依赖普通 block barrier 同步；
-- warp size、资源限制和具体指令能力属于目标相关信息。
+1. Host 侧发起 `Kernel launch`，确定 grid/block 配置，调用是异步返回；
+2. 进入 device 后按 `block` 划分执行实例；
+3. block 里的线程继续按 `warp`/`subgroup` 参与锁步执行；
+4. 同一 block 可通过 shared memory + barrier 进行合作；不同 block 一般不能依赖普通 barrier 做全局同步；
+5. 线程、block 之外的可见性和同步规则由目标平台定义，不能跨后端硬编码。
+
+```mermaid
+flowchart TD
+    H[Host] --> K[Kernel Launch]
+    K --> B[Blocks]
+    B --> W[Warp / Wavefront]
+    W --> T[Threads]
+    T --> MEM[Private / Shared / Global]
+```
+
+因此编译器在降低时不能直接固定 `warp=32` 等硬件常量，常见的安全做法是：
+
+- 先用抽象层级（grid/block/thread/subgroup）表达并行；
+- 再在目标后端把子组大小、同步语义、线程上限与内存子系统映射到实参；
+- 需要时把通用策略拆成多个版本（例如面向不同设备/shape 的 specialized kernel）。
+
+warp size、资源限制和具体指令能力属于目标相关信息，不应与高层模型混为一谈。
+
+### 12.1.1 识别常见误区
+
+- 不是所有分支都能直接 predication；
+- 共享/全局同步语义不可互相替代；
+- 在有 side effect 的路径，控制流重排要带着可见性和异常语义一起判断。
 
 ## 12.2 Reduction
 
@@ -1802,6 +1825,103 @@ resident_workgroups <= min(
 | 验证与调优 | 差分测试、profile、搜索 | 正确性阈值和测量口径稳定 |
 
 高质量 GPU 编译器并不是靠某一个神奇 Pass 获得性能，而是让这些选择在同一套依赖、布局、资源和数值语义约束下保持一致。
+
+## 13.10 GPU 体系结构核心资源约束
+
+编译器在选择 tile、fusion、线程分配时，先要从体系结构角度估计瓶颈：
+
+- SM/CU 规模：最大活跃 warp 数、每个 SM 的 block 与线程上限；
+- 寄存器文件：每线程上限和每块占用决定是否出现 spill；
+- shared memory/LDS：决定协同读取与双缓冲深度；
+- L1/L2/片外带宽：决定数据复用策略和访存合并收益；
+- Tensor Core / MMA：决定 fragment 分发、对齐和指令 shape 可行集；
+- 指令流水和 load/store 延迟：决定是否值得软件流水、预取、unroll；
+- 同步单元：barrier scope 与 memory order 决定可跨哪些同步边界移动指令。
+
+一个非常常见但容易忽略的事实是：同一 kernel 的最优点往往不是“某一项”单独最优，而是资源约束可行性与语义约束的交集。
+
+典型估算中，线程块级并行度受三类上界限制：
+
+- 线程总数；
+- 寄存器总数；
+- shared memory 总数。
+
+它只是估算基线。真实硬件还会加上分配粒度、subgroup 对齐、指令束缚和保留资源。
+
+## 13.11 AI Compiler 的 GPU 编译闭环
+
+AI Compiler 常见流程可以看成两个循环叠加：
+
+1. 图层循环：导入模型 → 图优化（消减、融合、布局变换）→ 算子分组；
+2. 内核循环：为每组算子搜索参数（tile、并行映射、reduction 策略）→ 降低到 GPU IR → 代码生成与 profile。
+
+在图层循环里，通常会涉及：
+
+- 计算图规范化（shape / type / layout / alias）；
+- 算子边界检查与依赖合法性；
+- 融合收益估计；
+- 是否调用成熟库 kernel（如高性能线性代数算子）或保持自定义 kernel。
+
+在内核循环里，通常会涉及：
+
+- 映射策略（grid/workgroup/subgroup 维度）；
+- 记忆体层次（global/shared/register）移动；
+- 同步与收敛策略（barrier、warp reduce、atomic）；
+- 指令选择（FMA、向量化、MMA）；
+- 编译时间预算（是否缓存结果、是否降级为通用 kernel）。
+
+这类系统通常需要把静态模型与真实测量结合，因为很多收益（例如 occupancy、cache 命中、分支分布）无法仅靠离线公式准确预测。
+
+AI 场景还常见：
+
+- 动态 shape 导致版本数爆炸；
+- 同一算子在不同输入分布下最优 kernel 不同；
+- 编译时间和部署延迟也计入总耗时目标；
+- 对数值语义误差与可复现性有训练/推理差异要求。
+
+实践里常用策略是：先用静态成本模型做剪枝，再以少量测量填充关键候选，把误差较小但鲁棒性高的方案留存为默认 fallback。
+
+## 13.12 从源码到部署的性能归因链条
+
+一个 AI 编译配置是否值得，最终不是只看 kernel 级提速，而要看：
+
+- compile time：是否触发额外编译和反复 JIT；
+- launch time：kernel 数量、启动间隙、stream 依赖；
+- runtime：访存/计算占比、同步开销、数值修正成本；
+- memory transfer：host-device 传输是否成为瓶颈；
+- cache 效果：是否能复用已测/已编译配置并快速回退到安全 fallback。
+
+这条链条是把 `13.4～13.9` 的“算法正确/合法/收益”推向系统级验证的桥梁。
+
+## 13.13 读者常见追问（GPU 与编译器交叉）
+
+1. 为什么不是所有核都要做得尽量大？
+
+每个核都追求“大”会导致寄存器和 shared memory 过量，从而降低 block 并发数，反而放大调度空转。先看是否能降低 `memory traffic` 与 synchronization 的总成本，再看吞吐是否明显上升。
+
+2. 既然有很多 block，为什么还会有“看似空闲”的 SM？
+
+因为部分 block 可能因为分支 divergence、边界条件、共享内存不足或 warp 不能达标而提前失去可执行 warp，实际可发射线程少于理论上限。编译器要同时平衡寄存器、共享内存和控制流。
+
+3. 什么情况下不用 shared memory？
+
+当 tile 数据重用很弱、tile 规模小、搬运开销与同步成本大于收益时，不宜搬到 shared/LDS。判断标准是 `global load reduction`、bank 冲突代价和 barrier 次数。
+
+4. 为何同一个模型在不同 shape 下会走不同 kernel？
+
+因为动态 shape 会触发不同并行映射和边界策略。AI 编译系统通常保留 fast path（常见 shape）+ fallback（通用路径），用 profile 决定默认路径。
+
+5. occupancy 为什么不是唯一指标？
+
+occupancy 高只说明可同时驻留更多 warp，不代表更少内存延迟，也不代表更高指令利用率。很多时候瓶颈来自访存、同步开销、数值规约路径，必须结合 Roofline、指令吞吐、同步边界一起判断。
+
+6. barrier 一定比 atomic 更慢吗？
+
+不一定。barrier 是块内同步机制，不同场景下成本可控；atomic 保证单地址原子性，但争用重时可能严重序列化。二者不是互斥，而是按语义和热点程度选型。
+
+7. AI compiler 为什么会“回退”到库 kernel？
+
+库 kernel 常年优化，参数验证和指令实现成熟。编译器在发现自定义路径收益不稳定、合法性证明困难或 autotune 成本高时，会回退到库实现，换取更稳健的吞吐与正确性。
 
 ---
 
