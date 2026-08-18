@@ -1399,27 +1399,20 @@ Grid
           → Thread
 ```
 
-```text
-Grid：一次 kernel 的全部执行任务边界。gridDim 决定有多少 block 实例。
-  - 语义：把“总任务”划分为许多个并发工作单元。
-  - 典型参数：grid.x / grid.y / grid.z。
-  - 编译意义：决定 launch 规模、全局索引上界和块级并发粒度。
+Grid 是一次 kernel 的任务边界，`gridDim` 决定并发 block 实例数。  
+它负责把总任务分成若干块级任务，是后续 `block` 划分的外层约束。  
+在编译器视角，grid 决定 launch 规模、全局索引上界，以及块级并发粒度。
 
-Block / CTA：一个可被独立调度的执行实例。每个 block 内有多个 Thread，且可共享共享内存和 barrier。
-  - 语义：块内线程协作处理一小片数据。
-  - 典型参数：blockIdx（块编号）、blockDim（每块线程规模）、blockDim.x/y/z。
-  - 编译意义：决定本地同步边界、shared memory 使用和 block 粒度策略。
+Thread Block（或 CTA）是可独立调度的执行实例。一个 block 内包含多个 thread，并可共享 shared memory 与 block 级 barrier。  
+它承担块内数据片段的协作处理。  
+编译阶段通常关注 `blockIdx`、`blockDim`，因为它决定了本地同步边界、shared memory 使用以及 block 粒度策略。
 
-Warp（或 Subgroup）：Block 内一组固定规格的线程集合，SIMT 中常见的锁步执行粒度。
-  - 语义：同一 warp 内线程通常走同一指令流，在分支时表现为分片执行。
-  - 典型参数：subgroup 大小依赖目标，不应在高层模型硬编码。
-  - 编译意义：决定分支代价评估、shuffle/vote/broadcast 通信成本与映射策略。
+Warp（或 Subgroup）是 block 内固定规模的 SIMT 执行组，常见实现中用于锁步执行。  
+同一个 warp 通常共享一条指令流，在分支处按 active mask 分片执行。  
+它直接影响分支代价、`shuffle`/`vote`/`broadcast` 等组通信原语成本，以及映射策略选择。
 
-Thread：最小执行实例，拥有独立线程上下文中的寄存器与执行位点。
-  - 语义：最终完成一个或多个逻辑元素的数据处理。
-  - 典型参数：threadIdx（在线程索引空间内唯一）。
-  - 编译意义：决定寄存器分配、循环体内地址计算、边界裁剪和 predication 可行性。
-```
+Thread 是最小执行实例，负责单元数据上的具体地址计算和指令执行，携带 `threadIdx`。  
+它决定元素级映射、寄存器占用、循环体内寻址与边界裁剪行为。
 
 把这一段先按顺序读成一个“任务从 Host 进入 Device 的旅程”：
 
