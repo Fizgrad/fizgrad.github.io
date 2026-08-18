@@ -1430,6 +1430,72 @@ warp size、资源限制和具体指令能力属于目标相关信息，不应�
 - 共享/全局同步语义不可互相替代；
 - 在有 side effect 的路径，控制流重排要带着可见性和异常语义一起判断。
 
+### 12.1.2 SIMT 与 SIMD 的实质差别
+
+很多人会把 SIMT 当作“warp = SIMD”，这里最关键的差别是：
+
+- SIMD 通常是“位宽上的并行”：
+  - 一条向量指令操纵固定 lane 数；
+  - 每个 lane 更像一个数据槽，语义上更接近“按位并行”。
+- SIMT 是“线程上的并行”：
+  - 一组线程共享同一份指令流；
+  - 每个线程有自己的 PC、寄存器视图和分支掩码；
+  - 同一 warp 的控制流允许短时分叉，随后在收敛点归并。
+
+因此，SIMT 可以表现得像 SIMD 的常见情况，但当出现分支、同步、异常、共享内存冲突或 atomic 时，行为就不再是“纯向量语义”。  
+这也是编译器不能把 warp 全部当成固定宽度 SIMD lane 直接处理的原因之一。
+
+### 12.1.3 warp 的执行状态：active mask、divergence 与 reconvergence
+
+可以先用三个变量想象一条 warp 的执行：
+
+- `active mask`：当前周期参与执行的线程集合；
+- `divergence`：不同线程走不同控制流路径；
+- `reconvergence`：分叉后再次汇合到同一后续点。
+
+一个 if/else 在 warp 内可能按下面方式执行：
+
+```text
+Step 1：只跑 then 分支（active=掩码A）
+Step 2：只跑 else 分支（active=掩码B）
+Step 3：在 reconvergence point 处再次统一
+```
+
+这意味着：
+
+- 逻辑分支不会“并行一次性完成全部路径”；
+- 同一 warp 在高度分叉时会隐式变成串行段执行；
+- 编译器常见优化是减少路径数量或让热点路径更一致。
+
+对应可用的处理策略有：
+
+- 合理组织 threadIdx 映射，让同一 warp 处理同质数据；
+- 把 `if` 转成 `predication` + 无副作用表达式（并非万能）；
+- 重排循环与数据布局，减少分支分裂；
+- 在极端分叉场景把任务拆成更细粒度 kernel，换取更好 warp 一致性。
+
+### 12.1.4 一个最小示例：分支分叉的可见执行
+
+```cpp
+__global__ void branch_split(float* dst, const float* x, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return; // 边界检查
+
+    // 同一 warp 内若 if 条件不同，执行会分两段：
+    // 先处理 activeA = (i % 2 == 0) 的线程
+    // 再处理 activeB = (i % 2 != 0) 的线程
+    float v = x[i];
+    if ((i & 1) == 0) {
+        dst[i] = v * v;
+    } else {
+        dst[i] = -v;
+    }
+}
+```
+
+如果这类条件在整个 kernel 中反复出现，编译器和编译器驱动都更希望看到更高的分支一致性（例如按偶数/奇数拆 launch、重新排列数据、或用更适合无分支表达的算子版本）。  
+一旦这段代码里再叠一个 `atomic` 或有副作用写入，很多“看起来可重排”的优化就会失效，不能再随意消减分叉路径。
+
 ## 12.2 Reduction
 
 归约把一组元素通过结合运算合成一个结果，例如 sum、max。树形归约把串行深度从 `O(n)` 降到 `O(log n)`，总工作仍为 `O(n)`。
