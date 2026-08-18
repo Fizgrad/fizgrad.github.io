@@ -1399,20 +1399,32 @@ Grid
           → Thread
 ```
 
-`Kernel launch` 是 host 端把一个设备函数作为“并行入口”提交给 GPU 的动作。它主要包含两层含义：
+把这一段先按顺序读成一个“任务从 Host 进入 Device 的旅程”：
 
-- 调度含义：由 `grid` 和 `block` 决定有多少执行实例（blocks / threads）需要创建并发运行；
-- 参数含义：将线程索引、边界和设备参数映射到内核代码可见的 `blockIdx`、`threadIdx` 等。
+1. Host 决定 `grid` 和 `block`，并发起 `Kernel launch`；
+2. Device 按 `grid` 把任务切成多个 `block`；
+3. 每个 `block` 再由多个线程并行执行；
+4. 线程按 `warp`/`subgroup` 形成锁步执行组；
+5. 同组内共享同一条指令序列，按线程掩码动态收发执行。
 
-`Kernel launch` 一般是异步返回的：host 发起后立刻继续运行，GPU 与 CPU 并发执行；只有在同步点（如显式 `cudaDeviceSynchronize` 或事件/流依赖）才必须等待完成。
+`Kernel launch` 就是 Host 把一个设备函数作为并行入口提交给 GPU 的动作。它通常是异步返回的，Host 可以继续执行，只有在同步点才强制等待 kernel 完成。这个异步特性也是为什么代码里要明确区分 launch 开始时间、执行时间和结果读取时间。
 
-先把它当作一个“模型契约”理解：它描述了编译器在做并行划分时必须守住的语义边界。
+### 12.1.1 `Kernel launch` 与并发执行边界
 
-1. Host 侧发起 `Kernel launch`，确定 grid/block 配置，调用是异步返回；
-2. 进入 device 后按 `block` 划分执行实例；
-3. block 里的线程继续按 `warp`/`subgroup` 参与锁步执行；
-4. 同一 block 可通过 shared memory + barrier 进行合作；不同 block 一般不能依赖普通 barrier 做全局同步；
-5. 线程、block 之外的可见性和同步规则由目标平台定义，不能跨后端硬编码。
+`Kernel launch` 只决定入口和调度参数，不会立即等同于“所有结果已写回”。通常要配合以下机制建立边界：
+
+- grid/block 配置：决定 block 数量、每 block 线程数；
+- 索引可见性：形成 `blockIdx`、`threadIdx` 等编译后可用的语义输入；
+- 同步边界：`cudaDeviceSynchronize`、流事件、stream 依赖；
+- 错误/边界检查：启动时参数合法性与运行时越界行为。
+
+### 12.1.2 block 的切分与 index 映射
+
+把“block 划分执行实例”落成可计算规则：
+
+- 每个 block 是一个可独立调度的执行实例；
+- 每个实例执行同一段 kernel 代码；
+- 每个实例处理的数据片段不同，通过索引公式区分。
 
 ```mermaid
 flowchart TD
@@ -1423,12 +1435,7 @@ flowchart TD
     T --> MEM[Private / Shared / Global]
 ```
 
-### block 划分与 index 映射
-
-用一句话说：
-`block` 就是“把总任务按子任务切片”；每个 `block` 都是一个可被独立调度的执行实例，执行同一段 kernel 代码，但处理不同数据片段。
-
-1D 映射最常见的写法是：
+最常见的 1D 映射是：
 
 ```text
 global_index = blockIdx.x * blockDim.x + threadIdx.x
@@ -1452,21 +1459,7 @@ index = row * pitch + col
 
 这样一来，“block 划分执行实例”就不只是术语，而是一个清晰的工作划分与地址计算规则。
 
-因此编译器在降低时不能直接固定 `warp=32` 等硬件常量，常见的安全做法是：
-
-- 先用抽象层级（grid/block/thread/subgroup）表达并行；
-- 再在目标后端把子组大小、同步语义、线程上限与内存子系统映射到实参；
-- 需要时把通用策略拆成多个版本（例如面向不同设备/shape 的 specialized kernel）。
-
-warp size、资源限制和具体指令能力属于目标相关信息，不应与高层模型混为一谈。
-
-### 12.1.1 识别常见误区
-
-- 不是所有分支都能直接 predication；
-- 共享/全局同步语义不可互相替代；
-- 在有 side effect 的路径，控制流重排要带着可见性和异常语义一起判断。
-
-### 12.1.2 SIMT 与 SIMD 的实质差别
+### 12.1.3 SIMT 与 SIMD 的实质差别
 
 很多人会把 SIMT 当作“warp = SIMD”，这里最关键的差别是：
 
@@ -1481,36 +1474,47 @@ warp size、资源限制和具体指令能力属于目标相关信息，不应�
 因此，SIMT 可以表现得像 SIMD 的常见情况，但当出现分支、同步、异常、共享内存冲突或 atomic 时，行为就不再是“纯向量语义”。  
 这也是编译器不能把 warp 全部当成固定宽度 SIMD lane 直接处理的原因之一。
 
-### 12.1.3 warp 的执行状态：active mask、divergence 与 reconvergence
+### 12.1.4 warp 与 subgroup 的锁步执行
 
-可以先用三个变量想象一条 warp 的执行：
-
-- `active mask`：当前周期参与执行的线程集合；
-- `divergence`：不同线程走不同控制流路径；
-- `reconvergence`：分叉后再次汇合到同一后续点。
-
-一个 if/else 在 warp 内可能按下面方式执行：
+锁步并不是“所有线程永远同步”，而是“线程集合在同一时刻共享同一条指令入口前进”。  
+它依赖 `active mask` 决定哪些线程当前参与，哪些线程暂时不参与。
 
 ```text
-Step 1：只跑 then 分支（active=掩码A）
-Step 2：只跑 else 分支（active=掩码B）
-Step 3：在 reconvergence point 处再次统一
+warp 内线程：t0 t1 t2 t3 t4 t5 t6 t7
+指令序列： A B C D E
+执行时序（示意）：
+  A：t0,t1,t2,t3,t4 有效
+  B：t4,t5,t6,t7 有效（divergence）
+  C：全体有效（mask 恢复）
 ```
 
-这意味着：
+如果目标提供 subgroup 抽象，warp 里的协作通信通常通过 `shuffle`、`vote`、`broadcast` 这类原语落在 subgroup 上实现。
 
-- 逻辑分支不会“并行一次性完成全部路径”；
-- 同一 warp 在高度分叉时会隐式变成串行段执行；
-- 编译器常见优化是减少路径数量或让热点路径更一致。
+### 12.1.5 典型控制流形态：active mask / divergence / reconvergence
 
-对应可用的处理策略有：
+把三个概念放在同一段更直观：
 
-- 合理组织 threadIdx 映射，让同一 warp 处理同质数据；
-- 把 `if` 转成 `predication` + 无副作用表达式（并非万能）；
-- 重排循环与数据布局，减少分支分裂；
-- 在极端分叉场景把任务拆成更细粒度 kernel，换取更好 warp 一致性。
+- `active mask`：当前参与该指令执行的线程集合；
+- `divergence`：条件导致部分线程走不同路径；
+- `reconvergence`：不同路径再次回到同一后继点。
 
-### 12.1.4 一个最小示例：分支分叉的可见执行
+一个 `if/else` 在 warp 内通常会是两段执行：
+
+```text
+Step 1：执行 then（active=掩码A）
+Step 2：执行 else（active=掩码B）
+Step 3：在 reconvergence point 汇合
+```
+
+理解方式：分支并行性不会变成“立即所有路径同时完成”，而是路径切片串行执行。高度分岐时，吞吐与隐含延迟都会受影响。
+
+处理上通常有三类动作：
+
+- 用数据重排减少同一 warp 内的路径差异；
+- 对简单场景用 predication；
+- 无法改善时拆分 kernel 或改写数据通路。
+
+### 12.1.6 一个最小示例：分支分叉的可见执行
 
 ```cpp
 __global__ void branch_split(float* dst, const float* x, int n) {
@@ -1532,36 +1536,12 @@ __global__ void branch_split(float* dst, const float* x, int n) {
 如果这类条件在整个 kernel 中反复出现，编译器和编译器驱动都更希望看到更高的分支一致性（例如按偶数/奇数拆 launch、重新排列数据、或用更适合无分支表达的算子版本）。  
 一旦这段代码里再叠一个 `atomic` 或有副作用写入，很多“看起来可重排”的优化就会失效，不能再随意消减分叉路径。
 
-### 12.1.5 为什么说 warp/subgroup “锁步执行”
+### 12.1.7 编译阶段常见问题排查
 
-可以把锁步理解为：一段时间内，参与执行的线程集合共享同一条指令入口，按同一节拍推进。  
-区别在于，未满足条件的线程会被掩码临时屏蔽，不参与这条指令的实际写入动作。
-
-```text
-warp 内线程：t0 t1 t2 t3 t4 t5 t6 t7
-指令序列： A B C D E
-执行时序（示意）：
-  A：t0,t1,t2,t3,t4 有效
-  B：t4,t5,t6,t7 有效（divergence）
-  C：全体有效（mask 恢复）
-```
-
-更直接地说：
-
-- 锁步是执行粒度，不是语义限制；
-- 只要 active mask 相同，编译器可把它视作高效的批量执行；
-- 一旦 active mask 改变（分支后），执行被分段化；
-- 如果目标提供 `subgroup` 抽象，`warp` 的操作通常要映射为该 subgroup 的同类原语（如 `shuffle`、`vote`、`broadcast`）；
-- subgroup 大小不是标准固定值，不能把“当前教程里的某一数值”硬编码进高层优化策略。
-
-因此，“warp 锁步”意味着编译器在做代码重排时，需要同时关心：
-
-- active mask 是否可预测；
-- barrier 和原子是否依赖了某些线程；
-- 分支是否会导致多次串行段执行；
-- 同一 subgroup 的通信原语是否在目标语义下安全。
-
-这也是很多 GPU 编译策略会先做“统一控制流概率分析”，再决定是否拆分 kernel 或改写为更容易保持一致性的版本。
+- `warp=32` 不能作为高层固定常量使用；先抽象再由目标后端映射；
+- 不能把 barrier 语义当成普通循环 barrier 使用；
+- 分叉场景里不能无脑做 predication，尤其有副作用路径时；
+- block 范围外的可见性和同步规则必须在模型外侧说明，不能默认。
 
 ## 12.2 Reduction
 
