@@ -1423,6 +1423,35 @@ flowchart TD
     T --> MEM[Private / Shared / Global]
 ```
 
+### block 划分与 index 映射
+
+用一句话说：
+`block` 就是“把总任务按子任务切片”；每个 `block` 都是一个可被独立调度的执行实例，执行同一段 kernel 代码，但处理不同数据片段。
+
+1D 映射最常见的写法是：
+
+```text
+global_index = blockIdx.x * blockDim.x + threadIdx.x
+```
+
+其中：
+
+- `blockIdx.x`：当前 block 的编号（来自 grid 切分）
+- `blockDim.x`：每个 block 内线程数
+- `threadIdx.x`：block 内线程编号
+
+在这个模型下，kernel 通常会用 `global_index` 去索引输入/输出数组，这就把“并行实例划分”变成了“每个 thread 处理一个或多个元素”的数据映射问题。
+
+二维 kernel 的常见扩展：
+
+```text
+row = blockIdx.y * blockDim.y + threadIdx.y
+col = blockIdx.x * blockDim.x + threadIdx.x
+index = row * pitch + col
+```
+
+这样一来，“block 划分执行实例”就不只是术语，而是一个清晰的工作划分与地址计算规则。
+
 因此编译器在降低时不能直接固定 `warp=32` 等硬件常量，常见的安全做法是：
 
 - 先用抽象层级（grid/block/thread/subgroup）表达并行；
