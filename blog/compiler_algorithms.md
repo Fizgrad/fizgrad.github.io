@@ -1399,6 +1399,28 @@ Grid
           → Thread
 ```
 
+```text
+Grid：一次 kernel 的全部执行任务边界。gridDim 决定有多少 block 实例。
+  - 语义：把“总任务”划分为许多个并发工作单元。
+  - 典型参数：grid.x / grid.y / grid.z。
+  - 编译意义：决定 launch 规模、全局索引上界和块级并发粒度。
+
+Block / CTA：一个可被独立调度的执行实例。每个 block 内有多个 Thread，且可共享共享内存和 barrier。
+  - 语义：块内线程协作处理一小片数据。
+  - 典型参数：blockIdx（块编号）、blockDim（每块线程规模）、blockDim.x/y/z。
+  - 编译意义：决定本地同步边界、shared memory 使用和 block 粒度策略。
+
+Warp（或 Subgroup）：Block 内一组固定规格的线程集合，SIMT 中常见的锁步执行粒度。
+  - 语义：同一 warp 内线程通常走同一指令流，在分支时表现为分片执行。
+  - 典型参数：subgroup 大小依赖目标，不应在高层模型硬编码。
+  - 编译意义：决定分支代价评估、shuffle/vote/broadcast 通信成本与映射策略。
+
+Thread：最小执行实例，拥有独立线程上下文中的寄存器与执行位点。
+  - 语义：最终完成一个或多个逻辑元素的数据处理。
+  - 典型参数：threadIdx（在线程索引空间内唯一）。
+  - 编译意义：决定寄存器分配、循环体内地址计算、边界裁剪和 predication 可行性。
+```
+
 把这一段先按顺序读成一个“任务从 Host 进入 Device 的旅程”：
 
 1. Host 决定 `grid` 和 `block`，并发起 `Kernel launch`；
