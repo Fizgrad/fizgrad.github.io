@@ -2625,7 +2625,62 @@ IRTranslator 把 LLVM IR 翻译成 gMIR：
 
 函数参数和返回值还要遵守 ABI，例如 AArch64 的 i32 参数/返回值通常通过 `$w0`、`$w1` 传递。
 
-### 10.3.4 Legalizer
+### 10.3.4 AArch64 调用约定（ARM64 Calling Convention）
+
+`call` 与 `ret` 是 ABI 交互点。LLVM 看到调用 IR 后，先按目标调用约定决定参数和返回值要落在哪些位置，再继续做合法化与寄存器分配。AArch64 后端对应规则主要在 `AArch64CallingConvention.td`、调用约定 lowering 逻辑和 prologue/epilogue/栈对齐中体现。
+
+核心规则（Linux/ELF 常见）：
+
+```text
+x0~x7：整数/指针参数前 8 个；返回整数/指针也优先放 x0 / x1
+w0~w7：同上对应 32 位视图（实际仍是 x0~x7）
+v0~v7：浮点与 SIMD 参数前 8 个；返回浮点/向量常走 v0 / v1
+x8：隐式返回（sret/indirect result）或平台工具寄存器（具体取决于 ABI 约定细节）
+x16/x17：过程内临时寄存器（IP0/IP1），通常由调用序列中的链接器胶水使用
+x18：平台保留寄存器（Linux 常见用于 TP 相关访问）
+x19~x28：callee-saved，需要被调用者保存恢复
+x29：frame pointer（如果启用）
+x30：link register（返回地址）
+```
+
+V 寄存器侧重点：
+
+```text
+v8~v15：callee-saved（调用者可以假设被保存）
+v0~v7、v16~v31：caller-saved
+```
+
+参数溢出和栈对齐：
+
+```text
+前 8 个 GPR / 前 8 个 V 寄存器用完后，参数才按 8 字节槽位入栈传递
+call 前 SP 通常要求 16 字节对齐（对应 AAPCS64 的基本规则）
+目标没有 red zone，不能依赖“调用边界下方的天然空隙”
+```
+
+返回规则（常见）：
+
+```text
+标量 / 指针：x0
+两个标量：x0 + x1
+标量 + 向量：x0 + v0
+超过寄存器承载能力的返回：采用间接返回（sret）方式
+```
+
+在 LLVM 中可以按这条链路理解：
+
+```mermaid
+flowchart LR
+    IRCall["LLVM IR call/ret"] --> CC["TargetCallingConv/CallLowering"]
+    CC --> Reg["按 ABI 放寄存器（x/v regs）"]
+    CC --> Stack["超出寄存器时走栈槽"]
+    Reg & Stack --> MIS["MachineInstr / MachineFunction"]
+    MIS --> RA["Register Allocation + Frame Lowering"]
+```
+
+这段逻辑解释了一个关键现象：为什么同样一段 LLVM IR，换目标（x86、AArch64）后参数布局、栈帧形态会变化，但语义仍一致——语义在 IR，位置在 ABI/后端。
+
+### 10.3.5 Legalizer
 
 Legalizer 判断：这个 `G_* opcode + LLT` 组合目标机器是否支持。
 
@@ -2643,7 +2698,7 @@ Unsupported
 
 例如目标不支持 `s7` 加法，可能 widen 到 `s32`，计算后再 truncate。
 
-### 10.3.5 RegBankSelect
+### 10.3.6 RegBankSelect
 
 RegBankSelect 不是寄存器分配。它只是选择寄存器银行：
 
@@ -2663,7 +2718,7 @@ flowchart LR
 
 真正的物理寄存器分配发生在 Register Allocation。
 
-### 10.3.6 InstructionSelect
+### 10.3.7 InstructionSelect
 
 最后把 generic opcode 换成目标 opcode：
 
@@ -2677,7 +2732,7 @@ flowchart LR
 
 > GlobalISel 直接在 MIR 体系里完成指令选择。它先用 IRTranslator 把 LLVM IR 翻译成带 `G_*` opcode 的 gMIR，再由 Legalizer 合法化类型和操作，由 RegBankSelect 选择寄存器银行，最后由 InstructionSelect 选择目标机器指令。RegBankSelect 不是寄存器分配，它只是决定 GPR/FPR 等寄存器银行。
 
-### 10.3.7 Register Bank、Register Class 与 Physical Register
+### 10.3.8 Register Bank、Register Class 与 Physical Register
 
 三者不要混为一谈：
 
