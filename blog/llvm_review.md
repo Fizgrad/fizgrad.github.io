@@ -1127,6 +1127,37 @@ always_inline / noinline 属性
 
 # 6. 常见中端优化 Pass
 
+## 6.0 中端优化的一条“链式边界图”
+
+很多问题不是单独某一条 pass，而是“这条值/路径是否满足下一个 pass 的前提”：
+
+```mermaid
+flowchart TD
+    G[IR CFG] --> DT[DominatorTree]
+    DT --> DF[Dominance Frontier]
+    DF --> M2R[mem2reg]
+    M2R --> Phi[PHI / SSA]
+    Phi --> S[SimplifyCFG / InstCombine]
+    S --> GVN[GVN + DSE + LICM]
+    GVN --> AA[AA / ModRef]
+    AA --> MSSA[MemorySSA]
+    MSSA --> M2R2[Load 消除 / Reorder 安全性]
+    GVN --> Li[LoopInfo / SCEV]
+    Li --> Vec[Loop Unroll / Vectorizer]
+    Vec --> SC[后续 codegen]
+```
+
+先用一个判断框架看边界：
+
+```text
+是否满足控制流不变量？ -> Dominator / LoopInfo
+是否满足内存可证明不别名？ -> AA / MemorySSA / ModRef
+是否满足语义（UB/poison/volatile/atomic）未被扩展？ -> Pass-local 安全条件
+```
+
+下面每个 pass 都会带这三类边界：  
+控制流、内存、语义。
+
 ## 6.1 mem2reg
 
 作用：
@@ -1180,6 +1211,33 @@ mem2reg 基于 Dominator Tree 和 SSA 构造算法
 遇到地址逃逸、复杂内存使用时无法提升
 ```
 
+### 6.1.1 边界条件
+
+```text
+1) 可提升对象约束
+   - 以 entry block 中的局部 alloca 为主
+   - 大小可静态确定，且通常是标量/可拆分标量
+
+2) 内存访问形态约束
+   - load/store 使用 value type 一致
+   - 避免“store of ptr”把地址带出，避免外部别名路径被打断
+   - 遇到复杂 GEP/bitcast 链接、不可判别访问时通常退化保守
+
+3) 语义约束
+   - volatile load/store 不提升
+   - 原子/外部可观察操作要保守处理
+   - 潜在可触发 UB 的访问（如非法内存）不能跨路径“合成”
+```
+
+### 6.1.2 常见退化处理
+
+```text
+single store           -> 常量/替换式消除
+dead alloca            -> 直接删除
+non-promotable pattern  -> 保留内存语义，等待后续 SROA 或其他 pass
+```
+
+mem2reg 的边界是“能否安全变成 SSA”，不是“有无优化价值”。
 
 
 ## 6.2 SROA
@@ -1217,6 +1275,22 @@ flowchart TD
 简要概括：
 
 > mem2reg 更像是把简单局部变量从内存提升到 SSA；SROA 先把聚合对象拆碎，再让后续 mem2reg、InstCombine、DCE 等优化发挥作用。
+
+### 6.2.1 边界条件
+
+```text
+可推进：
+1) 固定大小聚合对象（struct/array）可静态建模
+2) 字段访问可映射为明确子对象
+3) 访问形态能在子对象层面保持有序替换
+
+退化边界：
+1) 不规则 GEP/bitcast 导致子对象映射无法证明
+2) 大量外部 alias/escape、对齐不清晰
+3) 目标优化收益不够高时，仍保留内存语义
+```
+
+SROA 先确保“聚合可拆且可证”。拆不动的子对象不硬拆，避免误消语义。
 
 
 
@@ -1282,6 +1356,19 @@ InstCombine 的关键词是 **canonicalization**。例如：
 
 > InstCombine 是 IR 层目标无关 canonicalization pass。它做局部 peephole 化简和表达式规范化，比如 `x+0 -> x`、`x*2 -> x<<1`、比较谓词规范化。它的价值不只是减少当前指令数量，更是把 IR 变成后续优化可以稳定依赖的 canonical form。
 
+### 6.3.1 边界条件
+
+```text
+1) 保持单指令语义等价，不做 control-flow 重构
+2) 有副作用/可触发异常的路径保守：
+   - volatile、atomic、fence、invoke、可能 trap 的算术不随意替换
+3) 保持数学标志与浮点语义一致（nsw/nuw/nsz/fast-math）
+4) 不把未定义路径的计算提前到可观察行为前
+5) 不能把“可执行但语义改变较大”的重排当作化简
+```
+
+InstCombine 的边界是“在原 CFG 下、同一语义下的本地正规化”。
+
 ## 6.4 SimplifyCFG
 
 作用：
@@ -1318,6 +1405,17 @@ br label %A
 可能更新 phi
 常和 InstCombine 交替运行
 ```
+
+### 6.4.1 边界条件
+
+```text
+1) 折叠/合并必须保持行为一致
+2) 可达性判断需保证异常边界和控制边不变
+3) volatile/atomic/fence/landingpad 引发的语义不能丢失
+4) 只在 CFG 等价下移动 PHI 与分支，不跨越并发可见副作用
+```
+
+典型失败情况：把只有 `dead edge` 内的 volatile 读写拿掉，会把“硬件轮询/外设触发”语义抹掉。
 
 
 ## 6.5 DCE / ADCE
@@ -1514,6 +1612,23 @@ Live --> Delete[删除未标记指令]
 
 在 LLVM 优化流程中，DCE/ADCE 通常配合 InstCombine、GVN、SimplifyCFG 等 Pass 使用，因为前面的优化经常会产生新的死代码，需要后续 Pass 清理。
 
+### 6.5.1 边界条件
+
+```text
+DCE 边界：
+1) 只删“结果不用且无副作用”
+2) side effect 来源包括：
+   - store / call / volatile / atomic / fence / control transfer
+3) 不能删 control token/terminator（br、ret、invoke unwind）
+
+ADCE 边界：
+1) 根集合要包含所有可观察行为
+2) 只删“不会改变可到达行为”和“无异常可见性影响”的子图
+3) 对可能产生 trap 的路径，即使数据 unused 也不能盲删
+```
+
+即使 DCE 看起来很“局部”，根本还是：我删掉后是否还能保证对运行时可观察行为等价。
+
 
 
 ## 6.6 GVN
@@ -1667,6 +1782,24 @@ flowchart RL
 
 MemorySSA 不直接证明两个指针 NoAlias，它把内存 def-use 链组织得更高效；是否能跳过某个 MemoryDef，仍依赖 Alias Analysis、调用属性和访问大小等信息。
 
+### 6.6.6 边界条件
+
+```text
+1) 语义等价前提
+   - 同 opcode/type/flags，含 volatile 与 poison 语义一致
+2) 支配关系前提
+   - 旧值必须支配当前替换点
+3) 内存安全前提（load/pure 内存读取）
+   - 无未知 clobber 的 store/call/atomic 介入
+4) alias/size 前提
+   - 地址区间可判定，MayAlias 时不能跨 clobber
+5) 调用边界前提
+   - readonly/readnone 的外部调用可做更多替换，其他默认保守
+```
+
+GVN 的边界本质是：  
+“等价且能支配的值才可替换”。
+
 
 ## 6.7 SCCP
 
@@ -1706,6 +1839,18 @@ return 10;
 简要概括：
 
 > SCCP 同时在值 lattice 和 CFG 可达性上做稀疏分析。它不只是传播常量，还能发现某些分支不可达，从而进一步触发 CFG 简化和死代码删除。
+
+### 6.7.1 边界条件
+
+```text
+1) 值域是 3 态（constant/overdefined/underdefined），不能“过分确定”
+2) 可执行性（executable）与值域必须同步收敛
+3) 对有副作用路径只能保守保留
+4) 外部输入/未知调用常保持 overdefined，不会被误报为常量
+5) 控制流异常（trap、unreachable）作为行为约束不会被忽略
+```
+
+SCCP 的边界比“常量传播”更严：它可删掉分支，但不能删掉潜在未定义行为观察到的行为。
 
 
 ## 6.8 LICM
@@ -1753,6 +1898,21 @@ for (int i = 0; i < n; i++) {
 
 “循环不变”只是外提的必要条件之一。若循环可能零次执行，外提会让指令无条件运行；除零、无效地址访问以及可能产生 poison 的操作都需要额外证明。LLVM 通常结合 `isSafeToSpeculativelyExecute`、must-execute 分析、AliasAnalysis 和 MemorySSA 判断合法性。
 
+### 6.8.2 边界条件
+
+```text
+1) 必须有明确循环边界结构（LoopInfo、preheader）
+2) 外提指令要满足：
+   - invariant
+   - 可支配
+   - 不引入新的异常路径
+3) 内存操作需 AA/MemorySSA 证明无效 clobber
+4) must-execute 前提
+   - 零次循环场景不能引入本来不会执行的副作用
+```
+
+LICM 是“收益驱动 + 正确性约束”双重 pass，尤其在高优化里会和 LoopRotate/LoopSimplify 配合。
+
 
 ## 6.9 Loop Vectorizer 和 SLP Vectorizer
 
@@ -1768,6 +1928,23 @@ LLVM 主要有两类向量化器：
 简要概括：
 
 > Loop Vectorizer 关注跨迭代并行，核心问题是依赖分析、trip count、cost model、remainder loop；SLP Vectorizer 关注一个基本块或局部区域内相似 scalar expression 的打包。
+
+### 6.9.1 边界条件
+
+```text
+Loop Vectorizer：
+1) 必须满足跨迭代独立或可证明可矢量化依赖关系
+2) 指针/内存布局必须满足对齐与别名检查
+3) 控制流复杂（分支/异常）时通常不会直接向量化
+4) remainder 与 trip-count 需要额外路径保持边界一致
+
+SLP Vectorizer：
+1) 主要在单基本块做 pack，跨块/跨迭代通常不做
+2) 依赖链中有副作用/volatile 时不会打包
+3) 与后端向量宽度/寄存器压力存在代价权衡
+```
+
+向量化总的边界：合法性优先，收益其次。legal 通过但不盈利时不必强行变换。
 
 
 
@@ -1805,6 +1982,19 @@ add x5, x1, x6     ; 依赖 load 结果
 ```
 
 调度不删除计算，只是在不破坏数据依赖、内存依赖、控制依赖的前提下重排机器指令。它还要控制 register pressure，过度提前计算会拉长 live range，导致 spill。
+
+### 6.10.1 边界条件
+
+```text
+CSE / GVN：
+1) 不能跨越 side effect 或 volatile/atomic 边界
+2) 不改变 CFG 与可达性
+
+Instruction Scheduling：
+1) 不允许破坏目标 ISA 的 resource 与 hazard 约束
+2) 保留数据依赖、内存依赖与控制依赖
+3) 不能依赖寄存器分配前的理想状态去移动（受实际 register pressure 限制）
+```
 
 ## 6.11 LoopRotate
 
@@ -1845,6 +2035,15 @@ flowchart LR
 ```
 
 对可能零次执行的循环，LoopRotate 需要 guard，否则会把原本不执行的循环体提前执行，改变语义。
+
+### 6.11.1 边界条件
+
+```text
+1) 不是“必须做”，是对后续 pass 有利的规范化
+2) 必须处理 zero-trip loops，否则会提前执行本不该执行的循环体
+3) 无法突破有副作用顺序关键路径
+4) 复杂异常/多出边循环不一定可安全旋转
+```
 
 ## 6.12 Loop Pass 家族：Unswitch、Unroll、Vectorize、IndVarSimplify、Deletion
 
@@ -1949,6 +2148,57 @@ atomic
 可能不终止且不终止本身不能被忽略
 ```
 
+### 6.12.1 Loop 家族边界补充
+
+#### 6.12.1.1 LoopUnswitch
+
+```text
+1) 条件需在循环内不变
+2) 条件计算若可能产生 poison，通常要 freeze 或放弃
+3) 代码复制会增大体积，cost model 约束是否执行
+4) 副作用观察路径不能越界重排
+```
+
+#### 6.12.1.2 LoopUnroll
+
+```text
+1) 对 trip count 可推导性敏感；未知时通常做部分展开
+2) remainder/尾循环保持边界一致
+3) 需要权衡寄存器压力与 I-cache
+```
+
+#### 6.12.1.3 IndVarSimplify
+
+```text
+1) 将 IV 规整化不会改变每次迭代语义
+2) 溢出语义(nsw/nuw)需保留
+3) 非标准控制流或不规范 latch 时可能保留原态
+```
+
+#### 6.12.1.4 LoopDeletion
+
+```text
+1) 只删“无可观察副作用”且可证无后续行为影响的循环
+2) 有 volatile/atomic / call side effect 的循环不删
+3) 不能删除与同步/计时/调试行为有关的循环空转
+```
+
+#### 6.12.1.5 LoopVectorize
+
+```text
+1) 跨迭代可矢量化前提
+   - 需要可证明的迭代独立性或可控依赖
+   - 指针/地址步幅必须兼容向量 lane 映射
+
+2) 关键边界
+   - 控制流分支会触发 predication 或尾循环处理，不符合则不向量化
+   - alignment 与 alias 检查不通过时保持 scalar
+   - remainder 处理必须和原 trip count 行为一致
+
+3) 代价边界
+   - 寄存器压力、mask 分支代价、目标向量指令可用性不足会抑制变换
+```
+
 ## 6.13 Machine LICM 和 IR LICM
 
 `LICM` 工作在 LLVM IR 层，处理 `Instruction`；`MachineLICM` 工作在后端 MachineInstr 层，处理目标相关或半目标相关机器指令。
@@ -1962,6 +2212,17 @@ atomic
 | 风险 | 移动后可能改变 UB/内存语义 | 更直接影响寄存器压力、spill、调度 |
 
 为什么有了 IR LICM 还需要 Machine LICM？因为有些循环不变代码在后端才出现，例如常量 materialization、地址计算、target-specific pseudo、frame/global address lowering 后的指令。Machine LICM 是补充，不是 IR LICM 的替代品。
+
+### 6.13.1 边界条件
+
+```text
+1) 仅在机器级分析下可见的不变式才可移动
+2) 受 target pipeline、寄存器资源、指令流水约束
+3) 不能移动可能触发异常、fence 或原子语义的指令
+4) 仍需保留与上层 CFG、寄存器生命周期兼容
+```
+
+Machine LICM 是 IR LICM 的补充：能处理后端显露的热点指令，但也更依赖目标指令语义。
 
 # 7. Analysis 基础
 
@@ -1989,6 +2250,18 @@ strictly dominate
 immediate dominator
 dominator tree
 dominance frontier
+```
+
+### 7.1.1 Dominance Frontier 的边界
+
+```text
+DF 用于“定义合流后应在哪些块插 PHI”。
+
+边界条件：
+1) 仅在“有控制流合流且定义可达”时有意义
+2) 与 liveness 结合后才是 pruned-DF，能减少死 PHI
+3) 对异常控制流/不规则 CFG 会出现额外边界，插 PHI 也要结合 SSA 合法性
+4) 仅是结构线索，不能替代别名/值流语义判断
 ```
 
 思考题：
@@ -2124,6 +2397,34 @@ Instruction scheduling
 
 > 优化器想移动、删除、合并内存访问时，必须知道这些访问之间是否可能别名。如果 AA 只能给出 MayAlias，优化就必须保守。
 
+### 7.5.1 AA 的边界条件
+
+```text
+1) 结果保守且常是“上界”
+   - MayAlias 意味着“可能别名”，不是“肯定有别名”
+   - 不能把 MayAlias 当作必须发生冲突
+
+2) 只比较“内存 region”，不仅比较指针数字
+   - 起始地址 + 访问范围（size）共同决定是否可重叠
+   - 同起始地址、不同 size 不等于“一定冲突”
+   - 未知索引/变长访问会让分析降级到更保守结果
+
+3) 调用边界约束
+   - 未知调用、无属性函数常被按可 clobber 处理
+   - 读写属性（readonly/readnone/noalias）缺失会放大 MayAlias
+   - 跨模块/外部链接信息不全时同样保守
+
+4) 结构化信息边界
+   - 有 TBAA、restrict、alias scope 时精度提升
+   - 缺失这些信息即使语义上区分明显，仍可能保守
+
+5) 语义边界
+   - volatile / atomic / fence 相关访问的可见行为不能被 AA 本身“消除”
+   - 原子/内存模型语义会限制“可重排”和“可删除”范围
+```
+
+一句话：AA 能回答“可否证明不冲突”，不能单独回答“都能如何优化”；它需要和 Dominator、MemorySSA/ModRef、目标语义一起做最终裁决。
+
 
 
 ## 7.6 MemorySSA
@@ -2159,6 +2460,27 @@ MemorySSA 名字中有 SSA，但它并不是“每个字节都有一个版本号
 - `MemoryPhi`：在 CFG 合流处合并来自不同前驱的内存状态。
 
 实际判断一个 Def 是否真的 clobber 某个 Use，还需要 LocationSize、AA、函数属性、volatile/atomic 语义等信息。
+
+### 7.6.2 MemorySSA 的边界与失效情形
+
+```text
+1) 它是依赖骨架，不是完整证明器
+   - 能快速给出“可能的 clobber 来源”候选
+   - 但是否真的可替换，仍要配合 AA / ModRef / size
+
+2) 不同地址空间、未知 size 的保守边界
+   - 不确定大小/未知地址域会使 walk 更保守
+   - 结果仍然正确，但机会会更少
+
+3) 与可观察语义绑定
+   - volatile、atomic、调用副作用可能把大量访问视为强 clobber
+   - 对异常、同步边界也要保持 conservative
+
+4) CFG 变更后失效风险高
+   - split block / 删除边 / 重排 terminator 后，
+     MemoryDef/Use/Phi 关系可能过期
+   - 不能拿过期关系做 GVN/LICM 决策（会误删或误改序）
+```
 
 
 
