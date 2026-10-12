@@ -3452,6 +3452,8 @@ MLA 的收益来自用额外投影和更复杂 Kernel 换取较小 KV Cache，�
 
 训练框架中的模型由张量算子组成，例如 Linear、RMSNorm、Attention 和 Top-k；硬件真正执行的则是经过布局选择、分块和并行映射的 Kernel。Operator 描述“要计算什么”，Kernel 描述“在特定硬件上怎样计算”。一个 Operator 可以根据形状、数据类型和设备选择多个 Kernel，也可能与相邻 Operator 融合成一个 Kernel。
 
+从模型捕获、多层 IR、图优化、Kernel 生成到 Runtime，以及 PyTorch、OpenXLA、TVM、IREE、TensorRT、ONNX Runtime、OpenVINO 和 Triton 各自所处的层级，见[AI Compiler：从计算图到硬件执行](post.html?slug=ai_compiler)。本节只保留模型侧进入编译系统所需的最短主线。
+
 Eager Execution 每执行一条框架语句就立即调度对应运算，便于调试和动态控制流；Graph Execution 先捕获一段计算图，再跨算子分析和优化。图模式能做更多全局优化，但动态形状、数据依赖控制流和副作用会增加捕获与编译难度。编译不是简单把 Python 翻译成 CUDA，而是逐层降低抽象：
 
 ```text
@@ -3470,7 +3472,7 @@ MLIR 如何用 Operation、Dialect、Rewrite、Bufferization 和 Dialect Convers
 
 内存规划根据张量生命周期复用 Buffer，并在计算与通信之间安排拷贝。静态形状便于提前选 Tile 和分配内存，动态形状则可能需要 Shape Guard、多个编译版本或通用但较慢的回退 Kernel。推理引擎还负责请求调度、KV Cache 和分布式通信，AI Compiler 主要优化图与 Kernel；二者协作但不是同一层系统。
 
-CFG、数据流、融合、布局、Tiling、GPU 映射和成本模型在[编译器与高性能系统算法](post.html?slug=compiler_algorithms)中继续展开。
+CFG 与数据流在[编译器与高性能系统算法](post.html?slug=compiler_algorithms)中继续展开；融合、布局和成本模型见[张量计算、融合与性能算法](post.html?slug=tensor_compiler_algorithms)；Tiling 与 GPU 映射见[GPU Kernel 编译与 Lowering](post.html?slug=gpu_kernel_lowering)。
 
 ---
 

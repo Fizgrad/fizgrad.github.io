@@ -21,3 +21,6 @@ __pycache__/
 
 # Systems Lab local submissions and build workspaces
 /systems-lab-work/
+
+# Resumable blog translation cache (generated English Markdown is tracked)
+/tools/.translation-cache/

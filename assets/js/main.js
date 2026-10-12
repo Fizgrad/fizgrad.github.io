@@ -25,6 +25,16 @@
       blogTitle: "博客",
       blogSub: "所思所写",
       blogReadMore: "阅读全文",
+      blogSearchLabel: "搜索文章",
+      blogSearchPlaceholder: "标题或简介",
+      blogPaginationAria: "博客分页",
+      blogPrevious: "上一页",
+      blogNext: "下一页",
+      blogPageAria: "第 {page} 页",
+      blogResults: "第 {start}–{end} 篇，共 {total} 篇",
+      blogNoResults: "共 0 篇",
+      blogEmpty: "没有找到相关文章",
+      blogLoadError: "博客列表加载失败，请刷新重试",
       toolsTitle: "工具",
       toolsSub: "站内小工具",
       footerBuilt: "使用 GLM-5.2 构建",
@@ -57,6 +67,16 @@
       blogTitle: "Blog",
       blogSub: "Thoughts and writings",
       blogReadMore: "Read more",
+      blogSearchLabel: "Search articles",
+      blogSearchPlaceholder: "Title or description",
+      blogPaginationAria: "Blog pagination",
+      blogPrevious: "Previous",
+      blogNext: "Next",
+      blogPageAria: "Page {page}",
+      blogResults: "{start}–{end} of {total} articles",
+      blogNoResults: "0 articles",
+      blogEmpty: "No matching articles",
+      blogLoadError: "Could not load articles. Please refresh to try again.",
       toolsTitle: "Tools",
       toolsSub: "Built-in utilities",
       footerBuilt: "Built with GLM-5.2",
@@ -252,6 +272,10 @@
   var phrases = dict.phrases;
   var typePi = 0, typeCi = 0, typeDeleting = false, typeTimer = null;
   var blogPosts = null;
+  var BLOG_PAGE_SIZE = 9;
+  var blogPage = 1;
+  var blogSearch = "";
+  var blogLoadFailed = false;
 
   function detectLang() {
     var stored = localStorage.getItem("lang");
@@ -268,7 +292,7 @@
       for (var k in attrs) {
         if (k === "class") node.className = attrs[k];
         else if (k === "style") node.setAttribute("style", attrs[k]);
-        else if (k.indexOf("data-") === 0) node.setAttribute(k, attrs[k]);
+        else if (k.indexOf("data-") === 0 || k.indexOf("aria-") === 0) node.setAttribute(k, attrs[k]);
         else node[k] = attrs[k];
       }
     }
@@ -379,17 +403,139 @@
   function loadBlogPosts(callback) {
     if (blogPosts) return callback(blogPosts);
     fetch("blog/posts.json")
-      .then(function (r) { return r.json(); })
-      .then(function (data) { blogPosts = data; callback(blogPosts); })
-      .catch(function () { callback(null); });
+      .then(function (r) {
+        if (!r.ok) throw new Error("Could not load blog posts");
+        return r.json();
+      })
+      .then(function (data) {
+        if (!Array.isArray(data)) throw new Error("Invalid blog post list");
+        blogPosts = data;
+        blogLoadFailed = false;
+        callback(blogPosts);
+      })
+      .catch(function () { blogLoadFailed = true; callback(null); });
+  }
+
+  function blogText(key, values) {
+    return t(key).replace(/\{(\w+)\}/g, function (_, name) { return values[name]; });
+  }
+
+  function readBlogLocation() {
+    var params = new URLSearchParams(window.location.search);
+    var page = params.get("blogPage") || "1";
+    blogPage = /^[1-9]\d{0,5}$/.test(page) ? Number(page) : 1;
+    blogSearch = (params.get("blogSearch") || "").trim();
+    var input = document.getElementById("blog-search");
+    if (input) input.value = blogSearch;
+  }
+
+  function writeBlogLocation(push) {
+    var url = new URL(window.location.href);
+    if (blogPage > 1) url.searchParams.set("blogPage", String(blogPage));
+    else url.searchParams.delete("blogPage");
+    if (blogSearch) url.searchParams.set("blogSearch", blogSearch);
+    else url.searchParams.delete("blogSearch");
+    if (push) url.hash = "blog";
+    if (url.href !== window.location.href) {
+      window.history[push ? "pushState" : "replaceState"](window.history.state, "", url.href);
+    }
+  }
+
+  function filteredBlogPosts() {
+    var terms = blogSearch.toLowerCase().split(/\s+/).filter(Boolean);
+    return blogPosts.filter(function (post) {
+      var searchable = [post.title, post.titleEn, post.description, post.descriptionEn, post.slug]
+        .join(" ").toLowerCase();
+      return terms.every(function (term) { return searchable.indexOf(term) !== -1; });
+    });
+  }
+
+  function blogPageNumbers(total) {
+    var pages = [];
+    var start = 1;
+    var end = total;
+    if (total > 7) {
+      start = blogPage <= 4 ? 1 : (blogPage >= total - 3 ? total - 4 : blogPage - 1);
+      end = blogPage <= 4 ? 5 : (blogPage >= total - 3 ? total : blogPage + 1);
+      if (start > 1) pages.push(1, null);
+    }
+    for (var page = start; page <= end; page++) pages.push(page);
+    if (end < total) pages.push(null, total);
+    return pages;
   }
 
   function renderBlogCards() {
     var grid = document.getElementById("blog-grid");
-    if (!grid || !blogPosts) return;
+    var status = document.getElementById("blog-status");
+    if (!grid) return;
+    if (!blogPosts) {
+      if (status && blogLoadFailed) status.textContent = t("blogLoadError");
+      return;
+    }
+    var posts = filteredBlogPosts();
+    var totalPages = Math.ceil(posts.length / BLOG_PAGE_SIZE);
+    blogPage = Math.min(Math.max(1, blogPage), Math.max(1, totalPages));
+    var start = (blogPage - 1) * BLOG_PAGE_SIZE;
+    var end = Math.min(start + BLOG_PAGE_SIZE, posts.length);
     grid.innerHTML = "";
-    blogPosts.forEach(function (post) {
-      grid.appendChild(buildBlogCard(post));
+    posts.slice(start, end).forEach(function (post) {
+      var card = buildBlogCard(post);
+      card.classList.add("reveal");
+      grid.appendChild(card);
+    });
+    if (status) status.textContent = posts.length
+      ? blogText("blogResults", { start: start + 1, end: end, total: posts.length })
+      : t("blogNoResults");
+    document.getElementById("blog-empty").hidden = posts.length !== 0;
+    document.getElementById("blog-pagination").hidden = totalPages <= 1;
+    document.getElementById("blog-prev").disabled = blogPage <= 1;
+    document.getElementById("blog-next").disabled = blogPage >= totalPages;
+    var pageList = document.getElementById("blog-page-list");
+    pageList.innerHTML = "";
+    blogPageNumbers(totalPages).forEach(function (page) {
+      if (page === null) {
+        pageList.appendChild(el("span", { class: "blog-page-ellipsis", "aria-hidden": "true" }, "…"));
+        return;
+      }
+      var attrs = {
+        class: "blog-page",
+        type: "button",
+        "data-blog-page": String(page),
+        "aria-label": blogText("blogPageAria", { page: page }),
+        "aria-controls": "blog-grid"
+      };
+      if (page === blogPage) attrs["aria-current"] = "page";
+      pageList.appendChild(el("button", attrs, String(page)));
+    });
+  }
+
+  function setupBlogPagination() {
+    readBlogLocation();
+    var input = document.getElementById("blog-search");
+    var pagination = document.getElementById("blog-pagination");
+    if (!input || !pagination) return;
+    input.addEventListener("input", function () {
+      blogSearch = input.value.trim();
+      blogPage = 1;
+      renderBlogCards();
+      writeBlogLocation(false);
+    });
+    pagination.addEventListener("click", function (event) {
+      var button = event.target.closest("button");
+      if (!button || button.disabled || !blogPosts) return;
+      var action = button.getAttribute("data-blog-action");
+      var page = action === "prev" ? blogPage - 1 : (action === "next" ? blogPage + 1 : Number(button.getAttribute("data-blog-page")));
+      if (page === blogPage) return;
+      blogPage = page;
+      renderBlogCards();
+      writeBlogLocation(true);
+      var focused = action ? document.getElementById("blog-" + action) : null;
+      if (!focused || focused.disabled) focused = pagination.querySelector('[aria-current="page"]');
+      if (focused) focused.focus({ preventScroll: true });
+    });
+    window.addEventListener("popstate", function () {
+      readBlogLocation();
+      renderBlogCards();
     });
   }
 
@@ -551,6 +697,9 @@
     document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
       el.setAttribute("aria-label", I18N[lang][el.getAttribute("data-i18n-aria")]);
     });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
+      el.setAttribute("placeholder", I18N[lang][el.getAttribute("data-i18n-placeholder")]);
+    });
     var toggle = document.getElementById("lang-toggle");
     if (toggle) {
       toggle.textContent = t("langBtn");
@@ -710,12 +859,14 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    setupBlogPagination();
     applyLang(lang, true);
     navScroll();
     footerYear();
     bgCanvas();
     loadBlogPosts(function () {
       renderBlogCards();
+      if (blogPosts) writeBlogLocation(false);
       observeCards();
     });
     var toggle = document.getElementById("lang-toggle");

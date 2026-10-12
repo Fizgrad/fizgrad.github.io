@@ -1151,8 +1151,7 @@ GPU/SCF/Vector 子集，并且系统中存在对应的目标工具链；它不�
 提供表达与变换基础设施，但 Schedule、成本模型、运行时契约和目标能力仍由具体编译器
 定义。
 
-CFG、数据流、Tiling、GPU 映射和性能归因背后的算法见
-[编译器与高性能系统算法](post.html?slug=compiler_algorithms)。
+CFG 与数据流算法见[编译器与高性能系统算法](post.html?slug=compiler_algorithms)；Tiling 与 GPU 映射见[GPU Kernel 编译与 Lowering](post.html?slug=gpu_kernel_lowering)；性能归因见[GPU Compiler 工程实践](post.html?slug=gpu_compiler_engineering)。
 
 # 12. Transform Dialect：把变换顺序也表示成 IR
 

@@ -1042,6 +1042,18 @@ flowchart TD
 std::unique_ptr<int> p = std::make_unique<int>(10);
 ```
 
+`unique_ptr` 的核心原型是（简化）：
+
+```cpp
+template<class T, class Deleter = std::default_delete<T>>
+class unique_ptr;
+
+template<class T, class Deleter = std::default_delete<T[]>>
+class unique_ptr<T[], Deleter>;
+```
+
+第一参数 `T` 决定资源类别，第二参数 `Deleter` 决定销毁行为。默认情况是 `delete`/`delete[]`，但也可以通过自定义删除器管理 `fclose`、`close` 等非 `new` 语义的资源。
+
 特点：
 
 1. 不能拷贝。
@@ -2077,17 +2089,95 @@ Right* right = &object;
 
 # 11. 虚函数、虚表、RTTI 与运行期多态
 
-```mermaid
-flowchart LR
-    P["Base* p"] --> O["实际对象 Derived"]
-    O --> V["vptr"]
-    V --> T["Derived vtable"]
-    T --> F["Derived::foo"]
-    P -. "p->foo()" .-> F
+## 11.1 什么是 C++ 多态
+
+多态描述的不是“有几个同名函数”，而是调用方通过一个稳定接口处理不同具体类型，同一条
+调用表达式会依据对象类型选择对应实现。判断一种机制时应继续问两个问题：
+
+1. 调用方是否不需要写出每一种具体类型；
+2. 具体实现是在编译期选择，还是要等到运行期根据对象状态选择。
+
+C++ 日常语境中的“多态”通常特指虚函数实现的运行期子类型多态：
+
+```cpp
+struct Shape {
+    virtual ~Shape() = default;
+    virtual double area() const = 0;
+};
+
+struct Circle final : Shape {
+    double area() const override { return 3.14; }
+};
+
+struct Rectangle final : Shape {
+    double area() const override { return 6.0; }
+};
+
+double measure(const Shape& shape) {
+    return shape.area();
+}
+
+Circle circle;
+Rectangle rectangle;
+
+double a = measure(circle);     // Circle::area()
+double b = measure(rectangle);  // Rectangle::area()
 ```
 
+`measure()` 的源码只依赖 `Shape` 接口。形参 `shape` 的静态类型始终是
+`const Shape&`，实际引用的动态类型却可以是 `Circle` 或 `Rectangle`；
+`area()` 是虚函数，所以运行期按照动态类型选择最终重写函数。
 
-## 11.1 虚函数分派原理
+C++ 标准中的“多态类”是声明或继承了至少一个虚函数的类。虚析构函数也属于虚函数，因此
+只有虚析构函数的基类同样是多态类。多态类不一定是抽象类：只有仍包含纯虚函数的类才不能
+直接实例化；反过来，具体类也可以继续拥有和重写虚函数。
+
+```mermaid
+flowchart LR
+    CALL["measure(const Shape&)<br/>静态类型：Shape"] --> OBJECT["实际对象<br/>Circle 或 Rectangle"]
+    OBJECT --> VPTR["典型实现：vptr"]
+    VPTR --> VTABLE["动态类型对应的 vtable"]
+    VTABLE --> FINAL["最终重写函数<br/>Circle::area / Rectangle::area"]
+    CALL -. "shape.area()" .-> FINAL
+```
+
+### C++ 中的几类多态
+
+| 机制 | 实现选择时机 | 是否属于多态 | 适用边界 |
+| --- | --- | --- | --- |
+| 虚函数 + 基类指针/引用 | 运行期 | 运行期子类型多态 | 类型集合可扩展，调用方只依赖基类接口 |
+| 函数/运算符重载 | 编译期 | 广义上的特设多态 | 同一名字针对不同参数提供有限组实现 |
+| 函数模板、类模板 | 编译期 | 参数多态或泛型多态 | 同一份泛型定义适用于满足要求的类型 |
+| CRTP | 编译期 | 静态多态 | 编译期已知具体类型，需要统一外观或复用实现 |
+| 类型擦除，如 `std::function` | 运行期 | 运行期接口多态 | 不暴露具体类型，也不要求公开继承层级 |
+| `std::variant` + `std::visit` | 运行期访问当前分支 | 封闭类型集合上的分派 | 所有候选类型必须在 `variant` 类型中预先列出 |
+
+Concepts 本身不完成分派，它只把模板参数必须满足的能力写进接口。RTTI、`typeid` 和
+`dynamic_cast` 用于识别、检查和转换多态对象，也不是虚函数行为选择本身。
+vptr/vtable 则是编译器实现运行期多态的常见 ABI 机制，不是 C++ 标准要求对象必须采用的布局。
+
+### 哪些写法不构成运行期多态
+
+- 只有继承关系，没有虚函数：基类指针调用哪个非虚函数在编译期已经确定；
+- 派生类声明一个与基类同名的非虚函数：这是名字隐藏，不是重写和动态分派；
+- 只写了多个重载：编译器根据实参静态类型完成重载决议，运行期不会再重新选择；
+- 手工使用 `if`、类型枚举或 `dynamic_cast` 分支：可以实现运行期选择，
+  但调用方已经知道所有具体类型，不是通过虚接口获得的开放式子类型多态；
+- 只有 vptr、RTTI 或虚继承：它们分别属于实现细节、类型识别和对象布局，不能单独说明某次
+  调用发生了动态分派。
+
+最直接的判断式是：
+
+    基类指针或引用
+        → 实际指向派生类对象
+        → 调用可被重写的虚函数
+        → 根据动态类型选择最终重写函数
+
+显式限定调用，例如 `object.Base::function()`，会抑制虚分派并直接选择具有可用定义的基类版本；
+构造和析构阶段的动态类型还会被限制在当前已经构造且尚未析构的层级，第 12 章会继续说明。
+
+
+## 11.2 虚函数分派原理
 
 C++ 标准规定动态分派的行为，不规定对象里必须有 vptr，也不规定 vtable 的布局。下面使用 Linux 上常见的 Itanium C++ ABI 说明 Clang/LLVM 的典型实现：
 
@@ -2257,7 +2347,7 @@ flowchart LR
 
 因此，`%offset_slot` 使用 `-16` 查表，`%top` 才使用表中加载出的 `-8` 调整 `%right`；两者不能互换。
 
-## 11.2 RTTI/typeinfo 保存什么
+## 11.3 RTTI/typeinfo 保存什么
 
 RTTI（Run-Time Type Information）是 C++ 的运行期类型识别机制，`std::type_info` 是标准库提供的查询接口；`_ZTI7Derived` 则是 Itanium ABI 为 `Derived` 生成的 typeinfo 全局对象。各个 `Derived` 实例不会复制这份信息：就类型识别而言，每个多态对象通过自身的 vptr 间接找到通常由链接器合并为一份的 typeinfo。
 
@@ -2282,7 +2372,7 @@ RTTI 主要服务于：
 
 普通虚函数分派不读取 RTTI：它只按固定槽位从 vtable 取得函数地址。关闭 RTTI 后，虚函数仍能工作；需要运行期类型识别的 `typeid`、向下或横向 `dynamic_cast` 则不能照常使用。
 
-## 11.3 虚调用怎样变成 LLVM IR
+## 11.4 虚调用怎样变成 LLVM IR
 
 `dispatch()` 在 `-O0` 下的核心 IR 可以化简为：
 
@@ -2307,7 +2397,7 @@ define i32 @dispatch(ptr %object) {
 
 LLVM IR 没有专门的“虚函数调用”指令。Clang 前端负责依据 C++ ABI 生成 vtable、vptr 写入和槽位访问，LLVM 优化器看到的是全局常量、指针加载和普通的间接 `call`，目标后端再把它降低为相应架构的间接调用指令。
 
-## 11.4 去虚化发生在哪里
+## 11.5 去虚化发生在哪里
 
 `dispatch(const Base&)` 面向未知调用者时仍需保留间接调用；但 `known_type()` 中的对象明确是 `final` 的 `Derived`。在 `-O2` 下，优化器可以内联 `dispatch()`、证明目标函数，再内联 `Derived::value()` 并常量折叠：
 
@@ -2321,7 +2411,7 @@ define i32 @known_type() {
 
 ---
 
-## 11.5 对象切片
+## 11.6 对象切片
 
 ```cpp
 struct Base {
@@ -2348,7 +2438,7 @@ void consume(const Base& value);
 
 切片后的新对象就是独立的 `Base`，RTTI 无法恢复已经丢失的 `Derived::extra`。引用或指针仍指向原来的完整对象，因此可以观察动态类型。
 
-## 11.6 `typeid` 与 `std::type_info`
+## 11.7 `typeid` 与 `std::type_info`
 
 ```cpp
 #include <cstddef>
@@ -2370,7 +2460,7 @@ const char* name = dynamic_info.name(); // 内容由实现决定，可能是修�
 
 若 `base_ptr == nullptr`，表达式 `typeid(*base_ptr)` 在 `Base` 为多态类型时会抛出 `std::bad_typeid`，而不是实际解引用空指针。
 
-## 11.7 `dynamic_cast` 如何检查和调整指针
+## 11.8 `dynamic_cast` 如何检查和调整指针
 
 向下转换从基类接口恢复更具体的派生类型：
 
@@ -2409,7 +2499,7 @@ void* complete_object = dynamic_cast<void*>(drawable);
 
 ---
 
-## 11.8 抽象类、纯虚析构、`final` 与协变返回
+## 11.9 抽象类、纯虚析构、`final` 与协变返回
 
 含有未被实现的纯虚函数的类是抽象类，不能直接创建对象：
 
@@ -2596,6 +2686,10 @@ public:
 void f(int);
 void f(double);
 ```
+
+重载在广义分类中属于特设多态：同一个名字对应有限组实现，但编译器会根据实参的静态类型、
+隐式转换质量和模板偏序完成重载决议。程序运行后不会再根据对象的动态类型重新选择，因此它
+不是虚函数意义上的运行期多态。
 
 ---
 
@@ -3383,7 +3477,9 @@ std::for_each(std::execution::par,
 
 ## 16.1 模板什么时候实例化
 
-模板不是普通函数。模板本身是生成代码的蓝图。
+模板不是普通函数。模板本身是生成代码的蓝图：调用方用同一份泛型接口处理不同类型，编译器
+再为实际模板实参生成或复用相应实例。这在多态分类中称为参数多态或泛型多态，具体实现仍在
+编译期确定，不需要通过虚表进行运行期分派。
 
 ```cpp
 template <typename T>
@@ -3542,7 +3638,161 @@ append(out, 1); // T 由第一个参数确定为 long，第二个参数再执行
 
 ---
 
-## 16.6 可变参数模板与折叠表达式
+## 16.6 C 风格不定参数接口
+
+函数形参列表中的 `...` 表示调用方还可以传入数量和类型未写在函数类型中的匿名参数：
+
+```cpp
+int print_message(const char* format, ...);
+```
+
+被调用函数只知道 `format` 这个 named parameter，既不知道后面有几个参数，也没有运行期
+类型信息。双方必须额外约定参数协议：`printf` 用格式字符串，也可以使用数量、tag 列表或
+末尾 sentinel。省略号本身不会生成长度和类型描述。
+
+### 16.6.1 `va_list` 与四个基本操作
+
+下面用第一个参数记录后续 `int` 的数量：
+
+```cpp
+#include <cstdarg>
+#include <cstddef>
+
+int sum_ints(std::size_t count, ...) {
+    std::va_list args;
+    va_start(args, count);
+
+    int result = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        result += va_arg(args, int);
+    }
+
+    va_end(args);
+    return result;
+}
+
+int value = sum_ints(4, 10, 20, 30, 40); // 100
+```
+
+- `va_start(args, count)`：让游标指向第一个匿名参数；在 C++17/C++20 中第二个实参写省略号
+  前最后一个 named parameter。
+- `va_arg(args, T)`：按 `T` 的 ABI 分类、大小和对齐读取下一个参数，并推进游标。
+- `va_copy(dst, src)`：创建具有相同读取位置的独立游标。
+- `va_end(args)`：结束该游标的使用；每次成功的 `va_start` 或 `va_copy` 都要配对一次。
+
+这些宏通常会展开到编译器 builtin，因为实现必须知道目标 ABI 和当前函数的参数布局。
+`std::va_list` 可能是指针、数组或结构体，不应假设它能用赋值、`memcpy` 或字节序列安全
+复制。需要独立遍历时使用 `va_copy`：
+
+```cpp
+std::va_list copy;
+va_copy(copy, args);
+consume_once(copy);
+va_end(copy);
+
+// args 仍保持原来的读取位置。
+```
+
+若把同一个游标交给另一个函数继续执行 `va_arg`，它会消费该逻辑参数流。调用方之后还要
+从原位置读取时，应先复制，而不是依赖某个平台“传参时刚好复制了指针或结构体”。
+
+### 16.6.2 调用方会先执行默认参数提升
+
+匿名参数没有对应形参类型可指导转换。调用前仍会先执行 lvalue-to-rvalue、数组到指针和
+函数到指针等标准转换；随后对算术类型应用 default argument promotions：
+
+```text
+bool / char / signed char / unsigned char / short
+    → int，无法由 int 表示时才提升为 unsigned int
+
+float
+    → double
+```
+
+所以必须按提升后的类型读取：
+
+```cpp
+void read_values(int count, ...) {
+    std::va_list args;
+    va_start(args, count);
+
+    int character = va_arg(args, int);   // 调用方传 char
+    double ratio = va_arg(args, double); // 调用方传 float
+
+    va_end(args);
+}
+
+read_values(2, 'A', 0.25f);
+```
+
+不能写 `va_arg(args, char)` 或 `va_arg(args, float)`。调用方实际传入的下一个参数与 `va_arg`
+指定类型不兼容、参数数量不足或读取顺序错误，通常都是未定义行为，而不是由运行库抛出
+“类型不匹配”异常。
+
+### 16.6.3 参数数量和类型必须由协议给出
+
+下面的函数无法仅凭 `args` 判断何时结束：
+
+```cpp
+void consume(...); // 没有 count、format、tag 或 sentinel
+```
+
+常见协议各有边界：
+
+- count：读取次数明确，但调用方仍可能填错数量；
+- format string：同时描述数量和类型，但格式串与实参不一致仍会产生未定义行为；
+- sentinel：必须选择不会与合法数据混淆的终止值，并保证调用方真的传入；
+- tag/type-length-value：更易扩展，但需要逐项校验 tag、长度、对齐和未知类型。
+
+C++ 类对象通过省略号传递还受到实现支持和对象平凡性的限制，不适合把普通 RAII 对象、
+引用语义或需要析构的类型当成可移植接口。跨动态库、插件或其他语言边界时，还必须保证
+调用约定、数据模型和类型宽度一致。
+
+### 16.6.4 `v` 版本用于转发参数流
+
+一个可变参数函数不能把尚未展开的 `...` 原样再次写进另一条调用。C 库通常提供接收
+`va_list` 的 `v` 版本，例如 `vprintf`、`vfprintf`、`vsnprintf`：
+
+```cpp
+#include <cstdarg>
+#include <cstdio>
+
+void write_log(const char* format, ...) {
+    std::va_list args;
+    va_start(args, format);
+    std::vfprintf(stderr, format, args);
+    va_end(args);
+}
+```
+
+若 `write_log` 在调用 `vfprintf` 后还要再次遍历同一批参数，应在第一次消费前用 `va_copy`
+建立另一条游标。`va_list` 也不能逃出创建它的可变参数函数生命周期后继续使用，因为它
+引用的寄存器保存区和栈参数都属于当前调用帧。
+
+### 16.6.5 与可变参数模板的区别
+
+```text
+C 风格 ...
+  → 参数类型在函数类型中丢失
+  → 运行期按外部协议读取
+  → 可以暴露 C 兼容 ABI，但仍要匹配平台调用约定
+
+template <typename... Args>
+  → 每个具体实参类型在实例化时已知
+  → 可做约束、重载、完美转发和编译期检查
+  → 每种参数组合可能形成不同的 C++ 实例
+```
+
+新写的 C++ 内部接口通常优先选择参数包、`std::span`、`std::initializer_list`、容器或格式化
+库。只有要兼容既有 C API、格式化函数或明确的 ABI 协议时，才需要直接暴露 C 风格省略号。
+
+标准接口和默认参数提升的精确定义可对照
+[C++ `<cstdarg>`](https://eel.is/c++draft/support.runtime#cstdarg.syn)与
+[无对应形参时的调用规则](https://eel.is/c++draft/expr.call)。
+
+---
+
+## 16.7 可变参数模板与折叠表达式
 
 参数包可以表示任意数量的类型或值，`sizeof...` 返回包中元素个数：
 
@@ -3568,7 +3818,7 @@ auto sum(T... values) {
 
 ---
 
-## 16.7 CTAD 与 deduction guide
+## 16.8 CTAD 与 deduction guide
 
 C++17 的 class template argument deduction 允许从构造实参推导类模板参数：
 
@@ -3599,7 +3849,7 @@ deduction guide 只参与类型推导，不是构造函数，也不负责实际�
 
 ---
 
-## 16.8 函数模板偏序
+## 16.9 函数模板偏序
 
 函数模板不能偏特化，但多个重载模板之间可以比较谁更特殊：
 
@@ -3634,7 +3884,7 @@ void inspect<int>(int); // inspect(T) 在 T = int 时的全特化
 
 ---
 
-## 16.9 CRTP 与静态多态
+## 16.10 CRTP 与静态多态
 
 CRTP（Curiously Recurring Template Pattern，奇异递归模板模式）的基本形式是：派生类把自己的类型作为模板参数传给基类。
 
@@ -3863,169 +4113,531 @@ v.push_back(std::move(obj));   // 已经有对象
 
 ---
 
-# 18. SFINAE、type traits、concepts
+# 18. 类型萃取、SFINAE 与 Concepts
 
 ```mermaid
 flowchart LR
-    A["模板能力约束"] --> B["SFINAE"]
-    B --> C["enable_if / type traits"]
-    C --> D["if constexpr"]
-    D --> E["C++20 concepts"]
-    E --> F["接口更清楚，错误诊断更直接"]
+    T["原始类型 T"] --> N["类型规范化<br/>remove_cvref / decay"]
+    N --> Q["查询性质<br/>is_* / sizeof / requires"]
+    N --> X["生成类型<br/>remove_* / conditional / invoke_result"]
+    Q --> I["模板内部选择<br/>if constexpr / tag dispatch"]
+    Q --> O["接口候选选择<br/>SFINAE / Concepts"]
+    X --> I
+    O --> R["重载决议与约束排序"]
 ```
 
-## 18.1 本章用到的标准库工具
+Type traits 不是一种独立的运行期机制，而是一组“以类型为输入，在编译期产生值或新类型”的
+工具。理解本章时要始终区分三件事：
 
-Type traits 是 `<type_traits>` 中的一组编译期类型查询和类型变换工具。查询通常得到布尔常量，变换通常产生一个新类型；它们本身不会自动筛选重载，需要交给 SFINAE、`if constexpr` 或 Concept 使用。
+1. trait 负责查询或变换类型；
+2. SFINAE 和 Concept 决定某个函数模板是否进入候选集；
+3. `if constexpr` 在模板已经被选中后决定实例化哪段实现。
 
-标准库常用 `_v` 和 `_t` 后缀提供简写：
+把三者混在一起，容易出现“明明有 `if constexpr`，为什么错误重载仍可见”或“trait 返回
+false，为什么函数仍然能被调用”之类的问题。
+
+## 18.1 Trait 的两种结果：值与类型
+
+查询型 trait 产生编译期值：
 
 ```cpp
-std::is_integral_v<T>       // std::is_integral<T>::value
-std::remove_cvref_t<T>      // typename std::remove_cvref<T>::type
+std::is_integral<int>::value
+std::is_integral_v<int>       // C++17 简写
 ```
 
-本章出现的工具如下：
-
-| API | 头文件 | 目的 |
-| --- | --- | --- |
-| `std::true_type`、`std::false_type` | `<type_traits>` | 用类型表示编译期的 true/false，并提供静态成员 `value` |
-| `std::is_integral_v<T>` | `<type_traits>` | 判断 `T` 是否为整数类型 |
-| `std::enable_if_t<B, T>` | `<type_traits>` | `B` 为 true 时产生类型 `T`；为 false 时没有 `type`，可触发 SFINAE |
-| `std::remove_cvref_t<T>` | `<type_traits>` | 同时移除引用以及顶层 `const`/`volatile` |
-| `std::declval<T>()` | `<utility>` | 在不构造对象的情况下组成一个 `T` 类型表达式，只能用于 `decltype` 等不求值上下文 |
-| `std::same_as<T, U>` | `<concepts>` | 约束两个类型完全相同 |
-| `std::convertible_to<From, To>` | `<concepts>` | 约束 `From` 能以符合要求的方式转换为 `To` |
-
-`decltype`、`if constexpr` 和 `requires` 是语言机制，不是标准库 API。四者的分工可以简化为：trait 回答“类型具有什么性质”，SFINAE 从候选集中移除替换失败的模板，`if constexpr` 在已经选中的模板体内选择实现，而 Concept 直接约束模板接口。
-
----
-
-
-## 18.2 SFINAE 是什么
-
-SFINAE：Substitution Failure Is Not An Error。
-
-意思是：
-
-> 在模板参数替换的“立即上下文”中发生失败时，不把它作为整个程序的硬错误，而是把对应模板从候选集中移除。
-
-函数体实例化中的错误、访问控制错误以及替换完成后才触发的某些错误，不一定属于 SFINAE。
-
-例子：
+变换型 trait 产生嵌套类型 `type`：
 
 ```cpp
-template <typename T>
-auto has_size_impl(int)
-    -> decltype(std::declval<const T&>().size(), std::true_type{});
-
-template <typename T>
-std::false_type has_size_impl(...);
-
-template <typename T>
-using has_size = decltype(has_size_impl<T>(0));
+typename std::remove_reference<T>::type
+std::remove_reference_t<T>    // C++14 简写
 ```
 
-意图：
-
-1. 优先匹配第一个函数。
-2. 如果 `T` 有 `.size()`，第一个函数合法，返回 true_type。
-3. 如果 `T` 没有 `.size()`，替换失败，不报错，选择第二个函数，返回 false_type。
-
-这里不会真的调用 `declval` 或 `size()`：`decltype` 是不求值上下文。逗号表达式先要求左侧的 `.size()` 合法，再把整个返回类型确定为右侧的 `std::true_type`。
-
----
-
-## 18.3 enable_if
+查询结果通常继承自 `std::integral_constant`。它的简化结构是：
 
 ```cpp
-template <typename T>
-std::enable_if_t<std::is_integral_v<T>, void>
-print(T x) {
-    std::cout << "integer\n";
+template <typename T, T Value>
+struct integral_constant {
+    static constexpr T value = Value;
+    using value_type = T;
+    using type = integral_constant;
+
+    constexpr operator value_type() const noexcept {
+        return value;
+    }
+};
+
+using true_type = integral_constant<bool, true>;
+using false_type = integral_constant<bool, false>;
+```
+
+所以一个布尔 trait 既可以当编译期布尔值使用，也是一种类型：
+
+```cpp
+static_assert(std::is_pointer_v<int*>);
+
+using Answer = std::is_pointer<int*>;
+static_assert(Answer::value);
+
+void dispatch(std::true_type);
+void dispatch(std::false_type);
+
+void example() {
+    dispatch(Answer{});         // 传统 tag dispatch
 }
 ```
 
-只有当 `T` 是整数类型时，这个模板才参与重载决议。
+`_v` 和 `_t` 只是可读性别名，不会改变实例化时机或错误规则。
 
-这里 `std::is_integral_v<T>` 提供布尔条件；条件为 true 时 `std::enable_if_t<..., void>` 得到返回类型 `void`，条件为 false 时该类型不存在，于是函数模板在替换阶段退出候选集。
+## 18.2 Trait 为什么经常用类模板偏特化实现
 
----
+类模板偏特化可以描述“一组具有相同类型形状的参数”。下面实现一个简化的指针判断：
 
-## 18.4 if constexpr
+```cpp
+#include <type_traits>
 
-C++17 更推荐：
+namespace demo {
+
+template <typename T>
+struct is_pointer_impl : std::false_type {};
+
+template <typename T>
+struct is_pointer_impl<T*> : std::true_type {};
+
+template <typename T>
+struct is_pointer
+    : is_pointer_impl<std::remove_cv_t<T>> {};
+
+template <typename T>
+inline constexpr bool is_pointer_v = is_pointer<T>::value;
+
+} // namespace demo
+
+static_assert(demo::is_pointer_v<const int*>);
+static_assert(demo::is_pointer_v<int* const>);
+static_assert(!demo::is_pointer_v<int>);
+```
+
+`const int*` 是“指向 const int 的指针”，可以直接匹配 `T*`；`int* const` 是“顶层 const
+指针”，所以实现先用 `remove_cv_t` 去掉指针对象自身的 cv 限定。
+
+自定义业务 trait 应放在自己的命名空间，并通过主模板和特化扩展：
+
+```cpp
+#include <cstdint>
+#include <type_traits>
+
+template <typename T>
+struct is_message_id : std::false_type {};
+
+template <>
+struct is_message_id<std::uint32_t> : std::true_type {};
+```
+
+除非标准明确允许，否则不要特化 `std::is_*`、`std::remove_*` 等标准 trait。对标准库模板做
+未授权特化通常是未定义行为，也会让其他模板错误地相信某个语言性质已经成立。
+
+## 18.3 查询型 Trait 应该按问题选择
+
+常用查询可以按它们回答的问题分组，而不是逐个背名字：
+
+| 问题 | 常用 trait | 典型用途 |
+|---|---|---|
+| T 属于哪类语言类型 | `is_void`、`is_integral`、`is_floating_point`、`is_enum`、`is_class`、`is_union` | 选择数值、枚举或类类型路径 |
+| T 是否为间接类型 | `is_pointer`、`is_member_pointer`、`is_reference`、`is_array`、`is_function` | 处理指针、引用、数组和函数的不同规则 |
+| 顶层限定是什么 | `is_const`、`is_volatile`、`is_lvalue_reference`、`is_rvalue_reference` | 检查接口实际收到的 cv/ref 形状 |
+| 两个类型有什么关系 | `is_same`、`is_base_of`、`is_convertible` | 类型相等、继承和隐式转换判断 |
+| 对象能否执行生命周期操作 | `is_constructible`、`is_assignable`、`is_destructible` 及其 `nothrow`、`trivially` 变体 | 容器、variant、异常保证和存储管理 |
+| 对象布局具有什么性质 | `is_trivially_copyable`、`is_standard_layout`、`is_aggregate`、`is_polymorphic` | 底层复制、ABI 布局或初始化策略的前置检查 |
+| 调用是否合法 | `is_invocable`、`is_invocable_r`、`is_nothrow_invocable` | 回调包装、转发和 `noexcept` 推导 |
+| 数组有多少维、某维多长 | `rank`、`extent` | 保留原生数组形状的泛型代码 |
+
+trait 检查的是精确定义的语言性质，不是名字相似的业务概念。例如：
+
+```cpp
+static_assert(std::is_const_v<const int>);
+static_assert(!std::is_const_v<const int&>);
+```
+
+第二个结果为 false，因为引用类型自身没有顶层 cv；`const` 修饰的是被引用的 `int`。如果
+真正想检查去掉引用后的对象类型，应明确写出：
+
+```cpp
+using Object = std::remove_reference_t<const int&>;
+static_assert(std::is_const_v<Object>);
+```
+
+构造和调用类 trait 还可以同时编码参数列表：
+
+```cpp
+#include <cstddef>
+#include <string>
+#include <type_traits>
+
+static_assert(std::is_constructible_v<std::string,
+                                      const char*, std::size_t>);
+
+using Callback = int (*)(double);
+static_assert(std::is_invocable_r_v<int, Callback, float>);
+
+static_assert(std::is_assignable_v<std::string&,
+                                   const char*>);
+static_assert(!std::is_assignable_v<const std::string&,
+                                    const char*>);
+```
+
+它们比只检查“是否为类”更接近真正要执行的操作。`is_assignable<T, U>` 检查的是
+`declval<T>() = declval<U>()`，所以要判断普通对象能否赋值，目标通常应写成 `T&`；直接传 T
+会检查一个 T 类型的右值是否可作为赋值左侧，往往不是调用方真正想问的问题。
+
+## 18.4 类型规范化：`remove_cvref` 与 `decay` 不相同
+
+常见变换可以分为三类：
+
+| 目的 | 工具 |
+|---|---|
+| 去掉或增加类型外壳 | `remove_const`、`remove_volatile`、`remove_cv`、`remove_reference`、`remove_cvref`、`remove_pointer`、`add_pointer` |
+| 按条件或关系生成类型 | `conditional_t`、`common_type_t`、`common_reference_t`、`underlying_type_t` |
+| 从表达式或调用生成类型 | `decltype`、`invoke_result_t` |
+
+`remove_cvref_t<T>` 只去掉引用和随后暴露出来的顶层 cv：
+
+```cpp
+using A = std::remove_cvref_t<const int&>; // int
+using B = std::remove_cvref_t<const int*>; // const int*
+```
+
+`B` 仍指向 const int，因为 pointee 的 `const` 不是指针类型的顶层限定。
+
+`decay_t<T>` 模拟函数按值传参时的类型调整：
+
+```cpp
+using A = std::decay_t<const int&>;    // int
+using B = std::decay_t<int[4]>;        // int*
+using C = std::decay_t<int(double)>;   // int (*)(double)
+```
+
+它除了移除 cv/ref，还会把数组变成指针、函数变成函数指针。只想忽略调用者的 cv/ref 时应使用
+`remove_cvref_t`；盲目使用 `decay_t` 会丢掉数组长度和函数类型信息，使 `std::span`、数组
+重载或函数引用无法继续利用原始形状。
+
+其他变换解决的是不同问题：
+
+```cpp
+#include <cstdint>
+#include <type_traits>
+
+using Storage = std::conditional_t<
+    (sizeof(long) >= sizeof(void*)), long, std::intptr_t>;
+
+using Number = std::common_type_t<int, double>; // double
+
+enum class State : std::uint8_t { idle, busy };
+using RawState = std::underlying_type_t<State>;  // std::uint8_t
+
+using Result = std::invoke_result_t<
+    int (*)(double), float>;                     // int
+```
+
+`common_type_t` 偏向按值表达式的公共类型，`common_reference_t` 用于寻找能够保留引用关系的
+公共引用类型；两者都可能对某些输入没有结果，不能假定任意类型都存在公共类型。
+
+C++20 的 `type_identity_t<T>` 可以阻止某个位置参与模板实参推导：
+
+```cpp
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+template <typename T>
+void append(std::vector<T>& output,
+            std::type_identity_t<T> value) {
+    output.push_back(std::move(value));
+}
+
+void example() {
+    std::vector<int> values;
+    short value = 7;
+    append(values, value); // T 从 vector 推导为 int，value 随后转换为 int
+}
+```
+
+如果第二个参数也直接写成 `T`，编译器会分别尝试从 `vector<int>` 和 `short` 推导 T，产生
+冲突。`type_identity` 不是转换工具，它只是建立 non-deduced context。
+
+## 18.5 组合 Trait 与短路实例化
+
+`std::conjunction`、`std::disjunction` 和 `std::negation` 接受的是 trait 类型：
+
+```cpp
+#include <string>
+#include <type_traits>
+
+template <typename T>
+using CacheValue = std::conjunction<
+    std::is_move_constructible<T>,
+    std::is_nothrow_destructible<T>>;
+
+static_assert(CacheValue<std::string>::value);
+```
+
+它们分别对应逻辑与、逻辑或和逻辑非。`conjunction` 遇到第一个 false 后不再读取后续
+trait 的 `value`，`disjunction` 遇到第一个 true 后停止。与直接写一串 `_v && _v` 相比，
+这种短路可以减少昂贵实例化，也能避免访问只有在前置条件成立时才有效的后续 trait。
+
+不过，短路只能阻止“继续实例化后续 trait 的内容”，不能挽救一个在形成模板实参类型时就已
+经语法错误的表达式。需要延迟检查成员或表达式是否合法时，应使用下面的 detection idiom
+或 `requires`。
+
+## 18.6 `void_t`、`declval` 与 Detection Idiom
+
+在 C++20 Concepts 普及前，常用 detection idiom 检查类型和表达式；C++17 提供的
+`std::void_t` 让这种写法更简洁：
+
+```cpp
+#include <type_traits>
+
+template <typename T, typename = void>
+struct has_value_type : std::false_type {};
+
+template <typename T>
+struct has_value_type<
+    T,
+    std::void_t<typename T::value_type>>
+    : std::true_type {};
+
+static_assert(has_value_type<std::vector<int>>::value);
+static_assert(!has_value_type<int>::value);
+```
+
+`void_t<X...>` 在 `X...` 都合法时产生 `void`。如果 `T::value_type` 不存在，偏特化中的替换
+失败，主模板仍提供 false 结果。
+
+检测成员表达式时通常还需要 `std::declval`：
+
+```cpp
+#include <cstddef>
+#include <type_traits>
+#include <utility>
+
+template <typename T, typename = void>
+struct has_reserve : std::false_type {};
+
+template <typename T>
+struct has_reserve<
+    T,
+    std::void_t<decltype(
+        std::declval<T&>().reserve(std::size_t{}))>>
+    : std::true_type {};
+```
+
+`declval<T&>()` 只形成一个具有指定类型和值类别的表达式，不构造 T，也没有可调用的运行期
+定义，因此只能出现在 `decltype`、`noexcept` 等不求值上下文。这里检测的是“对左值 T 调用
+`reserve(size_t)` 是否语法有效”，并没有保证它的返回值、复杂度、线程安全性或业务语义。
+
+检测时必须选对 cv/ref 形状：
+
+```text
+declval<T&>()        检查可修改左值
+declval<const T&>()  检查 const 左值
+declval<T&&>()       检查右值
+```
+
+一个只在右值对象上可调用的成员，不应因为检测代码误用了 `T&` 而被判定为完全不可用。
+
+## 18.7 SFINAE 控制的是候选集
+
+SFINAE 是 Substitution Failure Is Not An Error。函数模板参数推导后，编译器把推导结果替换
+进函数类型、模板参数声明和相关表达式；如果在这些立即上下文中得到无效类型或表达式，该
+模板从候选集中移除，而不是让整个重载决议立即失败。
+
+`enable_if_t<Condition, T>` 在 Condition 为 true 时产生 T，为 false 时没有嵌套 `type`：
+
+```cpp
+template <bool Condition, typename T = void>
+struct enable_if {};
+
+template <typename T>
+struct enable_if<true, T> {
+    using type = T;
+};
+```
+
+这段简化实现的 false 主模板故意不声明 `type`，因此在替换位置访问
+`enable_if<false, T>::type` 会失败。标准库的 `enable_if_t` 只是相应嵌套类型的别名。
+
+```cpp
+template <
+    typename T,
+    std::enable_if_t<std::is_integral_v<T>, int> = 0>
+void encode(T value) {
+    // 整数编码
+}
+
+template <
+    typename T,
+    std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+void encode(T value) {
+    // 浮点编码
+}
+```
+
+第二个模板参数使用依赖条件产生的非类型参数，使两个模板可以形成不同候选。下面这种写法
+容易被误认为两个重载：
+
+```cpp
+template <typename T,
+          typename = std::enable_if_t<std::is_integral_v<T>>>
+void encode(T);
+
+template <typename T,
+          typename = std::enable_if_t<std::is_floating_point_v<T>>>
+void encode(T); // error：默认模板实参不参与区分模板签名
+```
+
+SFINAE 只保护立即上下文。函数体要等候选被选中后才实例化，其中的失败仍是硬错误：
 
 ```cpp
 template <typename T>
-void print(const T& x) {
+auto read_size(const T& value)
+    -> decltype(value.size()) {
+    return value.missing_member(); // 不在返回类型的立即上下文中
+}
+```
+
+没有 `size()` 的类型会让该模板退出候选集；有 `size()` 却没有 `missing_member()` 的类型会在
+实例化函数体时报错。SFINAE 也不会绕过访问控制：检测私有成员时，访问仍按正常上下文检查。
+
+返回类型、函数参数、非类型模板参数都可以承载 `enable_if`，但可读性和构造函数适用性不同。
+C++20 代码通常应优先把约束写成 `requires`；维护旧标准接口或实现 detection trait 时仍会
+大量遇到 SFINAE。
+
+## 18.8 `if constexpr` 与 Tag Dispatch 的职责
+
+如果所有类型共享同一个对外接口，只是模板内部实现不同，可以使用 `if constexpr`：
+
+```cpp
+template <typename>
+inline constexpr bool always_false_v = false;
+
+template <typename T>
+void describe(const T& value) {
     if constexpr (std::is_integral_v<T>) {
-        std::cout << "integer\n";
+        std::cout << "integer: " << value << '\n';
+    } else if constexpr (std::is_floating_point_v<T>) {
+        std::cout << "floating: " << value << '\n';
     } else {
-        std::cout << "other\n";
+        static_assert(always_false_v<T>,
+                      "describe does not support this type");
     }
 }
 ```
 
-`if constexpr` 不选择的分支会被丢弃，不会针对当前模板实参实例化其中的依赖代码。但分支仍必须能够被解析，完全不依赖模板参数的语法或语义错误仍可能直接报错。
+未选择分支中的依赖代码不会针对当前 T 实例化。最后的断言必须依赖 T；直接写
+`static_assert(false)` 在 C++17/20 规则下会在模板定义阶段失败。使用依赖 T 的写法也能兼容
+这些标准版本。
 
----
+但 `if constexpr` 不会把 `describe<T>` 从重载候选集中移除。调用者仍先选中这个接口，随后
+才可能在函数体看到断言。如果“不具备某能力就不应存在这个 API”，应使用 Concept 或
+SFINAE；如果“API 对所有 T 都存在，只是内部采取不同策略”，才适合 `if constexpr`。
 
-## 18.5 concepts
-
-C++20 concepts：
+C++17 以前常把查询结果作为标签传给不同实现：
 
 ```cpp
 template <typename T>
-concept HasSize = requires(T t) {
-    t.size();
-};
+void process_impl(T&, std::true_type);  // trivial 路径
 
-template <HasSize T>
-void print_size(const T& t) {
-    std::cout << t.size() << '\n';
+template <typename T>
+void process_impl(T&, std::false_type); // general 路径
+
+template <typename T>
+void process(T& value) {
+    process_impl(
+        value,
+        std::is_trivially_copyable<T>{});
 }
 ```
 
-优势：
+Tag dispatch 仍适合需要形成独立重载、递归调用或兼容旧标准的实现；简单的局部分支通常用
+`if constexpr` 更直接。
 
-1. 语义清楚。
-2. 错误信息更好。
-3. 约束直接写在接口上。
-4. 替代复杂 SFINAE。
+## 18.9 Concepts 把能力写进接口
 
-
-
-> concepts 是对模板参数能力的显式约束，使泛型代码更可读、更容易诊断错误。
-
----
-
-## 18.6 `requires` 表达式的四类要求
-
-`requires` 不只检查“某个表达式能否编译”，还可以表达类型、返回类型和额外布尔约束：
+Concept 是命名的编译期谓词。它可以由 trait、`requires` expression 和其他 Concept 组合：
 
 ```cpp
+#include <concepts>
+
+template <typename T>
+concept Numeric =
+    std::integral<T> || std::floating_point<T>;
+
+template <Numeric T>
+T twice(T value) {
+    return value + value;
+}
+```
+
+约束可以写在多个位置：
+
+```cpp
+template <std::integral T>
+void consume(T);                       // constrained type parameter
+
+template <typename T>
+    requires std::integral<T>
+void consume(T);                       // requires clause
+
+void consume(std::integral auto value); // abbreviated template
+```
+
+实际代码应选择一种稳定风格，避免同一接口在不同声明中以不等价形式重复约束。
+
+### `requires` expression 的四类要求
+
+```cpp
+#include <concepts>
+#include <cstddef>
+#include <type_traits>
+
 template <typename T>
 concept Sequence = requires(T value, const T const_value) {
-    typename T::value_type;                       // type requirement
-    value.clear();                                // simple requirement
-    { const_value.size() } -> std::convertible_to<std::size_t>;
-                                                   // compound requirement
-    requires std::same_as<                        // nested requirement
+    typename T::value_type;             // type requirement
+    value.clear();                      // simple requirement
+
+    { const_value.size() } noexcept
+        -> std::convertible_to<std::size_t>;
+                                         // compound requirement
+
+    requires std::same_as<              // nested requirement
         std::remove_cvref_t<decltype(*value.begin())>,
         typename T::value_type>;
 };
 ```
 
-`std::convertible_to<std::size_t>` 允许 `size()` 的结果转换为 `std::size_t`；`*value.begin()` 通常得到引用，所以先用 `std::remove_cvref_t` 去掉 cv/ref，再用 `std::same_as` 检查它是否正好是 `value_type`。
+- Type requirement 只检查某个类型名能否形成；
+- Simple requirement 检查表达式是否有效，不执行表达式；
+- Compound requirement 还可以检查 `noexcept` 和结果类型约束；
+- Nested requirement 接受另一个必须为 true 的约束表达式。
 
-requires expression 在约束替换过程中得到 false 时，通常使候选不满足约束，而不是像函数体内的普通错误那样立即终止整个编译。但不依赖模板参数、对所有可能实参都无效的代码仍可能使程序本身不合法。
+requires expression 中的 `value` 只是用于组成表达式的局部参数，没有存储、初始化和运行期开销。
+约束替换失败通常让 expression 得到 false；完全不依赖模板参数、对任何替换都无效的定义仍
+可能直接使程序不合法。
 
----
+### 标准 Concept 与相似 Trait 的差别
 
-## 18.7 约束包含关系与受约束重载
+| Trait | Concept | 需要注意的差别 |
+|---|---|---|
+| `is_same_v<T, U>` | `same_as<T, U>` | Concept 以对称约束定义，适合参与约束包含关系 |
+| `is_base_of_v<B, D>` | `derived_from<D, B>` | `derived_from` 还要求 public、无歧义的指针转换；private 或 ambiguous base 只可能满足前者 |
+| `is_convertible_v<F, T>` | `convertible_to<F, T>` | 后者同时要求隐式转换和 `static_cast` 形式，并带有 equality-preserving 语义要求 |
+| `is_invocable_v<F, A...>` | `invocable<F, A...>` | 两者都围绕 `std::invoke` 是否有效，Concept 更适合直接声明接口约束 |
 
-当两个重载的普通转换质量相同，编译器可以通过 constraint subsumption 选择约束更强的版本：
+Concept 可能包含编译器不能自动验证的语义要求，例如两个转换结果应保持相等。通过语法检查
+只说明表达式可形成，调用方和类型作者仍要满足标准所描述的语义约定。
+
+## 18.10 约束规范化与更受约束的重载
+
+当普通重载转换质量相同，编译器可以通过 constraint subsumption 选择更受约束的候选：
 
 ```cpp
 template <typename T>
@@ -4039,18 +4651,107 @@ concept Dereferenceable = requires(T value) {
 };
 
 template <typename T>
-concept ReverseCursor = Decrementable<T> && Dereferenceable<T>;
+concept ReverseCursor =
+    Decrementable<T> && Dereferenceable<T>;
 
 template <Decrementable T>
 void walk(T);
 
 template <ReverseCursor T>
-void walk(T); // 对 ReverseCursor 更受约束
+void walk(T); // ReverseCursor 候选更受约束
 ```
 
-`ReverseCursor` 显式复用了 `Decrementable`，编译器能从规范化后的原子约束看出包含关系。如果在两个地方分别复制一段看似相同的 requires 表达式，它们不一定被视为同一个原子约束，可能导致重载歧义。
+`ReverseCursor` 显式复用了 `Decrementable`，约束规范化后包含相同的原子约束，编译器能够证明
+第二个候选至少满足第一个候选。若在两个位置分别复制看似相同的 `requires { --value; }`，
+它们不一定形成同一个原子约束，可能无法建立包含关系并导致重载歧义。
 
-因此应把有语义名字的基础能力提取为小 concept，再组合出更强 concept；这同时改善接口文档、诊断信息和重载排序。
+因此应先定义有语义名字的小 Concept，再组合更强 Concept。不要依赖编译器进行任意布尔代数
+推理；源码中逻辑上“更严格”的表达式，不一定在约束规范化规则下可被证明更受约束。
+
+## 18.11 Trait、SFINAE、Concept 与 `static_assert` 怎么选择
+
+| 需求 | 合适工具 | 原因 |
+|---|---|---|
+| 获得一个类型性质或生成新类型 | trait / type transformation | 结果还能参与别名、`noexcept`、布局和后续约束 |
+| 同一接口内部选择不同实现 | `if constexpr` / tag dispatch | 不需要改变对外候选集 |
+| C++17 及以前按能力移除候选 | SFINAE / `enable_if` / detection idiom | 兼容旧标准和已有模板代码 |
+| C++20 起声明接口所需能力 | named Concept + `requires` | 意图、诊断和重载排序更清楚 |
+| 某模板已经被选中，但配置组合不受支持 | 依赖参数的 `static_assert` | 给出针对该实例的明确错误 |
+
+Concept 没有让 type traits 过时。Concept 主要回答“这个接口接受什么”，traits 仍负责类型
+变换、`noexcept` 传播、对象布局性质以及模板内部决策；很多标准 Concept 本身也建立在 traits
+和 requires expression 之上。
+
+## 18.12 把查询、约束和实现选择串起来
+
+下面的调用适配器同时使用了四种机制：
+
+```cpp
+#include <concepts>
+#include <functional>
+#include <type_traits>
+#include <utility>
+
+template <typename F, typename... Args>
+    requires std::invocable<F&&, Args&&...>
+decltype(auto) invoke_checked(F&& function, Args&&... args)
+    noexcept(std::is_nothrow_invocable_v<F&&, Args&&...>) {
+    using Result =
+        std::invoke_result_t<F&&, Args&&...>;
+
+    if constexpr (std::is_void_v<Result>) {
+        std::invoke(
+            std::forward<F>(function),
+            std::forward<Args>(args)...);
+        return;
+    } else {
+        return std::invoke(
+            std::forward<F>(function),
+            std::forward<Args>(args)...);
+    }
+}
+```
+
+执行关系是：
+
+1. `std::invocable` 先约束该调用是否能形成，不合法的调用不进入候选；
+2. `is_nothrow_invocable_v` 把底层调用的异常性质传播到包装器；
+3. `invoke_result_t` 取得精确返回类型；
+4. `if constexpr` 分开处理 void 和非 void 返回；
+5. `F&&`、`Args&&...` 保留调用对象和参数的 cv/ref 形状。
+
+最后一点不能随意改成 `decay_t<F>` 或 `decay_t<Args>...`。函数对象可能只允许在 `&`、
+`const&` 或 `&&` 限定下调用，过早 decay 会查询另一个类型形状，得到与真实转发调用不一致
+的结果。
+
+## 18.13 常见边界和误判
+
+- 不要为了“方便比较”无条件对所有 T 使用 `decay_t`。先确定数组、函数、cv 和引用是否属于
+  接口语义的一部分；
+- `is_trivially_copyable_v<T>` 允许在规则约束下复制对象表示，不表示 `memcmp` 能判断值相等，
+  也不表示原始字节可直接作为跨进程、跨架构或持久化格式；Padding、Endian、Pointer 和版本
+  布局仍要单独处理；
+- `is_standard_layout_v<T>` 关注一组布局兼容规则，不等于“没有 Padding”，也不是序列化保证。
+  旧的 POD 概念已经被更具体的 trivial、trivially copyable 和 standard-layout 性质拆分；
+- 部分 trait 对不完整类型有前置条件；如果类型补全后答案可能变化，过早查询可能导致未定义
+  行为或不可移植结果。应在类型完整后查询，并查阅对应 trait 的要求；
+- `is_constructible`、`is_invocable` 和 requires expression 只按指定的 cv/ref、参数与访问
+  上下文检查。换一个值类别、增加 `const` 或改变返回类型要求，都可能得到不同结果；
+- 语法检测不能证明复杂度、线程安全、资源所有权和业务语义。名为 `reserve` 的成员能被调用，
+  不代表它一定具有标准容器 `reserve` 的行为；
+- Trait 或 Concept 条件重叠时仍可能产生重载歧义。约束应该表达清晰的包含关系，不能把“越写越
+  多条件”当作稳定的优先级机制；
+- 模板错误若发生在辅助模板实例化、默认成员初始化、函数体或其他非立即上下文中，SFINAE
+  不一定能吸收。应尽量把真正要检测的表达式直接放进 `void_t`、返回类型或 `requires`。
+
+类型萃取的核心不是记住所有 `<type_traits>` 名字，而是准确回答：当前保留的是哪一种类型形状，
+要查询的是语言性质还是表达式能力，失败应该移除接口还是选择内部实现，以及这个编译期结论
+能否真正支持后续优化或资源操作。
+
+标准规则可以继续对照 C++ 工作草案中的
+[Metaprogramming and type traits](https://eel.is/c++draft/meta)、
+[Template argument deduction](https://eel.is/c++draft/temp.deduct) 与
+[Constraints and Concepts](https://eel.is/c++draft/temp.constr)。
 
 ---
 
@@ -6160,6 +6861,238 @@ private:
 6. 返回引用包装器意味着调用者不能在缓存下一次修改后长期保存该引用；需要稳定快照时应返回值。
 7. 该实现不是线程安全的，并发访问需要外部同步或分片设计。
 
+## 35.3 加入 TTL 后，LRU 顺序不能代替过期顺序
+
+TTL（Time To Live）表示条目从写入开始最多存活多久。过期和 LRU 淘汰是两套独立规则：
+
+- LRU 链表按最近访问时间排序，用于容量不足时淘汰最久未使用的条目；
+- 过期索引按 `expires_at` 排序，用于找到已经超过 TTL 的条目；
+- 哈希表仍负责按 key 直接定位 LRU 节点。
+
+刚被访问的条目可能马上过期，长期未访问的条目也可能还有很长 TTL，因此不能只检查 LRU
+链表尾部。每次线性扫描整条链表虽然简单，却会把操作复杂度退化为 `O(n)`。下面使用
+`std::multimap<TimePoint, Key>` 保存过期顺序，并让每个 LRU 节点保存自己在过期索引中的
+迭代器，使更新和删除不留下旧的过期记录。
+
+```mermaid
+flowchart LR
+    K["Key"] --> H["unordered_map<br/>按 Key 定位"]
+    H --> N["LRU list 节点<br/>Key / Value / expires_at"]
+    N --> L["前移到链表头<br/>容量满时淘汰链表尾"]
+    N --> E["expiry iterator"]
+    E --> T["multimap&lt;TimePoint, Key&gt;<br/>最早到期项位于 begin()"]
+```
+
+TTL 应使用 `std::chrono::steady_clock`，因为它单调递增，不受系统时间校准或人工修改墙上时钟
+的影响。这里采用固定 TTL：`get()` 只更新 LRU 顺序，不延长到期时间。如果希望实现
+expire-after-access，`get()` 还要重新插入过期索引，其复杂度会增加到 `O(log n)`。
+
+## 35.4 支持 TTL 的线程安全实现
+
+下面的实现用一把 `std::mutex` 同时保护哈希表、LRU 链表和过期索引。`get()` 也必须取得
+独占锁，因为命中后会修改链表顺序；直接把 mutex 换成 `shared_mutex` 并不能让命中读取安全
+并行。
+
+```cpp
+#include <chrono>
+#include <cstddef>
+#include <functional>
+#include <iterator>
+#include <list>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <unordered_map>
+#include <utility>
+
+template <
+    typename Key,
+    typename Value,
+    typename Clock = std::chrono::steady_clock,
+    typename Hash = std::hash<Key>,
+    typename KeyEqual = std::equal_to<Key>>
+class ConcurrentTtlLruCache {
+private:
+    using TimePoint = typename Clock::time_point;
+    using Duration = typename Clock::duration;
+    using ExpiryIndex = std::multimap<TimePoint, Key>;
+    using ExpiryIterator = typename ExpiryIndex::iterator;
+
+    struct Node {
+        Key key;
+        Value value;
+        TimePoint expires_at;
+        ExpiryIterator expiry;
+    };
+
+    using LruList = std::list<Node>;
+    using LruIterator = typename LruList::iterator;
+
+public:
+    explicit ConcurrentTtlLruCache(std::size_t capacity)
+        : capacity_(capacity) {
+        static_assert(
+            Clock::is_steady,
+            "TTL cache requires a monotonic clock");
+
+        if (capacity == 0) {
+            throw std::invalid_argument(
+                "LRU capacity must be positive");
+        }
+    }
+
+    std::optional<Value> get(const Key& key) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        purge_expired_locked(Clock::now());
+
+        const auto found = index_.find(key);
+        if (found == index_.end()) {
+            return std::nullopt;
+        }
+
+        lru_.splice(lru_.begin(), lru_, found->second);
+        return found->second->value;  // 返回受锁保护时取得的快照
+    }
+
+    void put(Key key, Value value, Duration ttl) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const TimePoint now = Clock::now();
+        purge_expired_locked(now);
+
+        auto found = index_.find(key);
+        if (ttl <= Duration::zero()) {
+            if (found != index_.end()) {
+                erase_node_locked(found->second);
+            }
+            return;
+        }
+
+        const Duration remaining = TimePoint::max() - now;
+        const TimePoint expires_at = ttl >= remaining
+            ? TimePoint::max()
+            : now + ttl;
+        ExpiryIterator new_expiry =
+            expirations_.emplace(expires_at, key);
+
+        if (found != index_.end()) {
+            LruIterator node = found->second;
+
+            try {
+                node->value = std::move(value);
+            } catch (...) {
+                expirations_.erase(new_expiry);
+                throw;
+            }
+
+            expirations_.erase(node->expiry);
+            node->expires_at = expires_at;
+            node->expiry = new_expiry;
+            lru_.splice(lru_.begin(), lru_, node);
+            return;
+        }
+
+        try {
+            lru_.emplace_front(Node{
+                std::move(key),
+                std::move(value),
+                expires_at,
+                new_expiry});
+        } catch (...) {
+            expirations_.erase(new_expiry);
+            throw;
+        }
+
+        try {
+            const bool inserted =
+                index_.emplace(lru_.front().key, lru_.begin()).second;
+            if (!inserted) {
+                throw std::logic_error("duplicate cache key");
+            }
+        } catch (...) {
+            expirations_.erase(new_expiry);
+            lru_.pop_front();
+            throw;
+        }
+
+        if (index_.size() > capacity_) {
+            erase_node_locked(std::prev(lru_.end()));
+        }
+    }
+
+    bool erase(const Key& key) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        purge_expired_locked(Clock::now());
+
+        const auto found = index_.find(key);
+        if (found == index_.end()) {
+            return false;
+        }
+
+        erase_node_locked(found->second);
+        return true;
+    }
+
+    std::size_t size() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        purge_expired_locked(Clock::now());
+        return index_.size();
+    }
+
+private:
+    void purge_expired_locked(TimePoint now) {
+        while (!expirations_.empty() &&
+               expirations_.begin()->first <= now) {
+            const ExpiryIterator expiry = expirations_.begin();
+            const auto found = index_.find(expiry->second);
+
+            if (found == index_.end() ||
+                found->second->expiry != expiry) {
+                // 防御性处理：正常不应留下与节点不匹配的记录。
+                expirations_.erase(expiry);
+                continue;
+            }
+
+            erase_node_locked(found->second);
+        }
+    }
+
+    void erase_node_locked(LruIterator node) {
+        expirations_.erase(node->expiry);
+        index_.erase(node->key);
+        lru_.erase(node);
+    }
+
+    std::size_t capacity_;
+    std::mutex mutex_;
+    LruList lru_;  // front: newest, back: oldest
+    std::unordered_map<Key, LruIterator, Hash, KeyEqual> index_;
+    ExpiryIndex expirations_;
+};
+```
+
+一次操作持有同一把锁期间完成，因此其他线程不会观察到“哈希表已经更新，但链表或过期索引
+尚未更新”的中间状态。`get()` 返回 `Value` 副本，而不是节点引用或裸指针；解锁后其他线程
+可能立即更新或淘汰节点，返回内部引用会产生数据竞争或悬空引用。若 Value 很大，可以把缓存
+值改为 `std::shared_ptr<const Value>`，让读取者取得独立的生命周期。这个示例因此要求
+Key 和 Value 可复制；若要支持 Move-only Value，也可以直接把 Value 存成 shared_ptr。
+
+过期项采用懒清理：每次公开操作先从过期索引头部删除到期项，不额外创建后台线程。这样的
+对象没有停止线程和析构同步问题；缺点是缓存完全空闲时，过期项仍占用内存，直到下一次操作。
+如果必须在截止时间附近主动释放资源，可以增加清理线程：它在同一个 mutex 关联的
+`condition_variable` 上等待最早的 `expires_at`，插入更早到期项时通知它重新计算等待时间，
+析构时则设置停止标志并等待线程退出。
+
+复杂度和并发边界如下：
+
+- 哈希定位平均 `O(1)`，LRU 节点移动和按迭代器删除是 `O(1)`；
+- `put()` 更新过期索引是 `O(log n)`，批量清理的成本可摊还到此前插入的条目；
+- 单 mutex 提供清晰的全局 LRU 顺序，但热点访问会在这把锁上串行；
+- 高并发场景可按 key 哈希分片，每个分片维护独立的锁、链表和过期索引，代价是得到近似的
+  分片 LRU，而不是严格的全局 LRU；
+- 淘汰回调、日志、磁盘 I/O 和用户代码不应在锁内执行，可先移出待处理对象，释放锁后再调用；
+- 容量限制的是条目数。如果 Value 大小差异明显，应改为记录总字节数，并在插入时循环淘汰。
+
 ---
 
 # 36. 初始化、存储期、求值顺序与对象生命周期
@@ -7227,6 +8160,11 @@ std::function<int(int)> function = [](int value) {
     return value * 2;
 };
 ```
+
+它把不同目标类型的存储、销毁和调用方式擦除在统一的 `R(Args...)` 接口后面。调用代码只看
+到一个 `std::function<int(int)>`，实际目标可以是函数指针、lambda 或函数对象，并在运行期
+经过擦除后的调用入口到达具体实现。这属于运行期接口多态，但不要求这些目标继承同一个公开
+基类。
 
 优点：
 

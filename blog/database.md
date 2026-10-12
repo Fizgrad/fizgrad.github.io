@@ -576,7 +576,43 @@ FROM orders;
 ```
 
 显式写出 `ROWS` frame 可以避免重复排序值下默认 `RANGE` frame 把多行一起纳入的
-意外。常见窗口函数还有：
+意外。
+
+窗口先由 `PARTITION BY` 划分分区，再由 frame clause 为分区中的每一行确定参与本次
+计算的子集。只考虑窗口 `ORDER BY` 表达式时值相同的行称为对等行（peer），所有对等
+行构成一个对等组（peer group）。三种 frame unit 的滑动单位不同：
+
+| 模式 | 滑动单位 | `CURRENT ROW` 的含义 |
+| --- | --- | --- |
+| `ROWS` | 单个物理行 | 当前这一行 |
+| `RANGE` | `ORDER BY` 值的逻辑范围 | 当前行及其所有对等行 |
+| `GROUPS` | 对等组 | 当前行所在的整个对等组 |
+
+例如：
+
+```sql
+SUM(amount) OVER (
+    ORDER BY price
+    GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+)
+```
+
+它会纳入当前 `price` 所在的对等组，以及排序后前、后各一个对等组；每组可以包含多
+行。相同边界若改成 `ROWS`，则只向前、向后各移动一行。`ROWS` 的排序键不唯一时，
+对等行内部次序可能不稳定；需要稳定的逐行结果时，应增加主键等唯一 tie-breaker。
+
+并非所有窗口函数都使用 frame。`SUM`、`AVG` 等窗口聚合以及 `FIRST_VALUE`、
+`LAST_VALUE`、`NTH_VALUE` 会受 frame 影响；`ROW_NUMBER`、`RANK`、`DENSE_RANK`
+等排名函数由分区顺序和 peer group 决定，`LAG`、`LEAD` 也按分区中的相对位置取值，
+不能通过改变 frame 来限制它们。
+
+`GROUPS` 属于 SQL 标准，但支持情况不同：[PostgreSQL 11+](https://www.postgresql.org/docs/11/functions-window.html)
+和 [Oracle](https://docs.oracle.com/en/database/oracle/oracle-database/26/sqlrf/Analytic-Functions.html)
+支持；[MySQL 8.0](https://dev.mysql.com/doc/refman/8.0/en/window-function-restrictions.html)
+只支持 `ROWS` 与 `RANGE`，虽然解析器能识别 `GROUPS`，执行时仍会报错。编写跨数据库
+SQL 时应先确认目标版本，不能仅凭语法能够解析就认为功能可用。
+
+常见窗口函数还有：
 
 - `ROW_NUMBER()`：连续编号，不并列；
 - `RANK()`：并列后跳号；
@@ -1559,6 +1595,42 @@ MVCC 不能解决所有并发问题：
 - 当前读需要锁。
 - 唯一约束冲突需要等待或报错。
 - 写偏差等业务一致性问题仍需额外约束。
+
+## 11.5 PostgreSQL：死元组、VACUUM 与表膨胀
+
+PostgreSQL 的 `UPDATE` 通常写入新 tuple version，`DELETE` 也不会立即移除旧版本。只要
+旧快照仍可能看到某个版本，它就不能被物理清理；不再可能被任何事务看到的旧版本称为
+死元组（dead tuple）。死元组积累会增加表和索引扫描、缓存与存储开销，形成表膨胀。
+
+普通 `VACUUM` 会识别可清理的死元组，并把对应空间标记为可被后续写入重用；它通常
+不会缩小表文件并把空间归还操作系统。`VACUUM FULL` 会重写并压缩整张表，能够归还更
+多空间，但整个过程需要 `ACCESS EXCLUSIVE` 锁，还需要新表副本的额外磁盘空间，不适
+合作为日常维护手段。
+
+autovacuum 根据表的变更量自动触发清理。忽略上限等细节时，更新和删除触发阈值可简化
+理解为：
+
+```text
+autovacuum_vacuum_threshold
++ autovacuum_vacuum_scale_factor × 表的估算行数
+```
+
+大表即使只有较小的变更比例，也可能产生很多死元组，因此可以按表降低
+`autovacuum_vacuum_scale_factor` 或调整固定阈值，使清理更及时。但参数过于激进会
+增加 I/O 和 worker 压力，应结合 `pg_stat_user_tables` 中 `n_dead_tup` 的估算值、最后一次
+autovacuum 时间及实际写入速率调节，而不是全局盲目降低。
+
+长时间保留旧快照的事务会把全局可见性清理边界停在较早位置，使 `VACUUM` 不能删除仍
+可能被该快照读取的 tuple version。因此应控制事务时长，避免 `idle in transaction`，
+并检查长期事务、prepared transaction、逻辑复制槽以及 standby feedback 是否持续保留
+过旧的可见性边界。`VACUUM` 已经运行不代表这些版本一定能够被回收。
+
+已经发生严重膨胀、又不能让业务长时间停写时，可以使用 [`pg_repack`](https://reorg.github.io/pg_repack/)
+在线建立紧凑副本、
+同步期间变更并在最后切换。它不像 `VACUUM FULL` 那样在整个重写期间持有排他锁，但并
+非完全无锁：初始化和最终切换仍需短暂取得 `ACCESS EXCLUSIVE` 锁。完整表重建还要求
+额外磁盘空间，目标表通常需要主键或基于非空列的唯一索引，因此执行前必须检查锁等待、
+磁盘余量和写入压力。
 
 ---
 

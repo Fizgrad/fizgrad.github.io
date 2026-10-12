@@ -2232,11 +2232,64 @@ MLFQ 使用多个优先级队列，并根据任务行为动态调整位置：
 | `S` | Interruptible Sleep | 可中断睡眠，等待事件且可被信号唤醒 |
 | `D` | Uninterruptible/Killable Sleep | 通常表示内核中的不可中断或特定可杀等待 |
 | `Z` | Zombie | 已退出，等待父进程读取退出状态 |
+| `X` | Dead | 已进入最终回收阶段，通常只会短暂存在 |
 | `T` | Stopped | 被作业控制信号暂停 |
 | `t` | Tracing Stop | 被调试器或 `ptrace` 停止 |
 | `I` | Idle Kernel Thread | 某些内核空闲线程的显示状态 |
 
-### 4.1 R 状态
+### 4.1 状态转换图
+
+下图把“等待 CPU”和“正在 CPU 上执行”分开画出，以便观察调度过程；在内核任务状态字段中，两者都属于 `TASK_RUNNING`，在 `ps` 中也都显示为 `R`。二者的切换依靠运行队列和 `on_cpu` 等调度信息表示，不会把任务状态改成另一个常量。
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    state "创建中：TASK_NEW" as NEW
+    state "可运行、等待 CPU：TASK_RUNNING / R" as READY
+    state "正在 CPU 上执行：TASK_RUNNING / R" as RUN
+    state "可中断睡眠：TASK_INTERRUPTIBLE / S" as SLEEP
+    state "不可中断或可杀等待：D" as DWAIT
+    state "作业控制停止：__TASK_STOPPED / T" as STOP
+    state "调试停止：__TASK_TRACED / t" as TRACE
+    state "僵尸：EXIT_ZOMBIE / Z" as ZOMBIE
+    state "已回收：EXIT_DEAD / X" as DEAD
+
+    [*] --> NEW: fork / clone
+    NEW --> READY: wake_up_new_task
+    READY --> RUN: 调度器选中
+    RUN --> READY: 抢占、时间片到期或主动让出
+
+    RUN --> SLEEP: 设置状态并调用 schedule
+    SLEEP --> READY: 事件、超时或可处理信号
+
+    RUN --> DWAIT: 设置状态并调用 schedule
+    DWAIT --> READY: 事件或超时
+    DWAIT --> READY: 致命信号，仅限 killable 等待
+
+    READY --> STOP: 处理停止信号
+    RUN --> STOP: 处理停止信号
+    SLEEP --> READY: 停止信号先唤醒任务
+    STOP --> READY: SIGCONT 或致命信号
+
+    RUN --> TRACE: ptrace、断点或信号投递停止
+    TRACE --> READY: 调试器继续执行或解除跟踪
+
+    RUN --> ZOMBIE: 退出并等待父进程读取状态
+    ZOMBIE --> DEAD: 父进程调用 wait 或 waitpid
+    RUN --> DEAD: 配置为自动回收
+    DEAD --> [*]
+```
+
+状态转换有几个容易混淆的细节：
+
+- 唤醒只会让任务变为可运行并进入运行队列，不保证它立即获得 CPU；
+- 任务准备阻塞时，通常先设置睡眠状态，再检查等待条件，最后调用 `schedule()`。这个顺序配合唤醒端的状态检查，可以避免事件恰好发生在检查条件与睡眠之间而造成丢失唤醒；驱动代码通常应使用 `wait_event*()` 等已经封装好该协议的接口；
+- `TASK_INTERRUPTIBLE` 可被需要处理的信号唤醒；经典的 `TASK_UNINTERRUPTIBLE` 不响应普通信号；`TASK_KILLABLE` 在不可中断等待的基础上允许致命信号唤醒；
+- `EXIT_ZOMBIE` 和 `EXIT_DEAD` 记录在独立的 `exit_state` 中，并非普通可运行性状态。僵尸已经不能运行，只保留供父进程回收的退出信息；若父进程选择自动回收，任务可能不会留下可观察到的僵尸阶段；
+- 图中省略了 `TASK_PARKED`、冻结状态和空闲内核线程等专用路径，普通用户进程的主要生命周期由图中状态覆盖。
+
+### 4.2 R 状态
 
 `R` 同时包含：
 
@@ -2253,7 +2306,7 @@ MLFQ 使用多个优先级队列，并根据任务行为动态调整位置：
 - 调度延迟；
 - 负载是否持续。
 
-### 4.2 S 状态
+### 4.3 S 状态
 
 `S` 表示可中断睡眠，常见于：
 
@@ -2271,7 +2324,7 @@ MLFQ 使用多个优先级队列，并根据任务行为动态调整位置：
 
 具体行为受系统调用、`sigaction` 标志和实现影响。
 
-### 4.3 D 状态
+### 4.4 D 状态
 
 `D` 常用于表示任务在内核中等待某个不能按普通方式中断的条件。常见原因包括：
 
@@ -2295,7 +2348,7 @@ cat /proc/<pid>/wchan
 
 读取其他进程内核栈通常需要足够权限和内核配置支持。
 
-### 4.4 Z 状态
+### 4.5 Z 状态
 
 子进程退出后，大部分资源已经释放，但内核仍保留：
 
@@ -2308,7 +2361,7 @@ cat /proc/<pid>/wchan
 
 `kill -9` 对僵尸无效，因为其执行已经结束。正确做法是修复父进程的回收逻辑。
 
-### 4.5 T 与 t 状态
+### 4.6 T 与 t 状态
 
 - `T`：作业控制停止，例如 `SIGSTOP` 或 `SIGTSTP`；
 - `t`：调试跟踪停止，例如 GDB 断点或 `ptrace`。
@@ -2445,6 +2498,48 @@ count++;
 
 锁可以同时建立互斥和 happens-before 关系；原子操作则提供由内存序指定的同步语义。
 
+### 4.1 锁状态为什么必须用原子指令修改
+
+锁首先要解决“多个 CPU 同时认为自己取得了锁”的问题。普通的读取、判断和写回是三个可被
+交错的步骤：
+
+```text
+CPU 0：读取 locked = 0 ─────────────── 写入 1
+CPU 1：        读取 locked = 0 ─────────────── 写入 1
+
+结果：两个 CPU 都可能认为自己成功
+```
+
+因此 Fast Path 必须使用不可分割的 Read-Modify-Write，例如 exchange、Compare-and-Exchange
+或 LL/SC 循环。编译器会根据目标和内存序选择具体指令：
+
+| 目标 | 常见实现形式 | 核心含义 |
+|---|---|---|
+| x86-64 | 带 `lock` 语义的 `cmpxchg`、`xchg` 等 | 取得目标 Cache Line 的独占修改权，并原子完成读改写 |
+| Arm64 LL/SC | `LDAXR` 读取独占值，`STLXR` 条件写回，失败则重试 | 只有独占监视仍有效时写回成功 |
+| Arm64 LSE | `CAS`、`SWP` 等单指令原子操作及其 acquire/release 变体 | 由支持 LSE 的硬件直接完成原子读改写 |
+
+这里的“原子”通常依靠 Cache Coherence Protocol 对目标 Cache Line 的所有权协调，不等于
+每次都锁住整条内存总线。对齐、是否跨 Cache Line、目标架构能力和内存类型都会影响可用
+指令及成本。
+
+原子修改锁字只保证不会出现两个成功获取者，还不能单独保证临界区数据的可见性。成功获取
+需要 acquire 语义，释放需要 release 语义：
+
+```text
+前一持有者的临界区写入
+          ↓ release unlock
+          ↓ synchronizes-with
+          ↓ acquire lock
+后一持有者的临界区读取
+```
+
+无竞争锁可以只走这一层。出现竞争后，睡眠锁还需要等待队列和调度器；自旋锁则继续在 CPU
+上观察原子状态。后面的 mutex、futex、qspinlock 和 rwsem 都是在这组原子状态转换之上加入
+不同的排队、唤醒与公平策略。
+
+若要继续追到具体指令，[ARM64 异常、中断、内存序与锁](post.html?slug=arm64_exception_interrupt_lock)用 `LDXR/STXR`、LSE、Acquire/Release 和 IRQ-Safe Spinlock 把这条实现链展开。
+
 ## 5. 互斥锁 Mutex
 
 互斥锁保证同一时刻最多一个线程持有该锁并进入受保护区域。
@@ -2517,6 +2612,176 @@ flowchart TD
 线程睡眠、唤醒和调度：需要内核参与
 ```
 
+### 5.4 一个用户态 Mutex 怎样编码状态
+
+futex 不是一把现成的锁，它只提供“当某个用户地址仍等于期望值时睡眠”和“唤醒等待该
+地址的任务”等内核能力。pthread 库仍要在用户空间定义锁字、所有者、公平性和错误处理
+协议。
+
+最小概念模型可以用一个 32 位原子锁字表达三种状态：
+
+```text
+0  UNLOCKED    没有持有者
+1  LOCKED      已锁定，目前没有已知睡眠等待者
+2  CONTENDED   已锁定，并且可能存在等待者
+```
+
+这里的数值只是教学协议，不是 glibc、musl 或 Linux 对 pthread mutex 的固定 ABI。真实实现
+还可能在锁字或旁边字段中保存 owner TID、递归计数、robust、PI 和自适应自旋状态。
+
+下面的伪代码只展示主线：
+
+```text
+void lock(atomic_uint32_t* word) {
+    uint32_t expected = UNLOCKED;
+    if (compare_exchange_acquire(
+            word, &expected, LOCKED)) {
+        return;                         // 无竞争 Fast Path
+    }
+
+    for (;;) {
+        uint32_t old =
+            exchange_acquire(word, CONTENDED);
+
+        if (old == UNLOCKED) {
+            return;                     // 本线程取得锁
+        }
+
+        futex_wait(word, CONTENDED);    // 值仍为 CONTENDED 才睡眠
+    }
+}
+
+void unlock(atomic_uint32_t* word) {
+    uint32_t old =
+        exchange_release(word, UNLOCKED);
+
+    if (old == CONTENDED) {
+        futex_wake(word, 1);            // 唤醒一个竞争者
+    }
+}
+```
+
+成功加锁使用 acquire，解锁使用 release，使前一持有者在临界区中的写入 happens-before
+后一持有者取得锁后的读取。futex 系统调用负责阻塞和唤醒，但不能替代锁字上的原子操作与
+内存序。
+
+这个模型离生产实现仍有距离：
+
+- 被唤醒只表示线程重新变为 Runnable，不表示内核已经把锁所有权交给它；
+- 新到达线程可能在已唤醒线程运行前抢到锁，是否允许 barging 由实现策略决定；
+- 超时、信号和虚假唤醒都要求调用方重新检查锁字；
+- 取消、robust owner death、进程共享和优先级继承需要额外协议；
+- 只用布尔锁字无法可靠判断解锁时是否需要进入内核唤醒。
+
+### 5.5 FUTEX_WAIT 为什么不会丢失唤醒
+
+最危险的窗口是：
+
+```text
+等待者发现锁被占用
+        ↓
+尚未真正睡眠
+        ↓
+持有者解锁并执行 wake
+        ↓
+等待者才开始睡眠
+```
+
+如果“检查条件”和“加入等待队列”互不协调，wake 会发生在队列为空时，等待者随后可能
+永久睡眠。futex wait 用期望值比较关闭这个窗口：
+
+1. 等待者先在用户态把锁标成 CONTENDED；
+2. 调用 `FUTEX_WAIT(addr, CONTENDED)`；
+3. 内核根据 futex key 找到并锁住对应的哈希桶；
+4. 内核再次读取 `addr`，只有它仍等于 CONTENDED 才把当前任务加入等待队列；
+5. 入队完成后设置睡眠状态并调用调度器；
+6. 解锁者修改锁字，再用 `FUTEX_WAKE` 从同一个 key 的队列中唤醒等待者。
+
+若解锁发生在第 1 步和第 4 步之间，内核重新检查时会发现值已经变化，wait 以类似
+`EAGAIN` 的结果返回而不睡眠；若解锁发生在入队以后，wake 就能找到等待者。
+所以关键不是“wake 会被保存”，而是“值检查与等待队列入队相对于 wake 正确同步”。
+
+经典 futex 使用对齐的用户空间锁字。Private futex 可以结合当前地址空间识别等待对象；
+进程共享 futex 则必须让不同进程中的映射解析到同一个共享后备对象。两个进程虚拟地址数值
+相同，并不自动说明它们等待的是同一把进程共享锁。
+
+`FUTEX_WAKE(addr, 1)` 通常只唤醒一个任务，以减少惊群。但内核唤醒顺序和 mutex
+最终取得顺序不是简单的 FIFO 承诺；公平性、handoff 和自适应自旋由更高层实现决定。
+
+### 5.6 Linux 内核 Mutex 的三条获取路径
+
+内核 `struct mutex` 是内核内部的睡眠锁，不是 pthread mutex 的锁字。典型结构
+包含：
+
+| 字段或结构 | 作用 |
+|---|---|
+| owner | 保存当前 `task_struct*`，并利用对齐留下的低位编码等待者等状态 |
+| wait_lock | 自旋锁，保护竞争慢路径中的等待队列 |
+| wait list | 保存已经进入睡眠竞争路径的任务 |
+| osq | 配置允许时，用 MCS 风格队列协调乐观自旋者 |
+
+字段和位布局会随内核版本、配置及架构变化，源码不能依赖上表之外的私有编码。加锁通常分成
+三条路径：
+
+```mermaid
+flowchart TD
+    A["mutex_lock"] --> F{"Fast Path<br/>cmpxchg owner: NULL → current"}
+    F -->|成功| CS["进入临界区"]
+    F -->|失败| M{"Mid Path<br/>Owner 正在 CPU 上运行？<br/>当前任务无需调度？"}
+    M -->|适合| O["进入 OSQ<br/>只让有限 Spinner 竞争"]
+    O --> T{"锁是否很快释放？"}
+    T -->|是| CS
+    T -->|否| S["Slow Path"]
+    M -->|不适合| S
+    S --> Q["在 wait_lock 保护下入 wait list"]
+    Q --> P["设置任务状态并 schedule()"]
+    P --> R["被唤醒后重新竞争"]
+    R --> F
+```
+
+- Fast Path：owner 为空时，用 `cmpxchg` 原子地写入 current，不操作等待队列；
+- Mid Path：若持有者仍在 CPU 上运行，它可能很快释放锁，等待者先进行有界的乐观自旋；
+- Slow Path：在 wait_lock 保护下登记 waiter，设置任务状态并调用 `schedule()`；
+- Unlock Fast Path：没有等待者时用 release 语义清空 owner；
+- Unlock Slow Path：存在等待者时同步访问等待队列，把候选任务加入 wake queue，再交给调度器
+  唤醒。
+
+OSQ 的作用不是保护业务临界区，而是把 mutex 的多个乐观自旋者排队，避免所有 CPU 同时反复
+读取和修改 owner Cache Line。只有排到前面的 Spinner 直接竞争 mutex；需要重新调度的
+Spinner 还必须能够退出 OSQ。
+
+内核 mutex 可以睡眠，因此只能在允许调度的进程上下文使用，不能用于 hardirq、softirq、
+timer 等原子上下文。持有它时可以调用可能睡眠的函数，但仍应控制临界区长度和锁顺序。
+
+### 5.7 优先级反转、PI futex 与 rt_mutex
+
+假设低优先级任务 L 持有锁，高优先级任务 H 等待这把锁，中优先级任务 M 又持续抢占 L：
+
+```text
+H：等待 L 持有的锁 ───────────────────┐
+                                      │ H 无法继续
+M：             持续运行并抢占 L ─────┤
+                                      │
+L：持锁 ── 被 M 抢占，无法及时解锁 ───┘
+```
+
+这会形成无界优先级反转。Priority Inheritance（PI）的做法是临时把 H 的优先级传播给 L，
+让 L 能越过 M 尽快运行并释放锁；释放后再撤销继承优先级。
+
+Linux `rt_mutex` 为 PI 维护两类按优先级组织的信息：
+
+- 每把 rt_mutex 保存等待它的任务，最高优先级者是 top waiter；
+- 每个 owner 记录其所持锁上的 top waiters，从中计算当前应继承的最高优先级；
+- 如果 owner 又阻塞在另一把 PI 锁上，内核沿 `task → lock → owner` 链继续传播；
+- waiter 超时、收到信号或锁被释放时，需要重新计算并降低继承优先级。
+
+用户空间使用带 Priority Inheritance 属性的 pthread mutex 时，竞争慢路径可以通过 PI futex
+进入内核，并复用 rt_mutex 的所有者与优先级传播机制。普通 `FUTEX_WAIT/WAKE`
+不会自动提供 PI；普通 mutex 也不应被描述成“天然解决优先级反转”。
+
+PI 需要维护优先级队列、owner 状态和可能很长的传播链，成本高于普通无竞争锁。它主要用于
+实时或明确存在优先级约束的路径，不能代替缩短临界区、减少嵌套和正确设计调度策略。
+
 ## 6. 自旋锁 Spin Lock
 
 自旋锁在获取失败时反复检查锁状态，而不是主动睡眠。
@@ -2539,6 +2804,166 @@ flowchart TD
 
 用户态自旋锁和内核自旋锁也不能简单等同。内核自旋锁常与关闭抢占、屏蔽中断等规则配合，具体语义依内核上下文而异。
 
+### 6.1 TAS 与 TTAS 为什么会争抢 Cache Line
+
+最直接的 Test-and-Set（TAS）锁不断执行原子交换：
+
+```cpp
+void lock() {
+    while (locked.exchange(
+               true, std::memory_order_acquire)) {
+        cpu_relax();
+    }
+}
+
+void unlock() {
+    locked.store(false, std::memory_order_release);
+}
+```
+
+原子读改写通常需要取得锁字 Cache Line 的写权限。多个 CPU 每次循环都执行 exchange，会让
+同一条 Cache Line 在各核之间反复转移所有权；竞争越高，总线/一致性流量越大。
+
+Test-and-Test-and-Set（TTAS）先用普通 load 等待看起来已经空闲，再尝试 CAS：
+
+```cpp
+void lock() {
+    for (;;) {
+        while (locked.load(
+                   std::memory_order_relaxed)) {
+            cpu_relax();
+        }
+
+        bool expected = false;
+        if (locked.compare_exchange_weak(
+                expected, true,
+                std::memory_order_acquire,
+                std::memory_order_relaxed)) {
+            return;
+        }
+    }
+}
+```
+
+锁仍被占用时，多个等待者主要读取共享状态，不必每轮都发起写所有权竞争；但解锁时所有等待者
+仍会同时观察到变化并尝试 CAS。TTAS 减少了流量，却没有自动提供公平性，也没有解决持有者
+被抢占的问题。`cpu_relax()` 只是向编译器和 CPU 表达自旋等待意图，可能改善功耗
+和流水线行为，不会让出锁或建立额外的业务同步协议。
+
+### 6.2 Ticket Lock 与 MCS Lock
+
+Ticket Lock 使用两个递增计数：
+
+```text
+next_ticket：下一个等待者领取的号码
+now_serving：当前可以进入临界区的号码
+
+lock:
+    my = fetch_add(next_ticket, 1)
+    while now_serving != my:
+        cpu_relax()
+
+unlock:
+    release_store(now_serving, now_serving + 1)
+```
+
+号码顺序提供近似 FIFO 公平性，但所有等待者都轮询同一个 now_serving Cache Line。每次解锁
+更新它时，许多 CPU 都会收到一致性无效化或更新，规模很大时仍会形成广播式流量。
+
+MCS Lock 为每个等待者准备独立队列节点：
+
+```text
+tail → Node A → Node B → Node C
+         │        │        │
+       owner    等待 A    等待 B
+                 写本地     写本地
+                 locked     locked
+```
+
+获取时，等待者原子地把自己的节点交换到 tail，并链接到前驱；随后只轮询自己节点中的
+locked 状态。释放者只通知直接后继。这样等待流量分散到不同 Cache Line，降低所有 CPU
+争抢同一个锁字的问题，并提供队列顺序。
+
+MCS 的代价是每个等待者必须提供节点，正确处理“后继尚未完成链接”和节点生命周期。Linux
+会在不同场景使用 MCS 或 MCS 风格队列，例如 mutex 乐观自旋的 OSQ；这不表示所有 Linux
+锁都直接采用原始论文中的 MCS 数据结构。
+
+### 6.3 Linux qspinlock
+
+许多架构上的 Linux queued spinlock（qspinlock）把常用状态压缩进一个 32 位锁字，逻辑上
+包含：
+
+```text
+locked   当前是否持有
+pending  一个浅竞争等待者正在尝试接手
+tail     MCS 风格等待队列的尾节点编码
+```
+
+典型获取路径是：
+
+1. 锁字为 0 时，Fast Path 用 acquire CAS 直接设置 locked；
+2. 浅竞争时，等待者可先设置 pending，短暂等待当前 owner 清除 locked；
+3. 已经存在 pending 或更多竞争者时，任务使用 per-CPU qnode 加入 MCS 风格队列；
+4. 队首到达后再竞争或接手 locked，后继主要在自己的节点上等待；
+5. 解锁通常用 release store 清除 locked，保证临界区写入先于后继取得锁。
+
+```mermaid
+flowchart LR
+    U["0<br/>Unlocked"] -->|"Fast CAS"| L["locked"]
+    L -->|"一个等待者"| P["locked + pending"]
+    P -->|"Owner release / handoff"| L
+    L -->|"更多竞争者"| Q["locked / pending / tail<br/>MCS 风格队列"]
+    Q -->|"队首接手"| L
+    L -->|"无等待者 release"| U
+```
+
+pending 减少只有一个等待者时建立完整队列的开销；tail 让高竞争等待者排队，避免退化成所有
+CPU 对同一锁字做无界原子读改写。具体位数、per-CPU 节点编码、虚拟化慢路径和支持架构属于
+内核实现细节，应以目标内核的 `asm/qspinlock.h` 与
+`kernel/locking/qspinlock.c` 为准。
+
+### 6.4 自旋锁与抢占、中断上下文
+
+选择内核锁接口必须先列出所有可能访问共享状态的上下文：
+
+| 竞争来源 | 常见接口 | 需要解决的问题 |
+|---|---|---|
+| 普通进程上下文 | `spin_lock()` | 防止其他 CPU 并发，并在非 RT 内核上防止当前任务被普通调度抢占 |
+| 当前 CPU 的 SoftIRQ | `spin_lock_bh()` | 加锁期间禁止本地 Bottom Half，避免 SoftIRQ 重入同一临界区 |
+| 当前 CPU 的 HardIRQ | `spin_lock_irqsave()` | 保存并关闭本地中断，避免 IRQ 处理器抢占后等待当前任务持有的锁 |
+| 极底层、必须真正自旋 | `raw_spin_lock*()` | 保留原始自旋语义，尤其用于 PREEMPT_RT 不能睡眠的路径 |
+
+如果进程上下文先取得锁，随后同一 CPU 的 IRQ 处理器抢占它并尝试同一把锁，IRQ 会一直
+自旋；被抢占的持有者又无法继续执行和解锁，形成单 CPU 自死锁。这就是
+`spin_lock_irqsave()` 必须先保存并关闭本地中断，再取得锁的原因。解锁时要用
+匹配的 `spin_unlock_irqrestore()` 恢复调用前状态，不能无条件打开中断。
+
+关闭本地抢占或中断只约束当前 CPU，不能阻止其他 CPU 访问共享数据，因此它不能替代 SMP
+锁。反过来，普通 spin lock 只解决 CPU 间互斥，也不会自动阻止当前 CPU 上能重入该路径的
+IRQ/SoftIRQ。
+
+在非 PREEMPT_RT 内核中，普通 `spinlock_t` 通常是真正的自旋锁并禁止抢占；
+PREEMPT_RT 会把部分 `spinlock_t` 语义转换为可调度的实时锁，以降低不可抢占
+时延，而 `raw_spinlock_t` 保留严格自旋语义。编写通用内核代码时不能把某一种
+配置下观察到的实现当作所有内核的固定行为。
+
+### 6.5 自旋锁的内存序与禁止操作
+
+成功获取必须提供 acquire 语义，释放必须提供 release 语义，才能让前一持有者对受保护数据
+的写入被后一持有者观察。原子地把 locked 从 0 改成 1 只解决锁字竞争，如果缺少匹配的内存
+顺序，业务数据仍可能被编译器或 CPU 错误重排。
+
+严格自旋临界区中不能执行可能调度或长期阻塞的操作，例如：
+
+- 获取 mutex、等待 completion 或调用 `schedule()`；
+- 可能发生缺页并睡眠的用户内存访问；
+- 不确定是否分配等待的内存分配；
+- 同步 I/O、长时间轮询或不可控回调；
+- 再次取得同一把不可递归锁。
+
+自旋锁应保护短小、确定、不可睡眠的状态变更。把大段计算放到锁外，或者复制必要状态后释放
+锁，通常比选择“更强的自旋锁”更有效。
+
 ## 7. 读写锁
 
 读写锁允许：
@@ -2557,6 +2982,55 @@ flowchart TD
 - 读者优先可能使写者饥饿；
 - 写者优先可能降低读吞吐；
 - 锁升级和降级如果接口不明确，容易死锁。
+
+### 7.1 rwlock_t 与 rw_semaphore 不是同一种等待方式
+
+Linux 内核提供两类常见读写原语：
+
+| 类型 | 等待方式 | 可用上下文 | 临界区能否睡眠 |
+|---|---|---|---|
+| `rwlock_t` | 自旋 | 需要原子上下文读写锁时使用，并匹配 IRQ/BH 规则 | 否 |
+| `struct rw_semaphore` / rwsem | 竞争时可进入调度器睡眠 | 进程上下文 | 可以，但要控制持锁范围 |
+
+两者都提供“多读者或单写者”的抽象，但不能因为接口都叫 read/write lock 就互换。读侧很长
+或可能阻塞时，rwlock_t 会让其他 CPU 持续空转；中断路径又不能改用会睡眠的 rwsem。
+
+### 7.2 rwsem 的状态与慢路径
+
+当前通用 rwsem 实现围绕以下信息工作：
+
+- 原子 count：编码活跃 Reader 数、Writer Locked、Waiters/Handoff 等状态；
+- owner：写者 owner 或 Reader-owned 提示，供诊断和乐观自旋判断使用；
+- wait_lock 与 wait list：保护已经进入慢路径的 Reader/Writer waiter；
+- OSQ：配置允许时协调 Writer 的乐观自旋。
+
+具体位位置不是稳定 API，但获取算法可以概括为：
+
+```text
+down_read
+  ├─ Fast Path：原子增加 Reader 计数，且没有阻止新 Reader 的 Writer/Handoff 状态
+  └─ Slow Path：撤销或修正计数，进入 wait list，睡眠后重试
+
+down_write
+  ├─ Fast Path：CAS 将完全空闲状态改成 Writer Locked
+  ├─ Mid Path：Owner 仍在运行时尝试有界乐观自旋
+  └─ Slow Path：作为 Writer 入队并睡眠
+
+up_read / up_write
+  └─ 更新 count；状态允许时唤醒队首 Writer 或一批 Reader
+```
+
+仅用一个 Reader Counter 还不够：如果 Reader 不断在 Writer 等待期间继续插入，Writer 可能
+永远等不到计数归零。实现会结合等待队列、handoff 或限制 lock stealing，在吞吐和 Writer
+饥饿之间取舍。Reader 批量唤醒可以形成读阶段，Writer 通常按队列顺序推进，但精确公平策略
+会随内核版本与 PREEMPT_RT 配置变化。
+
+rwsem 的 owner 对 Reader 往往只能是提示，因为同时可能存在很多 Reader，逐一保存所有
+owner 成本过高。不能像普通 mutex 那样假设 owner 字段永远指向唯一真实持有者。
+
+读多并不自动意味着 rwsem 更快。如果读临界区很短，Reader 计数所在 Cache Line 的跨核
+原子更新也可能成为瓶颈；若读取可以接受旧版本，RCU、Seqcount、per-CPU 数据或数据分片
+可能比一把全局读写锁更合适。
 
 ## 8. 条件变量
 
@@ -2671,6 +3145,8 @@ void consumer() {
 
 内存序应从 happens-before 和共享不变量出发选择，而不是只根据“哪个更快”选择。
 
+AArch64 上的 `LDAR/STLR`、`DMB/DSB/ISB`、LL/SC 与 LSE 的分工见[ARM64 异常、中断、内存序与锁](post.html?slug=arm64_exception_interrupt_lock)。
+
 ## 11. 无锁不等于无等待
 
 并发算法常见进展保证：
@@ -2681,6 +3157,184 @@ void consumer() {
 - **obstruction-free**：单独运行时可以完成。
 
 无锁算法仍可能因 CAS 重试、缓存行争用和内存回收而变慢，也更容易出现 ABA、悬空指针和复杂内存序问题。
+
+## 12. 内核等待队列与 Completion
+
+### 12.1 Wait Queue 不是锁
+
+Linux wait queue 把“等待某个条件的任务”和调度器连接起来。典型 wait queue head 包含一把
+保护队列的自旋锁和 waiter 链表；waiter 记录任务以及独占唤醒、回调等信息。它不自动保护
+业务对象，也不自动保存一次事件。
+
+等待侧的概念流程是：
+
+```c
+DEFINE_WAIT(wait);
+
+for (;;) {
+    prepare_to_wait(&queue, &wait, TASK_INTERRUPTIBLE);
+
+    if (condition_is_true())
+        break;
+
+    schedule();
+
+    if (signal_pending(current)) {
+        /* 处理 EINTR 路径 */
+        break;
+    }
+}
+
+finish_wait(&queue, &wait);
+```
+
+关键顺序是：
+
+```text
+先入等待队列并设置任务状态
+          ↓
+再次检查业务条件
+          ↓
+条件仍不满足才 schedule()
+```
+
+如果先检查条件，再在没有协调的情况下入队，waker 可能正好在两步之间修改条件并调用
+`wake_up()`，造成丢失唤醒。先登记 waiter 后重新检查条件，可以让等待者要么
+看到条件已成立而不睡眠，要么已经在队列中被 waker 找到。
+
+实际代码通常优先使用 `wait_event*()` 宏，而不是手写上述循环，因为
+interruptible、timeout、exclusive waiter 和任务状态恢复都有严格规则。无论使用哪种接口，
+业务条件仍需通过锁、原子操作或其他发布协议建立正确的可见性。
+
+唤醒也不是锁所有权转移：
+
+```text
+修改受保护的 condition
+        ↓
+发布对应内存状态
+        ↓
+wake_up(queue)
+        ↓
+等待任务变为 Runnable
+        ↓
+调度运行后重新检查 condition
+```
+
+### 12.2 Completion 保存一次完成状态
+
+Completion 用于表达“一项工作已经完成”，建立在 wait queue 和调度器唤醒机制之上：
+
+```c
+DECLARE_COMPLETION(done);
+
+/* 等待者 */
+wait_for_completion(&done);
+
+/* 完成者 */
+complete(&done);       /* 释放一个等待者 */
+/* complete_all(&done); 释放当前和后续等待者 */
+```
+
+`struct completion` 中的 done 状态使完成通知可以先于等待发生：如果
+`complete()` 已经增加完成计数，后来调用
+`wait_for_completion()` 可以直接消费它。这与“裸 wake 没有 waiter 时不会替
+未来保存事件”不同。
+
+Completion 适合驱动初始化、异步请求完成和线程退出握手，不适合当作普通 mutex 使用。
+`reinit_completion()` 只重置 done，不负责确认旧 waiter 已离开；对象销毁前还
+必须保证不会再有 complete 或 wait 路径访问它。
+
+## 13. Seqcount 与 Seqlock
+
+Seqcount 面向“读者只需取得某个一致快照，并允许失败后重试”的场景。Writer 更新前把序列号
+变成奇数，完成后再变成下一个偶数；Reader 读取前后两次观察序列号：
+
+```c
+unsigned sequence;
+Snapshot snapshot;
+
+do {
+    sequence = read_seqcount_begin(&state_seq);
+    snapshot.x = state.x;
+    snapshot.y = state.y;
+} while (read_seqcount_retry(&state_seq, sequence));
+```
+
+如果 Reader 发现开始时 Writer 正在工作，或者结束时序列号已经变化，就丢弃这次快照并
+重试。Reader 不需要给共享计数器加减，也不会阻塞 Writer，因此短读、少写场景很高效。
+
+但 `seqcount_t` 本身不串行化多个 Writer。Writer 必须通过外部锁保证互斥，并且
+在可能被 Reader 抢占的环境中保证写侧临界区不会被长时间抢占；否则 Reader 可能一直看到
+奇数序列而空转。`seqlock_t` 把 Seqcount 与 Writer Spin Lock 组合起来，减少
+漏掉写侧互斥的风险。
+
+Seqcount/Seqlock 的边界：
+
+- Reader 读取的字段必须能安全复制，不能在重试前产生不可撤销副作用；
+- 不适合直接保护可能被 Writer 释放的指针生命周期，Reader 可能解引用已经失效的对象；
+- Writer 很频繁或写侧长时间不结束时，Reader 可能反复重试甚至饥饿；
+- 它提供一致快照协议，不提供普通 mutex 那样的 Reader/Writer 所有权。
+
+需要保护指针发布与延迟回收时，应考虑 RCU 或额外生命周期机制；需要 Reader 阻塞等待最新
+结果时，应选择 rwsem、mutex、wait queue 等更符合语义的原语。
+
+## 14. Lockdep 与锁竞争诊断
+
+### 14.1 Lockdep 检查的是锁依赖图
+
+Lockdep 不必等系统真的形成死锁才工作。它把锁实例映射到 Lock Class，并记录已经观察到的
+获取顺序：
+
+```text
+路径一：持有 A 时获取 B
+        建立依赖 A → B
+
+路径二：持有 B 时尝试获取 A
+        形成 B → A
+
+A → B → A
+构成潜在循环，Lockdep 报告
+```
+
+它还跟踪锁是否在 HardIRQ/SoftIRQ 上下文中取得，能够发现“某锁在 IRQ 中取得，却又在未
+关闭 IRQ 的进程上下文中持有”等可能自死锁的组合。嵌套层级属于同一锁类但语义不同的情况，
+需要使用 nested/subclass 接口告诉 Lockdep 合法层级，不能直接关闭检查掩盖报告。
+
+常见配置和断言包括：
+
+- `CONFIG_DEBUG_LOCK_ALLOC`：维护锁类和获取信息；
+- `CONFIG_PROVE_LOCKING`：进行依赖图与上下文正确性验证；
+- `CONFIG_LOCK_STAT`：收集锁等待、持有和竞争统计；
+- `lockdep_assert_held()` 等：在被保护的辅助函数入口声明锁前置条件。
+
+Lockdep 只能检查经过其插桩的锁协议，不能发现所有无锁数据竞争、业务条件错误或绕过标准锁
+接口的自定义同步。报告中的依赖链需要结合实际对象生命周期和调用上下文分析，但不应因为
+“这次没有真的卡死”就忽略。
+
+### 14.2 从等待时间定位锁竞争
+
+具备相应内核配置和权限时，可以使用：
+
+```bash
+sudo perf lock record -- <workload>
+sudo perf lock report
+sudo perf lock contention
+
+sudo cat /proc/lock_stat
+```
+
+分析时至少区分：
+
+- acquire 次数很多，但几乎不等待；
+- 等待次数不多，却有很长尾延迟；
+- 持锁时间长；
+- 临界区短，但大量 CPU 同时争用同一 Cache Line；
+- 持有者被抢占、发生缺页或调用了慢路径；
+- 锁只是下游 I/O、内存回收或调度异常的表面等待点。
+
+优化顺序通常是先确认锁保护的不变量，再缩小临界区、移出阻塞操作、分片共享状态或降低共享
+写频率。直接替换成自旋锁、读写锁或无锁结构，可能只是把睡眠等待变成 CPU 空转、Reader
+计数争用或更难验证的内存回收问题。
 
 # 五、死锁
 
@@ -3614,6 +4268,119 @@ Page Cache
 > 需要持久化普通文件时，通常还要使用 fsync() 或 fdatasync()。
 > 
 > 创建、删除或重命名文件时，若还需要保证目录项在崩溃后可恢复，通常还需要同步相关目录。
+
+## 8. 从 VFS 到块设备的完整 I/O 路径
+
+普通文件的一次读写会跨过多层对象，不能把“文件系统”和“磁盘驱动”视为同一层：
+
+```mermaid
+flowchart TD
+    A["read / write / mmap / fsync"] --> B["VFS：file、dentry、inode"]
+    B --> C["ext4 / F2FS 等具体文件系统"]
+    C --> D{"Buffered I/O?"}
+    D -->|是| E["Page Cache / Folio"]
+    E --> F["Writeback / Readahead"]
+    D -->|Direct I/O| G["直接组织设备 I/O"]
+    F --> H["bio：描述一组块 I/O"]
+    G --> H
+    H --> I["blk-mq：软件提交队列与硬件派发队列"]
+    I --> J["UFS / NVMe / eMMC 驱动"]
+    J --> K["控制器与存储介质"]
+```
+
+### 8.1 Buffered I/O、Direct I/O 与 `mmap`
+
+- Buffered I/O 先访问 page cache。读命中时无需设备 I/O；写入通常先把页面标脏，再由
+  writeback 异步回写。
+- Direct I/O 尝试绕过 page cache，减少缓存复制和双份缓存，但会引入对齐、I/O 大小、
+  并发和设备能力约束。它不等于绕过文件系统，也不自动保证数据已经持久化。
+- `mmap` 通过页故障把文件页映射进进程地址空间，最终仍可能使用同一份 page cache。
+  `msync()`、`fsync()` 与映射写回的具体持久化协议必须按文件系统和应用语义设计。
+
+Buffered I/O 与 Direct I/O 同时访问重叠区域时，需要特别小心缓存一致性和正在进行的
+I/O。数据库通常会选择一套明确的缓存与刷盘策略，而不是任意混用两种路径。
+
+### 8.2 Dirty Page、writeback 与脏页节流
+
+`write()` 把 page cache 页面改成 dirty 后，后台 flusher 会按时间和脏页比例回写；当
+产生脏页的速度长期高于设备写入速度时，调用线程也会被节流，甚至参与回写。于是一次
+看似普通的 `write()` 延迟突然升高，可能不是该次写立即落盘，而是系统在偿还此前累积
+的脏页债务。
+
+排查时可结合：
+
+```bash
+grep -E 'Dirty|Writeback' /proc/meminfo
+cat /proc/vmstat
+iostat -x 1
+```
+
+要同时观察脏页规模、设备队列、吞吐和尾延迟。仅把
+`vm.dirty_background_ratio` 或 `vm.dirty_ratio` 调大可能推迟回写，却会放大随后一次集中
+回写的延迟与断电风险。
+
+### 8.3 `bio` 与 blk-mq
+
+文件系统把逻辑文件区间映射到块后，通常以 `bio` 描述目标扇区、页面片段、方向和操作
+标志。块层可以合并或拆分请求，再交给 blk-mq：
+
+```text
+提交 CPU
+  → software staging queue
+  → 调度、合并与标签分配
+  → hardware dispatch queue
+  → 控制器命令队列
+  → 完成中断或轮询
+```
+
+多队列设计让多核提交能映射到多个硬件队列，降低一把全局锁造成的争用，但并不保证
+所有设备都真正并行。队列深度过小会饿死设备，过大则可能增加排队尾延迟；吞吐和时延
+需要结合负载选择。
+
+### 8.4 ext4 日志与 F2FS 日志结构
+
+ext4 常通过 JBD2 记录需要保证一致性的元数据事务。典型 ordered 模式会在提交相关
+元数据前，先保证对应文件数据按要求写出；日志主要保证崩溃后文件系统结构可恢复，
+并不等于每次 `write()` 都自动具有应用事务语义。应用仍要正确安排临时文件、
+`fsync()`、`rename()` 和目录同步。
+
+F2FS 面向闪存采用日志结构思路，写入新位置并通过 checkpoint、node/data log 等机制
+恢复状态。它仍需要 garbage collection 回收有效数据较少的 segment。设备接近写满、
+空闲 segment 不足或冷热数据混放时，GC 会造成写放大与尾延迟；“顺序追加”不代表没有
+回收成本。
+
+### 8.5 Flush、FUA 与设备写缓存
+
+存储设备可能先确认写入，再把数据留在易失写缓存中。块层用两类语义表达顺序和稳定性：
+
+- `REQ_PREFLUSH`：先把此前缓存的写刷新到稳定介质，再处理当前请求；
+- `REQ_FUA`：要求当前写完成时已经满足稳定存储语义。
+
+文件系统根据日志和 `fsync()` 协议组合这些能力。若控制器或设备虚报 flush/FUA 能力，
+上层协议再正确也可能在掉电后丢失数据；反过来，无条件关闭写缓存会牺牲大量性能。
+
+### 8.6 Discard 与写放大
+
+删除文件只改变文件系统元数据，设备未必知道哪些逻辑块已空闲。`discard`/TRIM 可以把
+这类信息传给 SSD 或闪存控制器，帮助后续回收。持续在线 discard 可能把设备回收延迟
+暴露给前台 I/O；批量 `fstrim` 则把工作集中到可控时段。选择哪种方式取决于设备固件、
+负载和延迟目标，不能仅凭“SSD 就应该开启”判断。
+
+### 8.7 分层定位 I/O 延迟
+
+```text
+应用等待
+  → 系统调用与锁
+  → page cache 命中/回写节流
+  → 文件系统日志、分配与 GC
+  → blk-mq 排队
+  → 驱动与中断
+  → 控制器、介质及固件回收
+```
+
+`strace` 可看系统调用阻塞，`perf`/ftrace/tracepoint 可看内核路径，`iostat` 可看块设备
+利用率和队列，但任何单一工具都不能直接给出完整因果链。Direct I/O、加密层、device
+mapper、RAID 和虚拟块设备还会增加新的层次。
 
 # 九、I/O 模型
 
@@ -6067,6 +6834,17 @@ EEVDF 仍使用虚拟时间和权重公平思想，但增加两个关键概念�
 - **lag**：任务相对于公平份额是欠 CPU 时间还是超额使用；
 - **virtual deadline**：任务本次请求对应的虚拟截止时间。
 
+这里的 **eligible** 表示“当前有资格进入最终选择集合”，它不等同于 runnable：
+
+- **runnable** 只说明任务没有阻塞，可以被调度；
+- **eligible** 还要求任务没有领先于自己的公平份额，通常可近似理解为 `lag >= 0`；
+- runnable 但 `lag < 0` 的任务已经超额获得服务，会暂时留在候选集合之外，等待其他任务取得
+  应得服务或系统虚拟时间继续推进；它没有睡眠，也没有被停止。
+
+任务等待 CPU 时会逐渐积累应得服务，lag 向“欠服务”方向变化；任务实际运行时会消耗这份
+服务，lag 向“超额使用”方向变化。EEVDF 先用 eligibility 保证份额约束，再用 virtual
+deadline 决定当前合格任务中先运行谁。
+
 简化选择过程：
 
 1. 找出 eligible 的任务，通常要求 lag 表明它没有超额占用；
@@ -6076,7 +6854,7 @@ EEVDF 仍使用虚拟时间和权重公平思想，但增加两个关键概念�
 ```mermaid
 flowchart TD
     A["可运行公平类任务"] --> B["计算/维护 lag"]
-    B --> C["筛选 eligible 任务"]
+    B --> C["筛选 eligible：未超额使用的任务"]
     C --> D["比较 virtual deadline"]
     D --> E["选择最早虚拟截止任务"]
 ```
@@ -6090,6 +6868,22 @@ nice 通常范围：
 ```text
 -20 ... 19
 ```
+
+这里的权重是公平调度实体的**相对 CPU 服务权重**，不是 CPU 算力、固定时间片或实时优先级。
+`nice 0` 的典型基准权重为 1024；nice 每增加一级，权重约缩小为原来的 `1 / 1.25`，每降低
+一级则约增大 1.25 倍。只有发生竞争时，相对权重才决定份额：
+
+```text
+任务的理想 CPU 份额 ≈ 任务权重 / 同层可运行实体的权重总和
+```
+
+例如同一 CPU、同一 cgroup 内只有两个持续可运行任务时，`nice 0` 的权重约为 1024，
+`nice 5` 约为 335，理想 CPU 份额约为 75% 和 25%。如果当前只有一个任务可运行，即使它是
+`nice 19`，也可以使用空闲 CPU，不会为了维持低份额而让 CPU 闲置。
+
+该权重会参与虚拟时间、lag 和 virtual deadline 的计算：高权重任务的实际运行时间折算成
+虚拟时间时增长更慢，公平模型也认为它应获得更多服务，因此长期竞争中通常得到更多 CPU；
+但它不保证每次都先运行，也不提供确定的响应时间。
 
 - nice 越小，权重越高；
 - nice 越大，权重越低；
@@ -6525,6 +7319,130 @@ flowchart TD
 - 对高隔离需求使用 microVM 或沙箱运行时。
 
 容器安全不是单一开关，而是内核攻击面、配置、供应链和运行权限的组合问题。
+
+容器与拥有独立 Guest Kernel 的虚拟机在隔离边界、内存转换和 I/O 路径上不同；KVM、
+QEMU、virtio/vhost、VFIO 和迁移机制见独立的
+[Linux 虚拟化文章](post.html?slug=linux_virtualization)。
+
+## 11. 物理内存分配、回收与 OOM
+
+前面的页表和页故障解释了“地址怎样映射”，这一节继续回答“内核从哪里找到物理页，
+找不到时又怎样腾出空间”。
+
+### 11.1 Node、Zone 与页分配约束
+
+NUMA 机器按 node 表示不同的物理内存局部性，每个 node 又按硬件可寻址范围和用途划分
+zone。常见 zone 包括 `DMA`、`DMA32`、`Normal`，是否存在及边界取决于架构和配置。
+
+```mermaid
+flowchart TD
+    N0["NUMA Node 0"] --> Z00["ZONE_DMA / DMA32"]
+    N0 --> Z01["ZONE_NORMAL"]
+    N1["NUMA Node 1"] --> Z10["ZONE_NORMAL"]
+    Z01 --> P0["Per-CPU Page Lists"]
+    Z01 --> B0["Buddy Free Areas"]
+```
+
+分配请求不仅有大小，还有 GFP flags、允许睡眠与否、可访问 zone、NUMA policy、迁移
+类型和对齐要求。中断上下文中的分配不能走可能睡眠的慢路径；设备 DMA 也可能受到地址
+位宽限制。因此系统“还有空闲内存”不代表任意请求都能成功。
+
+### 11.2 PCP 与 Buddy Allocator
+
+小阶页面分配通常先走 per-CPU page lists（PCP），减少多个 CPU 对 zone 全局锁的争用。
+PCP 不足时再批量向 buddy allocator 获取；释放也可能先回到 PCP。
+
+Buddy allocator 把空闲页按 `2^order` 个连续页组织。分配较大 order 时逐级拆分更大的块，
+释放时若相邻 buddy 同阶且可合并，就逐级合并。它解决的是物理页的快速分配与连续块
+管理，不负责 C 对象大小级别的复用。
+
+```text
+order 3: [8 pages]
+             ↓ split
+order 2: [4 pages] [4 pages]
+             ↓ split one block
+order 1: [2 pages] [2 pages] [4 pages]
+```
+
+总空闲页很多但分散在小块中时，高阶分配仍可能失败，这就是外部碎片。`/proc/buddyinfo`
+可以查看各 zone 不同 order 的空闲块数量。
+
+### 11.3 SLUB：从页到小对象
+
+内核频繁分配 `task_struct`、dentry 等小对象，若每个对象都直接向 buddy 请求整页会浪费
+空间。SLUB 把一组页面作为 slab，再切成同类型对象，并使用 per-CPU fast path 降低锁
+竞争：
+
+```text
+kmem_cache
+  → per-CPU slab
+      → object / object / object ...
+  → partial slabs
+  → buddy 提供的新页面
+```
+
+`kmalloc()` 使用通用尺寸 cache，`kmem_cache_create()` 适合专用对象 cache。SLUB debug、
+red zone 和 poisoning 能发现越界或 use-after-free，但会改变布局和性能。SLUB 内部碎片与
+buddy 的物理连续碎片是不同问题。
+
+### 11.4 Watermark、kswapd 与 direct reclaim
+
+每个 zone 维护 `min/low/high` 等水位。空闲页降到 low 附近时，后台 `kswapd` 被唤醒并
+尝试回收到 high；若分配路径已无法满足请求，调用线程可能进入 direct reclaim，并在
+必要时触发 compaction。
+
+```mermaid
+flowchart LR
+    A["分配请求"] --> B{"PCP/Buddy 可满足?"}
+    B -->|是| C["返回页面"]
+    B -->|否| D["唤醒 kswapd"]
+    D --> E["direct reclaim / compaction"]
+    E --> F{"仍可满足?"}
+    F -->|是| C
+    F -->|否| G["失败或进入 OOM 路径"]
+```
+
+后台回收影响总体吞吐，direct reclaim 会直接出现在业务线程尾延迟中。诊断时应区分
+“空闲内存低”与“某个 zone/某种 order 无法满足”。
+
+### 11.5 匿名页、文件页与回收
+
+干净文件页可以丢弃，之后需要时从文件重新读取；脏文件页必须先写回。匿名页没有文件
+后备存储，通常要写入 swap/zram 才能释放物理页。回收器依据访问热度和 refault 反馈
+在不同类型页面间取舍，现代内核还可使用 Multi-Gen LRU 以“代”组织 folio 的老化与
+回收。
+
+Folio 表示一组作为单元管理的连续基础页，帮助文件系统和内存管理减少反复按单页处理的
+开销；它不等于架构 Huge Page，也不保证每个 folio 都是大页。
+
+### 11.6 Compaction、CMA 与连续内存
+
+Compaction 通过迁移可移动页面，把分散的空闲页聚成较大的连续块。它能缓解外部碎片，
+但迁移、扫描和锁竞争本身有成本，而且被 pin、不可移动或正在 I/O 的页面会形成障碍。
+
+CMA 在启动阶段预留一片区域，平时可供可移动页面使用，需要大块连续内存时再迁移这些
+页面并回收连续区，常用于显示、相机等设备。CMA 不是永不失败的专用内存池；长期 pin
+住其中页面仍会破坏可回收性。IOMMU 能让物理分散页呈现连续 IOVA 时，应先判断设备是否
+真的要求物理连续。
+
+### 11.7 memcg 与 OOM
+
+全局 OOM 表示整个系统难以继续满足分配；memcg OOM 表示某个 memory cgroup 达到自身
+限制，即使系统其他位置仍有空闲内存也可能发生。OOM killer 会结合 badness 等因素选择
+牺牲进程，但它是系统无法继续回收后的恢复手段，不是稳定的资源调度策略。
+
+排查至少需要同时看：
+
+```bash
+cat /proc/meminfo
+cat /proc/zoneinfo
+cat /proc/buddyinfo
+cat /proc/pressure/memory
+cat /sys/fs/cgroup/<group>/memory.events
+```
+
+要区分匿名内存、page cache、不可回收 slab、页表、被 pin 页面、内核栈和设备内存。
+只看到进程 RSS 或一句 OOM 日志，通常还不足以解释内存去了哪里。
 
 ---
 
@@ -7720,6 +8638,8 @@ Device Tree 节点、Linux device 和驱动实例相关联，但三者不是同�
 最后调用驱动注册的 handler。硬件中断是异步外部事件；page fault 等同步异常不能
 简单归入同一种机制。
 
+ARM64 上从向量表、GIC 到 Generic IRQ 的逐层示例见[ARM64 异常、中断、内存序与锁](post.html?slug=arm64_exception_interrupt_lock)。
+
 | 执行位置 | 能否睡眠 | 适合的工作 |
 |---|---|---|
 | hard IRQ handler | 不能 | 确认中断来源、读取必要状态、应答或屏蔽设备、唤醒后续处理 |
@@ -7854,6 +8774,97 @@ IOMMU 不是 CPU MMU，也不意味着设备天然安全。共享同一 IOMMU do
 看到 IOMMU fault 时，应同时核对 IOVA、访问方向、长度、设备 stream ID、Buffer
 生命周期和映射解除时机。很多故障不是“IOMMU 配错”，而是设备仍在访问已经释放
 或提前解除映射的 Buffer。
+
+IOMMU 在设备直通和 GPU 虚拟地址中的具体位置，分别见
+[Linux 虚拟化](post.html?slug=linux_virtualization)与
+[Linux GPU 驱动](post.html?slug=linux_gpu_driver)。
+
+### 3.7 Platform、I2C、SPI 与 PCIe 设备
+
+驱动必须先回答设备“怎样被发现、怎样寻址、怎样传输”：
+
+| 类型 | 设备发现与资源 | 常见特点 |
+|---|---|---|
+| Platform | Device Tree、ACPI 或板级描述提供 MMIO、IRQ 等资源 | SoC 内建控制器，没有可枚举总线 |
+| I2C | 总线号与从设备地址，常由 Device Tree 描述 | 两线、低带宽，常见于传感器和电源芯片 |
+| SPI | 控制器、chip select、mode、最大频率 | 全双工、无统一设备枚举，常见于屏幕和高速外设 |
+| PCIe | 配置空间枚举、BAR、MSI/MSI-X | 可发现、资源标准化，常见于独显、NVMe、网卡 |
+
+`platform_driver` 的 `probe()` 常先取得资源，再建立软件状态：
+
+```c
+static int demo_probe(struct platform_device *pdev)
+{
+    struct demo *d;
+
+    d = devm_kzalloc(&pdev->dev, sizeof(*d), GFP_KERNEL);
+    if (!d)
+        return -ENOMEM;
+
+    d->regs = devm_platform_ioremap_resource(pdev, 0);
+    if (IS_ERR(d->regs))
+        return PTR_ERR(d->regs);
+
+    d->irq = platform_get_irq(pdev, 0);
+    if (d->irq < 0)
+        return d->irq;
+
+    platform_set_drvdata(pdev, d);
+    return devm_request_threaded_irq(&pdev->dev, d->irq,
+                                    demo_irq, demo_irq_thread,
+                                    IRQF_ONESHOT,
+                                    dev_name(&pdev->dev), d);
+}
+```
+
+`devm_*` 把资源释放绑定到 device 生命周期，能缩短错误回滚路径，但不会替代并发停止：
+`remove()` 前仍要停止新提交、等待 IRQ/work/DMA 完成，再让资源被释放。
+
+### 3.8 GPIO、pinctrl、regmap、clock、reset 与 regulator
+
+SoC 外设不是只有寄存器和 IRQ。一个控制器开始工作前，通常还依赖：
+
+```text
+regulator 供电
+  → clock 提供时钟
+  → reset deassert
+  → pinctrl 选择引脚复用和电气状态
+  → GPIO 控制离散信号
+  → regmap 访问寄存器
+  → 设备开始收发
+```
+
+- pinctrl 管理 pin mux 和 bias、drive strength 等电气属性；GPIO 只表达离散输入输出，
+  二者有重叠但不是同一抽象。
+- regmap 为 MMIO、I2C、SPI 等寄存器设备提供统一访问、缓存和位更新接口，减少每个驱动
+  重写寄存器样板代码；volatile、precious、cache 同步等属性配置错误会读到旧值或破坏
+  有副作用寄存器。
+- clock、reset、regulator 都可能由另一个驱动提供。consumer 在 provider 尚未就绪时可
+  返回 `-EPROBE_DEFER`，driver core 会稍后重试。
+
+启停顺序应按芯片手册和依赖关系设计，失败时反向回滚。不能假定 bootloader 留下的时钟
+和电源状态会永久有效；也不能在 consumer 仍访问设备时先关闭 supplier。
+
+### 3.9 Runtime PM 与系统 Suspend
+
+Runtime PM 在系统仍运行时，按设备空闲状态执行 runtime suspend/resume；系统 suspend
+则协调整机进入睡眠。二者会共享部分驱动回调和硬件序列，但触发条件与全局约束不同。
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active
+    Active --> Idle: 最后一个使用者释放
+    Idle --> RuntimeSuspended: autosuspend 到期
+    RuntimeSuspended --> Active: 新请求 / pm_runtime_get
+    Active --> SystemSuspended: 系统睡眠回调
+    RuntimeSuspended --> SystemSuspended: 系统睡眠回调
+    SystemSuspended --> Active: resume 并恢复上下文
+```
+
+驱动需要定义谁持有 runtime PM 引用、何时设备仍有 DMA/IRQ、寄存器状态是否会丢失，
+并处理 suspend 与 remove、错误恢复、异步 work 的竞争。常见故障包括引用计数不平衡导致
+永不休眠，或过早掉电导致总线 timeout。Device link 可以表达 supplier/consumer 依赖，
+帮助驱动核心安排 probe 和电源管理顺序。
 
 ## 4. 内核源码配置、构建、调试与追踪
 
@@ -8017,6 +9028,187 @@ tracepoint 保留指向已卸载模块代码的函数指针。
 日志只能说明“某条路径发生过”，采样只能估计时间分布，trace 也可能因缓冲区覆盖
 丢失事件。可靠结论应同时说明时间顺序、资源状态、因果机制和对照实验，而不是只
 展示一张调用栈或一次波形。
+
+## 5. 修改、测试与协作闭环
+
+### 5.1 GNU Make、GCC 与 Git 各自解决什么
+
+Linux 工程中这三者处在不同层次：
+
+```text
+Kconfig / .config       决定功能配置
+Kbuild / GNU Make       决定目标和依赖怎样构建
+GCC 或 Clang            把源代码编译成目标文件
+ld / objcopy             链接和生成镜像
+Git                      保存、比较、审查和定位版本变化
+```
+
+GNU Make 的核心不是“依次执行 shell 命令”，而是根据 target、prerequisite 和时间戳构建
+依赖图。自动变量 `$@` 表示目标，`$<` 表示第一个依赖，`$^` 表示全部依赖：
+
+```make
+demo: main.o io.o
+	$(CC) $(LDFLAGS) $^ -o $@
+
+%.o: %.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+```
+
+Kbuild 建立在 GNU Make 之上，但提供自己的 `obj-y`、`obj-m`、host tools、生成头文件和
+递归目录协议，不能把普通用户态 Makefile 原样放进内核目录。
+
+编译警告、预处理结果和汇编常是定位问题的第一手证据：
+
+```bash
+gcc -Wall -Wextra -Werror -O2 -g demo.c -o demo
+gcc -E demo.c -o demo.i
+gcc -S -O2 demo.c -o demo.s
+objdump -drS demo.o
+readelf -Ws demo.o
+```
+
+优化会内联、合并或删除变量，GDB 中“下一行”不一定对应一条机器指令。调试内核时应
+保留匹配的带调试信息 `vmlinux`，用 `/proc/kallsyms`、模块 section 地址或自动加载脚本
+完成重定位，不能拿压缩启动镜像直接代替符号文件。
+
+Git 应把一个逻辑变化组织成可审查提交：代码、必要测试和文档保持一致，避免把格式化
+混进功能修改。常用定位关系是：
+
+```text
+git log -p / blame     找到历史意图
+git show / diff        检查具体变化
+git bisect             在可自动判定的好坏版本之间二分
+git format-patch       导出可邮件审查的提交
+```
+
+### 5.2 QEMU、GDB/KGDB 与 Crash Dump
+
+QEMU 适合快速启动自编内核、构造虚拟设备和恢复快照，尤其适合与 GDB 连接调试早期启动：
+
+```bash
+qemu-system-aarch64 ... -S -s
+gdb vmlinux
+(gdb) target remote :1234
+(gdb) hbreak start_kernel
+(gdb) continue
+```
+
+QEMU 只能复现其设备模型和时序，真实 SoC 的缓存、一致性互连、固件和外设错误仍需要真机。
+KGDB 通过串口或网络等 I/O 调试运行内核，适合断点和单步，但停住 CPU 会改变时序，不适合
+所有并发故障。
+
+Oops 表示内核检测到严重异常并打印现场，系统有时仍继续运行；panic 表示内核决定停止或
+重启。若配置 kdump，发生 panic 后可由预留的 capture kernel 保存 vmcore，再用 `crash`
+和匹配的 `vmlinux` 离线检查 task、锁、内存和调用栈。地址符号化只是起点，还需确认最初
+异常、受损对象的生命周期以及后续连锁错误。
+
+### 5.3 Lockup、hung task 与 RCU stall
+
+- soft lockup 通常表示某 CPU 长时间没有让 watchdog 线程得到运行机会；hard lockup 更偏向
+  CPU 长时间连 NMI watchdog 都无法观察到正常进展。
+- hung task 表示处于不可中断睡眠等状态的任务长时间没有前进，常见根因是 I/O、锁或驱动
+  completion 永不发生。
+- RCU stall 表示 grace period 长时间无法完成，可能因为 CPU 长期不进入 quiescent state、
+  中断/抢占被关闭太久，或系统整体过载。
+
+三类告警都只是“缺少进展”的症状。应结合所有 CPU 栈、IRQ/softirq 状态、锁等待、调度
+时间线和设备完成路径，而不是看到 watchdog 函数名就把它当根因。
+
+### 5.4 KUnit、kselftest 与系统测试
+
+| 层次 | 适合验证 | 边界 |
+|---|---|---|
+| KUnit | 内核内部函数、数据结构和错误分支 | 白盒测试，通常随测试内核构建运行 |
+| kselftest | 用户可见 ABI、系统调用和子系统端到端行为 | 依赖内核配置与运行环境 |
+| LTP | 更广泛的 Linux 系统调用与兼容性回归 | 套件通过不等于具体硬件驱动正确 |
+| 真实硬件压力/故障注入 | DMA、IRQ、热插拔、掉电和长稳 | 成本高，必须控制可重复性 |
+
+一个修复至少应包含能在修改前失败、修改后通过的验证，并同时运行相关子系统回归。并发
+问题要重复、改变 CPU 数和抢占配置；内存问题可结合 fault injection、KASAN/KCSAN；I/O
+持久性问题要覆盖重启或断电模型，不能只测正常返回值。
+
+### 5.5 静态检查与补丁提交
+
+- `checkpatch.pl` 检查常见代码风格和部分易错模式，不是正确性证明；
+- Sparse 擅长地址空间、类型注解与上下文检查；
+- Smatch 做跨函数的数据流和错误路径分析；
+- Coccinelle 用语义补丁批量匹配、迁移 API 或发现重复模式。
+
+提交前应运行与改动相关的编译矩阵和测试，并说明测试环境。发送到上游时，补丁说明需要
+先讲可复现问题和根因，再讲为什么该修改正确、边界如何处理、怎样验证。`Fixes:`、
+`Cc: stable@vger.kernel.org` 等标签应按项目规则使用；维护者列表可由
+`scripts/get_maintainer.pl` 辅助生成，但最终仍要阅读目标子系统文档与近期提交。
+
+跟踪社区演进时，以目标分支的源码、`Documentation/`、维护者树和邮件讨论为准。LWN、
+博客和演讲适合建立背景，但不能替代最终合入语义；Android common kernel、厂商内核与
+upstream 的版本和 backport 关系也必须分开记录。
+
+## 6. ARM64 与 RISC-V 的内核入口
+
+本节用于对照两种架构的总体入口。ARM64 异常向量、GIC 中断链、Barrier、原子指令和锁实现的完整主线见[ARM64 异常、中断、内存序与锁](post.html?slug=arm64_exception_interrupt_lock)。
+
+### 6.1 ARM64：异常级别与异常入口
+
+ARM64 常见执行层次为：
+
+```text
+EL0  用户程序
+EL1  普通操作系统内核
+EL2  Hypervisor / 虚拟化控制
+EL3  Secure Monitor（平台存在时）
+```
+
+层级编号描述权限和异常路由，不表示应用每次系统调用都逐级经过 EL2、EL3。Linux 用户态
+通过 `svc` 触发同步异常进入 EL1；IRQ、FIQ、SError 和同步异常由异常向量区分。入口代码
+保存必要寄存器，建立 `pt_regs`，再分派到系统调用、页故障或中断处理，返回前恢复状态。
+
+### 6.2 ARM64 页表、TLB 与缓存
+
+页表粒度和虚拟地址位数由平台配置决定，常见 4 KiB granule 会形成多级 translation
+table。PTE 除物理页号外，还含访问权限、执行权限、内存类型、access flag 等属性。
+修改正在使用的映射时必须遵循架构要求的 break-before-make、TLB invalidation 和 barrier
+顺序；`dmb`、`dsb`、`isb` 作用不同，不能用一个“内存屏障”笼统替代。
+
+CPU cache coherence 解决参与一致性域的 CPU/设备之间缓存视图问题，DMA API 解决驱动在
+具体平台上的映射与同步协议，IOMMU/SMMU 解决设备地址转换与隔离。三者相关但不等价。
+
+### 6.3 GIC、PSCI 与 SMMU
+
+GIC 管理中断路由和优先级；per-CPU SGI/PPI 与外设 SPI 的来源和目标不同，MSI 设备还可
+通过 ITS 等机制形成消息中断。PSCI 是操作系统与固件协作 CPU on/off、suspend、system
+reset 等操作的标准接口。SMMU 是 Arm 平台常见 IOMMU，实现 stream 对应的设备地址转换
+和隔离。
+
+定位问题时先区分层次：中断未到达可能在设备、GIC 路由或 CPU mask；CPU 无法下线可能在
+调度迁移、驱动 hotplug 回调、PSCI 固件；SMMU fault 则要核对 stream ID、IOVA、页表和
+buffer 生命周期。
+
+### 6.4 RISC-V：Hart、特权级与 SBI
+
+RISC-V 把一个硬件执行线程称为 hart。运行 Linux 的常见平台包含 U-mode、S-mode 和
+M-mode：应用运行在 U-mode，Linux 内核运行在 S-mode，机器固件通常运行在 M-mode。
+ECALL、异常和中断统称 trap，并由 `stvec`、`scause`、`sepc`、`stval` 等 CSR 描述入口
+和现场。
+
+SBI 是 S-mode 操作系统向更底层执行环境请求服务的接口，常用于 timer、IPI、hart 状态
+管理和 system reset。SBI 不是设备驱动总线，也不规定所有外设访问。
+
+### 6.5 RISC-V 地址转换与扩展
+
+RV64 Linux 常见 Sv39 或 Sv48 页表模式；`satp` 选择地址空间和根页表，`sfence.vma`
+同步地址转换缓存。RISC-V 的 ISA 由基础指令集和扩展组成，软件不能只看到“RV64”就假设
+原子、向量或特定缓存管理扩展一定存在；内核会根据硬件描述和运行探测建立 capability。
+
+启用 H 扩展的虚拟化环境还会出现 HS/VS/VU 等状态与两阶段地址转换。概念上它与 ARM64
+stage-2、x86 EPT 都是在 guest 自己的地址转换之外，再由 hypervisor 控制 guest physical
+到 host physical 的映射，但寄存器、TLB 和异常细节属于各自架构。
+
+### 6.6 两种架构应怎样学习和定位
+
+先掌握共同问题：异常如何进入内核、页表怎样转换、IRQ 怎样路由、CPU 怎样启动、设备怎样
+DMA，再对照架构手册寻找寄存器和屏障语义。出现 fault 时保留原始 syndrome/CSR、PC、
+页表、CPU/hart 和固件版本；只把 ARM64 名词机械替换成 RISC-V 名词，很容易忽略架构保证
+的差异。
 
 
 # 十七、常用 CLI 工具
@@ -8795,5 +9987,30 @@ page fault 通常发生在 TLB miss 后发现页表条件不满足
 30. [util-linux: flock(1)](https://man7.org/linux/man-pages/man1/flock.1.html)
 31. [Linux man-pages: proc_locks(5)](https://man7.org/linux/man-pages/man5/proc_locks.5.html)
 32. [Linux Kernel Documentation: Virtual File System](https://docs.kernel.org/filesystems/vfs.html)
+33. [Linux Kernel Documentation: Physical Memory](https://docs.kernel.org/mm/physical_memory.html)
+34. [Linux Kernel Documentation: Multi-Gen LRU](https://docs.kernel.org/mm/multigen_lru.html)
+35. [Linux Kernel Documentation: Multi-Queue Block I/O](https://docs.kernel.org/block/blk-mq.html)
+36. [Linux Kernel Documentation: Writeback Cache Control](https://docs.kernel.org/block/writeback_cache_control.html)
+37. [Linux Kernel Documentation: Platform Devices and Drivers](https://docs.kernel.org/driver-api/driver-model/platform.html)
+38. [Linux Kernel Documentation: Pin Control](https://docs.kernel.org/driver-api/pin-control.html)
+39. [Linux Kernel Documentation: Runtime Power Management](https://docs.kernel.org/power/runtime_pm.html)
+40. [Linux Kernel Documentation: Testing Guide](https://docs.kernel.org/dev-tools/testing-overview.html)
+41. [Linux Kernel Documentation: Submitting Patches](https://docs.kernel.org/process/submitting-patches.html)
+42. [Arm: Exception Model](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/Learn%20the%20Architecture/Exception%20model.pdf)
+43. [RISC-V Privileged Architecture](https://docs.riscv.org/reference/isa/priv/priv-intro.html)
+44. [Linux source: Task state definitions](https://github.com/torvalds/linux/blob/master/include/linux/sched.h)
+45. [Linux source: Scheduler trace state mapping](https://github.com/torvalds/linux/blob/master/include/trace/events/sched.h)
+46. [Linux Kernel Documentation: Scheduler Nice Design](https://docs.kernel.org/scheduler/sched-nice-design.html)
+47. [Linux Kernel Documentation: Generic Mutex Subsystem](https://docs.kernel.org/locking/mutex-design.html)
+48. [Linux Kernel Documentation: Robust Futexes](https://docs.kernel.org/locking/robust-futexes.html)
+49. [Linux Kernel Documentation: RT-mutex Implementation Design](https://docs.kernel.org/locking/rt-mutex-design.html)
+50. [Linux Kernel Documentation: Lock Types and Their Rules](https://docs.kernel.org/locking/locktypes.html)
+51. [Linux source: Queued Spinlock](https://github.com/torvalds/linux/blob/master/kernel/locking/qspinlock.c)
+52. [Linux source: Read/Write Semaphore](https://github.com/torvalds/linux/blob/master/kernel/locking/rwsem.c)
+53. [Linux Kernel Documentation: Sequence Counters and Sequential Locks](https://docs.kernel.org/locking/seqlock.html)
+54. [Linux Kernel Documentation: Completions](https://docs.kernel.org/scheduler/completion.html)
+55. [Linux Kernel Documentation: Lockdep Design](https://docs.kernel.org/locking/lockdep-design.html)
+56. [Intel: Manuals for Intel 64 and IA-32 Architectures](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)
+57. [Arm: Armv8-A Architecture and Its Ongoing Development](https://developer.arm.com/community/arm-community-blogs/b/architectures-and-processors-blog/posts/the-armv8-a-architecture-and-its-ongoing-development)
 
 > 内核文档和 man-pages 会持续更新。阅读具体机器行为时，应同时检查发行版内核版本、配置选项和对应源码。

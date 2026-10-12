@@ -3,8 +3,57 @@
     "title": "编译器与高性能系统算法",
     "titleEn": "Algorithms for Compilers and High-Performance Systems",
     "slug": "compiler_algorithms",
-    "description": "CFG、数据流、SSA、寄存器分配、GPU Kernel 映射与 CPU/GPU 性能算法",
-    "descriptionEn": "CFGs, data flow, SSA, register allocation, GPU kernel mapping, and CPU/GPU performance algorithms."
+    "description": "CFG、数据流、SSA、寄存器分配与指令调度",
+    "descriptionEn": "CFGs, data flow, SSA, register allocation, and instruction scheduling."
+  },
+  {
+    "title": "张量计算、融合与性能算法",
+    "titleEn": "Tensor Computation, Fusion, and Performance Algorithms",
+    "slug": "tensor_compiler_algorithms",
+    "description": "张量布局、GEMM、算子融合、CPU 缓存、成本模型与验证",
+    "descriptionEn": "Tensor layouts, GEMM, fusion, CPU caches, cost models, and validation."
+  },
+  {
+    "title": "CUDA 编程模型：从向量加法开始",
+    "titleEn": "CUDA Programming Model: Starting with Vector Addition",
+    "slug": "cuda_programming",
+    "description": "从可运行的 CUDA C++ 示例理解线程层级、内存、同步与 Stream",
+    "descriptionEn": "A runnable CUDA C++ introduction to thread hierarchy, memory, synchronization, and streams."
+  },
+  {
+    "title": "CUDA 执行与内存模型",
+    "titleEn": "CUDA Execution and Memory Model",
+    "slug": "cuda_execution_model",
+    "description": "Grid、Block、Warp、SM、SIMT、同步与内存层级",
+    "descriptionEn": "Grids, blocks, warps, SMs, SIMT, synchronization, and memory hierarchy."
+  },
+  {
+    "title": "CUDA 并行原语与性能分析",
+    "titleEn": "CUDA Parallel Primitives and Performance Analysis",
+    "slug": "cuda_parallel_primitives",
+    "description": "Reduction、Scan、Histogram、Softmax、Occupancy 与 Roofline",
+    "descriptionEn": "Reduction, scan, histogram, softmax, occupancy, and roofline analysis."
+  },
+  {
+    "title": "GPU Kernel 编译与 Lowering",
+    "titleEn": "GPU Kernel Compilation and Lowering",
+    "slug": "gpu_kernel_lowering",
+    "description": "PTX、MLIR GPU 路径、Tiling、Tensor Core 与软件流水",
+    "descriptionEn": "PTX, MLIR GPU lowering, tiling, tensor cores, and software pipelining."
+  },
+  {
+    "title": "GPU Compiler 工程实践",
+    "titleEn": "GPU Compiler Engineering",
+    "slug": "gpu_compiler_engineering",
+    "description": "动态形状、资源模型、版本选择、正确性验证与性能归因",
+    "descriptionEn": "Dynamic shapes, resource models, versioning, correctness, and performance attribution."
+  },
+  {
+    "title": "AI Compiler：从计算图到硬件执行",
+    "titleEn": "AI Compilers: From Computational Graphs to Hardware Execution",
+    "slug": "ai_compiler",
+    "description": "模型捕获、多层 IR、图优化、Kernel 生成、Runtime 与主流技术栈",
+    "descriptionEn": "Model capture, multi-level IR, graph optimization, kernel generation, runtimes, and mainstream stacks."
   },
   {
     "title": "MLIR：多层中间表示与渐进式 Lowering",
@@ -26,6 +75,13 @@
     "slug": "Android",
     "description": "安卓是一个面向各种不同形态设备的操作系统。",
     "descriptionEn": "Android is an operating system for a wide array of devices with different form factors."
+  },
+  {
+    "title": "Android Connectivity：蜂窝、Wi-Fi、Bluetooth、GNSS 与 NFC",
+    "titleEn": "Android Connectivity: Cellular, Wi-Fi, Bluetooth, GNSS, and NFC",
+    "slug": "android_connectivity",
+    "description": "从 Framework、协议栈、HAL 到驱动与控制器，串联 Android 的通信与定位链路",
+    "descriptionEn": "Android communication and positioning paths from framework and protocol stacks to HALs, drivers, and controllers."
   },
   {
     "title": "我的NebulaIM",
@@ -61,6 +117,27 @@
     "slug": "os_review",
     "description": "Linux系统基础复习笔记",
     "descriptionEn": "Linux System Fundamentals review notes."
+  },
+  {
+    "title": "ARM64 异常、中断、内存序与锁",
+    "titleEn": "ARM64 Exceptions, Interrupts, Memory Ordering, and Locks",
+    "slug": "arm64_exception_interrupt_lock",
+    "description": "从异常向量、GIC、内存屏障和原子指令理解 Linux 锁的实现",
+    "descriptionEn": "Linux locking from exception vectors and the GIC to memory barriers and atomic instructions."
+  },
+  {
+    "title": "Linux 虚拟化：KVM、QEMU 与 virtio",
+    "titleEn": "Linux Virtualization: KVM, QEMU, and virtio",
+    "slug": "linux_virtualization",
+    "description": "vCPU、两阶段地址转换、virtio/vhost、VFIO、迁移与性能定位",
+    "descriptionEn": "vCPUs, two-stage translation, virtio/vhost, VFIO, migration, and performance analysis."
+  },
+  {
+    "title": "Linux GPU 驱动",
+    "titleEn": "Linux GPU Drivers",
+    "slug": "linux_gpu_driver",
+    "description": "DRM/KMS、GEM/TTM、dma-buf、Fence、GPU VM、调度与故障恢复",
+    "descriptionEn": "DRM/KMS, GEM/TTM, dma-buf, fences, GPU VMs, scheduling, and recovery."
   },
   {
     "title": "大模型之火",

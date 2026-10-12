@@ -935,6 +935,39 @@ Fence 用于表达异步硬件任务完成状态。图形 Buffer 在生产、消
 - 高优先级后台线程争抢 CPU。
 - 内存回收、I/O 或中断风暴。
 
+## 8.10 Android 图形栈与 Linux GPU 驱动的边界
+
+BufferQueue、SurfaceFlinger 和 HWC 主要位于用户空间；真正的显存对象、GPU 命令、显示
+原子提交和完成通知还要进入内核驱动：
+
+```mermaid
+flowchart TD
+    APP["App / HWUI / Vulkan / OpenGL ES"] --> UMD["用户态 GPU 驱动"]
+    APP --> BQ["BufferQueue / Gralloc"]
+    BQ --> SF["SurfaceFlinger"]
+    SF --> HWC["Composer HAL"]
+    UMD --> DRM["Linux DRM Render Node"]
+    HWC --> KMS["DRM/KMS 或厂商显示驱动"]
+    DRM --> GPU["GPU 命令提交与调度"]
+    KMS --> DISP["显示控制器 / Panel"]
+    BQ --> BUF["AHardwareBuffer / dma-buf"]
+    BUF --> UMD
+    BUF --> HWC
+    GPU --> FENCE["dma_fence / sync_file"]
+    KMS --> FENCE
+    FENCE --> BQ
+```
+
+Gralloc 按格式、尺寸和 usage 分配 Buffer，并把句柄传给生产者和消费者；BufferQueue
+传递句柄而不是复制整帧像素。`AHardwareBuffer` 是应用和 NDK 可见的跨进程硬件 Buffer
+抽象，底层常能与 dma-buf、EGLImage 或 Vulkan external memory 衔接，但它们不是同一层
+API，也不能假设所有设备都采用完全相同的 allocator 实现。
+
+Fence 解决“什么时候可以访问”，dma-buf 解决“共享哪块 Buffer”。Fence 等待过长可能
+来自 GPU 任务慢、显示提交慢或依赖链错误；dma-buf 占用过大则是容量和生命周期问题。
+这两个维度应分别统计。DRM/KMS、显存管理和 GPU reset 等内核细节在
+[Linux GPU 驱动](post.html?slug=linux_gpu_driver)中展开。
+
 ---
 
 # 9. Android Runtime 总览
@@ -2063,6 +2096,8 @@ mmap 将文件或匿名内存映射到地址空间。优势：
 
 中断处理过长可能增加调度延迟。中断风暴会表现为 CPU 时间大量进入 irq/softirq。
 
+在 ARM64 设备上，从 Exception Vector、GIC、Generic IRQ 到驱动 Handler 的完整路径，以及 IRQ-Safe Spinlock 为什么必须同时处理本地重入和跨 CPU 互斥，见[ARM64 异常、中断、内存序与锁](post.html?slug=arm64_exception_interrupt_lock)。
+
 ## 17.4 `/proc`、`/sys` 与 `/dev`
 
 - `/proc`：进程和内核运行状态视图。
@@ -2193,6 +2228,9 @@ seccomp 可限制进程允许执行的系统调用，减少攻击面。Native �
 
 # 20. Android 网络体系
 
+本章先建立 IP 数据通路与系统网络选择的整体认识；蜂窝、Wi-Fi、Bluetooth、GNSS、NFC
+各自从 Framework 到控制器的完整链路，见 [Android Connectivity](post.html?slug=android_connectivity)。
+
 ## 20.1 数据通路概览
 
 ```mermaid
@@ -2281,6 +2319,146 @@ Perfetto 是现代 Android 系统级性能分析主工具，可采集：
 - Java heap profile。
 - `procfs` 统计。
 
+### 采集链路里的术语
+
+Perfetto 不是一张静态时间线，而是一套采集与查询系统：
+
+    Data Source
+        → Producer 写入共享 Trace Buffer
+        → traced 管理会话和缓冲区
+        → Trace Packet 写入 .perfetto-trace
+        → Perfetto UI / Trace Processor
+        → 时间线、PerfettoSQL 和指标
+
+Data Source 指 sched、ftrace、atrace、FrameTimeline、进程统计、heap profile 等数据来源。
+traced 是设备上的会话服务；traced_probes 负责 ftrace、procfs 等系统探针。TraceConfig 决定
+采哪些数据、采多久、Buffer 多大以及满了以后停止还是覆盖旧数据。Trace Processor 把多种
+Trace Packet 解析成统一的 SQL 表和标准库模块。
+
+Ring Buffer 适合“问题发生后停止”：Buffer 满时覆盖最旧数据，可以保留故障前最近的一段
+历史；Stop when full 适合不能丢开头的短 Trace；长时间采集则应周期性写文件并严格控制探针
+和存储开销。
+
+### 先完成一次可运行的采集
+
+Perfetto 官方提供 record_android_trace 脚本，它会配置设备、结束后拉取 Trace，并可直接
+打开 UI：
+
+    curl -O https://raw.githubusercontent.com/google/perfetto/main/tools/record_android_trace
+    python3 record_android_trace \
+      -o trace_file.perfetto-trace \
+      -t 10s \
+      -b 32mb \
+      -a '*' \
+      sched freq view ss input
+
+sched 记录线程调度，freq 记录 CPU 频率，view、ss 和 input 提供 Android 用户空间语义；
+-a '*' 允许收集所有应用的 atrace 标记。远程主机可增加 --no-open，再把生成的 Trace
+拖入 https://ui.perfetto.dev/。不同 Android 版本、构建类型和权限开放的数据源不同，开始
+分析前先在 Trace 中确认目标轨道确实存在。
+
+需要固定配置时可以编写 config.pbtx：
+
+    duration_ms: 10000
+    buffers {
+      size_kb: 32768
+      fill_policy: RING_BUFFER
+    }
+    data_sources {
+      config {
+        name: "linux.ftrace"
+        ftrace_config {
+          ftrace_events: "sched/sched_switch"
+          ftrace_events: "sched/sched_wakeup"
+          ftrace_events: "power/cpu_frequency"
+          atrace_categories: "am"
+          atrace_categories: "wm"
+          atrace_categories: "gfx"
+          atrace_categories: "view"
+          atrace_categories: "binder_driver"
+          atrace_apps: "*"
+        }
+      }
+    }
+    data_sources {
+      config {
+        name: "linux.process_stats"
+        process_stats_config {
+          scan_all_processes_on_start: true
+        }
+      }
+    }
+
+    python3 record_android_trace \
+      -c config.pbtx \
+      -o trace_file.perfetto-trace
+
+配置应围绕问题裁剪。开启所有 ftrace 事件、所有应用和高频计数器会增大 Trace、增加扰动，
+还可能使关键区间被 Ring Buffer 覆盖。低概率问题可先用低开销配置持续等待，触发后再用
+更细配置复现。
+
+### 给业务阶段添加语义
+
+只有 sched 轨道时只能看到线程何时运行，不知道它在处理哪一步。Java/Kotlin 可以用
+android.os.Trace 标记同步区间：
+
+    Trace.beginSection("decodeFrame");
+    try {
+        decodeFrame();
+    } finally {
+        Trace.endSection();
+    }
+
+Native 代码可使用 ATrace：
+
+    #include <android/trace.h>
+
+    ATrace_beginSection("decodeFrame");
+    decode_frame();
+    ATrace_endSection();
+
+begin/end 必须成对，区间名应稳定且避免携带用户数据。跨线程、跨异步任务的工作不能用两个
+互不相关的同步区间冒充因果关系，应使用带稳定 cookie 的异步事件或 Perfetto Track Event。
+埋点本身也有成本，不要在逐像素、逐包等高频循环中无条件写事件。
+
+### 用 PerfettoSQL 验证判断
+
+UI 适合发现异常，SQL 适合量化和批量回归。下面查询带线程、进程上下文的 CPU 调度片段：
+
+    INCLUDE PERFETTO MODULE sched.with_context;
+
+    SELECT process_name, thread_name, cpu,
+           ts / 1e6 AS ts_ms,
+           dur / 1e6 AS dur_ms
+    FROM sched_with_thread_process
+    WHERE dur > 5e6
+    ORDER BY dur DESC
+    LIMIT 50;
+
+查看 Android atrace slice：
+
+    INCLUDE PERFETTO MODULE slices.with_context;
+
+    SELECT process_name, thread_name, name,
+           ts / 1e6 AS ts_ms,
+           dur / 1e6 AS dur_ms
+    FROM thread_or_process_slice
+    WHERE name GLOB '*decodeFrame*'
+    ORDER BY dur DESC;
+
+CPU 频率可通过标准库模块查询：
+
+    INCLUDE PERFETTO MODULE linux.cpu.frequency;
+
+    SELECT *
+    FROM cpu_frequency_counters
+    ORDER BY ts
+    LIMIT 100;
+
+表和标准库会随数据源及 Perfetto 版本演进。先用 UI 的 Query 页面查看表结构，自动化脚本则
+固定兼容的 Trace Processor 版本，并用一条已知 Trace 做回归测试，避免查询失败被误认为
+“没有异常”。
+
 ### Perfetto 阅读顺序
 
 1. 先定位异常时间范围。
@@ -2291,6 +2469,20 @@ Perfetto 是现代 Android 系统级性能分析主工具，可采集：
 6. 沿 Binder 跨进程追踪。
 7. 查看 CPU 频率、核类型和热限制。
 8. 对照日志和系统状态。
+
+### 从卡顿到根因的一条闭环
+
+1. 固定操作路径并用自定义 Trace 区间标出开始、结束和关键阶段；
+2. 同时采 sched、freq、input、view、gfx、binder_driver 和 FrameTimeline；
+3. 从 FrameTimeline 找到 missed frame，确认是应用帧还是 SurfaceFlinger 帧；
+4. 查看主线程、RenderThread 和相关服务线程处于 Running、Runnable 还是 Sleeping；
+5. Running 很久时用 Simpleperf 找热点；Runnable 很久时检查 CPU 竞争、优先级、频率和热限制；
+6. Sleeping 时沿 futex、Binder、epoll、I/O 或 fence 找唤醒者，Binder 调用要继续追到服务端；
+7. 修改后用同一采集配置比较帧分布、关键 slice、Runnable 延迟和 CPU 时间，而不是只比较截图。
+
+Perfetto 能建立“何时发生、谁在等待谁”的系统时间线，但不会自动证明某个函数内部为何慢。
+时间线定位到 CPU 热点后交给 Simpleperf，定位到内存压力后交给 heapprofd/heap dump，定位到
+驱动等待后继续结合 ftrace、驱动 tracepoint 和 fence。工具之间是逐层缩小范围的关系。
 
 ## 21.3 Systrace、atrace 与 ftrace 的关系
 
@@ -3147,6 +3339,468 @@ flowchart LR
 7. 副作用评估。
 8. 回归检测方式。
 
+# 31. 端侧 AI 的系统链路
+
+## 31.1 从模型到设备执行
+
+端侧推理不是“把模型交给 NPU”这一跳，而是一条包含模型转换、运行时、硬件后端、驱动、
+内存和系统资源管理的链路：
+
+```mermaid
+flowchart TD
+    M["训练模型 / 交换格式"] --> C["转换、量化与图优化"]
+    C --> R["端侧 Runtime"]
+    R --> P["图分区与后端选择"]
+    P --> CPU["CPU Backend"]
+    P --> GPU["GPU Backend"]
+    P --> NPU["NPU / DSP Backend"]
+    GPU --> GD["用户态驱动 + 内核 GPU 驱动"]
+    NPU --> HAL["Vendor Runtime / HAL"]
+    HAL --> ND["NPU / DSP 内核驱动"]
+    CPU --> MEM["共享 Tensor / Buffer"]
+    GD --> MEM
+    ND --> MEM
+    MEM --> OBS["Fence、调度、功耗、温控与追踪"]
+```
+
+CPU、GPU 和 NPU 并不是简单的快慢排序：CPU 支持面广且启动成本低；GPU 擅长规则并行
+计算但要考虑 shader/kernel 编译与提交；NPU 对支持的算子和数据类型能效高，但受驱动能力、
+片上存储和图边界限制。小模型或频繁在后端间复制的图，即使使用加速器也可能更慢。
+
+## 31.2 图分区、编译与回退
+
+Runtime 会查询后端支持的算子、dtype、layout、动态 shape 和性能信息，再把图划分成一个
+或多个子图。每个子图可能经历：
+
+```text
+合法性检查
+  → layout/quantization 转换
+  → 算子融合与常量折叠
+  → 内存规划
+  → 生成或加载设备程序
+  → enqueue
+```
+
+一个算子不支持时，可以只把相邻子图回退到 CPU，也可能因运行时限制让整图回退。边界上
+的 tensor 转换、同步和复制会抵消加速收益，因此要同时记录每个 partition 的后端、编译
+缓存命中、实际执行时间和边界开销。
+
+Android 的 NNAPI NDK API 从 Android 15 起已弃用，不能再把 NNAPI 当成所有新项目的默认
+入口；NN HAL 接口仍用于相关系统实现。具体产品还可能采用应用自带 Runtime、GPU API 或
+厂商加速器 SDK。架构分析时应先确认设备和 Android 版本真正使用哪条路径。
+
+## 31.3 Tensor Buffer 与零拷贝边界
+
+端侧流水线经常在相机、CPU 预处理、GPU/NPU 推理和显示之间传递同一批数据。
+`AHardwareBuffer` 可以表示供多种硬件组件访问的内存，并通过 Binder 传递共享视图；它还
+能绑定到 EGL/OpenGL 或作为 Vulkan external memory 使用。底层常以 dma-buf fd 跨驱动
+共享，但“共享同一物理 Buffer”不意味着完全没有成本：
+
+- 不同设备需要各自建立 IOMMU 映射；
+- CPU lock/unlock 可能触发 cache maintenance；
+- 图像与 tensor 的 layout、stride、padding 或量化格式可能不匹配；
+- producer/consumer 仍要通过 fence 保证访问顺序；
+- protected Buffer 可能禁止 CPU 映射或某些硬件访问。
+
+因此零拷贝优化应验证实际 allocator、usage flags、格式兼容、映射次数与同步等待，不能只
+看到 API 传递了句柄就下结论。
+
+## 31.4 调度、并发与内存规划
+
+模型执行通常同时占用 CPU 提交线程、加速器队列、DMA 带宽和中间 Buffer。提高并发数能
+填满设备，但也会增加：
+
+- command queue 排队和尾延迟；
+- activation、KV cache 或中间 tensor 峰值内存；
+- 内存带宽争用；
+- 与 UI、相机、编码器共享 GPU/NPU 的干扰。
+
+内存规划会依据 tensor 生命周期复用 arena；动态 shape 可能让计划失效并触发重新分配或
+重新编译。异步接口返回通常只表示任务已提交，Buffer 只有在 completion/fence 到达后才可
+覆盖。取消请求也不必然能抢占已经进入硬件的任务。
+
+## 31.5 Power HAL、DVFS 与 Thermal 反馈
+
+推理耗时会参与系统能效闭环：CPU/GPU/NPU 负载影响频率和电压，Power HAL 或性能提示帮助
+表达时延目标，thermal governor 又会在温度升高时限制可用容量。
+
+```text
+请求 deadline / 工作量
+  → 调度与频率选择
+  → 执行时间和能量
+  → 温度变化
+  → thermal cooling state
+  → 下一轮可用性能
+```
+
+短时间基准的最佳配置可能在持续运行后因热降频变差。需要同时测冷机、稳态温度、功耗、
+吞吐和 P95/P99 延迟；把所有核和加速器锁在最高频率通常不是可持续的产品策略。
+
+## 31.6 一条跨层定位方法
+
+1. 固定模型、输入 shape、量化方式、线程数、设备温度和电源状态；
+2. 记录各子图实际选择的后端以及是否发生 CPU fallback；
+3. 分开测编译/prepare、首次执行和稳定执行，确认缓存命中；
+4. 统计预处理、layout 转换、enqueue、fence wait 和后处理，而不只看 kernel 时间；
+5. 用 Perfetto/ftrace 关联应用线程、Binder/HAL、调度、频率、IRQ 和设备 fence；
+6. 查看 dma-buf、进程 PSS、设备内存和峰值 tensor，排除隐含复制与内存压力；
+7. 做单一变量的 CPU/GPU/NPU 对照，并在热稳态重复验证。
+
+出现超时时应沿“请求 ID → Runtime 子图 → HAL/用户态驱动提交 → 内核队列 → IRQ/fence”
+建立同一时间线。只有用户态日志或一次总耗时，无法区分编译缓存、调度等待、内存复制、
+设备执行和热限制。
+
+# 32. 应用兼容与系统定制边界
+
+## 32.1 先区分三种兼容性
+
+“兼容”至少包含三个层面：
+
+- 应用兼容：已有 APK 在新系统上能否安装、启动并保持原有行为；
+- 系统与厂商兼容：Framework、system、vendor、HAL 和内核升级后接口是否仍满足约定；
+- 数据与协议兼容：升级后数据库、配置、序列化数据和跨设备协议能否继续读取。
+
+应用能启动不代表功能、权限、后台行为和性能都兼容；CTS 通过也不代表每个三方应用的私有
+假设都成立。排查前先明确是公开 API 语义变化、目标版本行为变化、厂商实现差异，还是应用
+依赖了未承诺稳定的内部接口。
+
+## 32.2 minSdk、targetSdk 与 compileSdk
+
+- minSdk 决定应用声明支持的最低系统 API Level；
+- targetSdk 告诉系统应用已经适配到哪个行为契约；
+- compileSdk 决定编译时可见哪些 SDK API，不会直接改变设备运行版本。
+
+Android 平台行为变化分为两类：
+
+1. 对所有应用生效，用于安全、隐私或平台一致性等必须统一修正的行为；
+2. 只对达到某个 targetSdk 的应用生效，给已有应用留下迁移时间。
+
+因此“系统升级后出错”和“应用提高 targetSdk 后出错”是两条不同测试路径。开发者选项和
+adb am compat 可针对单个应用启停部分兼容性变更，适合验证某项 behavior change 是否为
+原因，但不能替代真正修改应用并回归。
+
+公开 SDK 是应用应依赖的长期边界。反射调用 hidden/non-SDK API、JNI 查找内部符号、假设
+系统私有类布局或文件路径，都会随版本升级失效。Native 应用还要检查：
+
+- APK 是否包含设备 ABI 对应的 32/64 位 so；
+- NDK 公共符号而非平台私有符号；
+- ELF relocation、对齐和目标设备页大小要求；
+- Java 与 JNI 方法签名、对象生命周期和异常处理；
+- 第三方预编译库是否跟随平台要求更新。
+
+## 32.3 常见破坏点
+
+| 领域 | 容易依赖的旧假设 | 正确处理 |
+|---|---|---|
+| 权限与 AppOps | 清单声明后即可永久访问 | 处理运行时授权、撤销、一次性权限和拒绝路径 |
+| 后台执行 | 后台进程可长期启动服务和定时唤醒 | 使用受支持的 Job、前台服务类型和配额 |
+| 存储 | 可直接访问任意外部存储路径 | 使用 MediaStore、Storage Access Framework 或应用私有目录 |
+| 组件启动 | Intent 总能隐式命中，组件默认可导出 | 明确 exported、权限、包名和可见性 |
+| 通知与 PendingIntent | 旧默认值一直不变 | 按目标版本显式声明权限、可变性和行为 |
+| WebView | 与 APK 一起固定不变 | 把 WebView 当成可独立升级的运行时并测试版本差异 |
+| Native | 系统私有 so 和固定页大小可长期依赖 | 只使用 NDK API，验证 ABI、页大小和装载错误 |
+
+兼容修复优先放在应用或稳定扩展点。平台侧白名单、包名特判和永久关闭安全行为会形成无法
+维护的分支；确需过渡措施时，应写清适用版本、终止条件、指标和删除计划。
+
+## 32.4 CDD、CTS、VTS 与 VINTF
+
+- CDD 描述一类 Android Compatible 设备必须满足的兼容要求；
+- CTS 从应用和 Framework 可见行为验证 Android API 与平台契约；
+- CTS Verifier 覆盖需要人工操作或外设参与的项目；
+- VTS 更关注 HAL、内核和 vendor 接口等底层契约；
+- VINTF Manifest/Matrix 描述设备提供哪些 HAL、Framework 需要哪些 HAL 及其版本关系。
+
+这些体系解决的是不同边界。某应用崩溃要先复现和读取异常，不能用“CTS 已通过”直接否定；
+HAL 升级也不能只跑应用测试而忽略 VINTF/VTS 与 vendor 侧回归。
+
+## 32.5 三方应用兼容闭环
+
+1. 建立应用矩阵：高使用量、关键业务、不同 targetSdk、32/64 位、不同图形与媒体路径；
+2. 保存旧系统基线：安装、首启、登录、权限、后台、升级安装、数据迁移和关键性能；
+3. 在新系统复现并记录 logcat、ANR、tombstone、dumpsys 和 Perfetto；
+4. 用兼容性开关、最小 APK 或替换单个系统组件缩小到具体行为变化；
+5. 判断应修应用、Framework、HAL/vendor 还是升级迁移代码；
+6. 同时测试全新安装、保留数据 OTA、降级禁止路径、多用户和工作资料；
+7. 把故障样例加入自动化，并跟踪临时兼容措施何时删除。
+
+安装失败、启动崩溃、功能错误、显示异常、耗电和后台丢消息应分别统计。只以“能打开首页”
+作为兼容标准，会漏掉大量生命周期和升级后的状态问题。
+
+## 32.6 系统定制如何解耦
+
+系统定制优先使用已有扩展边界：
+
+- 资源颜色、尺寸、布尔值和字符串用 RRO 覆盖；
+- 可运行期调整的策略使用 DeviceConfig、Feature Flag 或明确的配置服务；
+- 运营商差异使用 CarrierConfig，而不是散落包名与 MCC/MNC 判断；
+- 跨进程能力使用版本化 AIDL 和公开权限；
+- 硬件差异收敛在稳定 HAL、vendor service 与内核驱动；
+- 产品组件按 system、system_ext、product、vendor 等分区边界放置；
+- 可独立升级的平台组件使用 Mainline/APEX 对应的模块机制。
+
+RRO 只能替换目标包已经暴露并允许覆盖的资源值，不能添加任意 Java 逻辑，也不能绕过
+overlayable 策略。需要行为扩展时应设计接口、回调或策略对象；直接修改 Framework 深层
+实现虽然起步快，却会把每次平台升级变成大规模冲突合并。
+
+定制接口还应包含版本协商、默认行为、超时、调用者权限、失败回退和可观测性。只抽出一个
+Binder 方法而不定义这些契约，并没有真正完成架构解耦。
+
+---
+
+# 33. OTA、A/B 与 Virtual A/B
+
+## 33.1 OTA 更新的完整链路
+
+OTA 是把经过签名和验证的系统更新安全地送到设备，并在断电、写入失败或新版本无法启动时
+保持可恢复性。它与应用商店更新不同；APEX/Mainline 可更新部分系统模块，但整机 OTA 还要
+处理 boot、system、vendor、动态分区、启动验证和用户数据迁移。
+
+```mermaid
+flowchart LR
+    S["更新服务<br/>版本与 Payload"] --> C["Update Client<br/>下载与策略"]
+    C --> UE["update_engine<br/>校验并写入"]
+    UE --> T["非活动 Slot<br/>或 Snapshot / COW"]
+    T --> P["Post-install<br/>完整性检查"]
+    P --> BC["boot_control<br/>设置待启动 Slot"]
+    BC --> R["重启与 Bootloader"]
+    R --> AVB["AVB / dm-verity<br/>验证启动链"]
+    AVB --> H["Health Check<br/>markBootSuccessful"]
+    H --> M["Snapshot Merge<br/>或完成 Slot 切换"]
+    R -->|启动失败| RB["回退到旧 Slot"]
+```
+
+- Update Client 负责下载条件、用户策略和触发，不负责直接决定某个分区如何写；
+- update_engine 解析 OTA Payload、校验元数据和数据，执行分区操作；
+- boot_control HAL 暴露当前 Slot、活动 Slot、可启动状态与成功状态；
+- Bootloader 根据 Slot 元数据选择启动目标，并在反复启动失败时回退；
+- AVB 验证启动链和分区完整性，防止启动未授权或被篡改的内容；
+- Health Check 只有在关键服务、数据迁移和基本功能正常后才应确认启动成功；
+- Virtual A/B 的 Merge 把 COW 中的新块合并回基础动态分区。
+
+“下载完成”“Payload 应用完成”“新 Slot 启动一次”“标记启动成功”“Snapshot 合并完成”
+是五个不同状态。状态上报和恢复逻辑必须区分它们。
+
+完整包包含目标版本需要的全部分区数据，体积大但不依赖某个精确源版本；增量包只编码源、
+目标版本之间的差异，体积更小，却要求设备当前分区内容与生成增量包时的源版本匹配。用户
+修改分区、源版本不一致或分区损坏都可能使增量校验失败。
+
+## 33.2 传统 A/B
+
+传统 A/B 为需要原子更新的分区保留两套物理 Slot：
+
+    当前运行 slot_a
+          │
+          ├── 用户继续使用旧系统
+          │
+          └── update_engine 写 slot_b
+                         ↓
+                  校验并设为 active
+                         ↓
+                       重启
+                         ↓
+             slot_b 成功 → 标记 successful
+             slot_b 失败 → bootloader 回到 slot_a
+
+更新不覆盖当前正在运行的 Slot，写入过程中断电仍可从旧 Slot 启动。代价是两套分区占用
+较多空间。A/B 不是“自动不会失败”：公共 userdata、固件兼容、数据迁移和启动后服务仍可能
+出错，必须在标记 successful 前完成足够的健康检查。
+
+## 33.3 Virtual A/B
+
+Virtual A/B 保留 boot 等启动关键分区的物理 Slot，而对 system、vendor 等动态分区使用
+Device Mapper Snapshot 与 COW（Copy-on-Write）表示新版本：
+
+```mermaid
+flowchart LR
+    OLD["基础动态分区<br/>旧块"] --> SNAP["Snapshot 逻辑视图"]
+    COW["COW 存储<br/>新块 / 替换操作"] --> SNAP
+    SNAP --> NEW["新系统读取到<br/>旧块 + 新块"]
+    NEW --> BOOT["新版本启动并验证"]
+    BOOT -->|成功| MERGE["Merge：把新块合入基础分区"]
+    BOOT -->|失败| DROP["丢弃 Snapshot<br/>继续使用旧内容"]
+```
+
+读取未修改区域时仍从基础分区取旧块；读取已更新区域时由 Snapshot 映射到 COW 中的新内容。
+因此它不需要为所有动态分区长期保留两份完整物理空间。现代实现可由 snapuserd 等用户空间
+组件参与 Snapshot I/O 与合并。
+
+边界条件包括：
+
+- COW 空间不足会使更新无法继续，应在下载和应用前估算空间；
+- 合并前断电必须能恢复到一致的 Snapshot 状态，不能把“正在 merge”当成更新失败直接清除；
+- 合并会产生额外 I/O，与前台启动、应用编译和存储压力竞争；
+- 已标记启动成功不代表 merge 已结束，存储空间和性能监控要持续到 merge 完成；
+- userdata 不是靠 Snapshot 自动回滚，数据库和配置迁移仍要向前兼容并可重复执行。
+
+## 33.4 验证、签名与回滚保护
+
+OTA 包/Payload 的签名验证回答“更新是否来自可信发布者”；AVB 和 dm-verity 回答“启动时
+分区是否匹配受信任的描述并保持完整”；Rollback Index 防止设备启动签名正确但安全版本更
+旧的镜像。它们处于不同阶段，不能互相替代。
+
+更新还要同时满足：
+
+- Framework 与 vendor 的 VINTF 兼容矩阵；
+- GKI/KMI 与厂商内核模块兼容；
+- bootloader、radio、DSP 等固件的版本和更新顺序约束；
+- SELinux Policy、文件上下文和分区布局一致；
+- APEX、APK、odex 与 ART 数据可在新版本正确激活或重建；
+- 用户数据 Schema 迁移具备事务性、幂等性和失败恢复路径。
+
+降级通常比升级危险：新版本写入的用户数据未必能被旧代码理解。工程上应明确禁止哪些降级，
+哪些调试构建允许降级，以及是否存在独立的数据恢复方案。
+
+## 33.5 状态与故障定位
+
+可先收集：
+
+    adb shell getprop ro.boot.slot_suffix
+    adb shell bootctl get-current-slot
+    adb shell update_engine_client --status
+    adb logcat -b all | grep -i update_engine
+    adb shell lpdump
+    adb shell dmesg | grep -Ei 'snapshot|dm-|verity|avb'
+
+命令是否可用取决于 Android 版本、构建类型、SELinux 和权限。定位时按阶段查看：
+
+1. 下载失败：URL、证书、代理、空间、流量与电量策略；
+2. Payload 校验失败：签名、源版本、分区内容和增量前置条件；
+3. 写入失败：COW/分区空间、I/O 错误、update_engine operation；
+4. Post-install 失败：脚本、文件系统、固件或预编译步骤；
+5. Bootloader 回退：Slot 元数据、AVB、内核 panic、early init；
+6. 系统启动但未确认成功：关键服务、VINTF、SELinux、数据迁移或 watchdog；
+7. Merge 异常：Snapshot 状态、COW 空间、I/O 和 snapuserd。
+
+测试至少覆盖全量/增量、低电量、低空间、下载中断、写入中断、首次启动崩溃、merge 中重启、
+保留数据升级和多次连续升级。只验证一台设备从开发版顺利升级一次，无法证明恢复状态机正确。
+
+---
+
+# 34. XR 系统链路
+
+XR 是对 VR、AR、MR 等沉浸式或空间计算形态的统称。XR 的关键约束不是只达到较高平均帧率，
+而是在显示截止时间前，把尽可能接近真实显示时刻的头部姿态对应画面送到屏幕。
+
+## 34.1 从传感器到显示
+
+```mermaid
+flowchart LR
+    S["IMU / Camera<br/>带时间戳采样"] --> T["Tracking<br/>VIO / SLAM"]
+    T --> P["Pose Prediction<br/>预测显示时刻姿态"]
+    P --> A["App Simulation<br/>更新场景"]
+    A --> R["Stereo Rendering<br/>GPU 渲染双眼"]
+    R --> Q["XR Runtime<br/>Compositor"]
+    T --> L["Late Pose<br/>更晚姿态"]
+    L --> Q
+    Q --> W["Reprojection<br/>重投影"]
+    W --> D["Scanout / Display<br/>逐行扫描与发光"]
+```
+
+- IMU 提供高频角速度和加速度，Camera 提供环境特征与尺度约束；
+- VIO 是 Visual-Inertial Odometry，把相机和惯性数据融合为设备运动；
+- SLAM 同时估计设备位姿并构建或维护环境地图；
+- Pose 是位置与方向，3DoF 只有旋转，6DoF 同时包含三轴平移和旋转；
+- Predicted Display Time 是某帧预计真正显示的时间，而不是 CPU 开始渲染的时间；
+- Stereo Rendering 为左右眼生成具有视差的图像；
+- XR Runtime/Compositor 组合应用图层，处理显示时序并在提交后继续校正姿态；
+- Scanout 是显示控制器按时序把一帧送往面板，并非整屏在同一瞬间完成更新。
+
+Android 产品中的 XR Runtime 可能复用 Surface、BufferQueue、fence、GPU 和显示驱动，也可能
+有面向低延迟显示的专用合成路径。不能看到一个 Surface 就默认它一定经过普通应用与
+SurfaceFlinger 完全相同的队列深度和合成策略。
+
+## 34.2 Motion-to-Photon 延迟
+
+Motion-to-Photon 是用户运动到对应光子从屏幕发出的端到端延迟，主要由以下部分组成：
+
+    传感器采样与时间戳
+      + 传感器传输和融合
+      + 姿态预测
+      + 应用 CPU 仿真
+      + GPU 排队和渲染
+      + Runtime 合成 / 重投影
+      + 显示等待、Scanout 和像素响应
+
+60、90、120 Hz 每帧分别约有 16.67、11.11、8.33 ms。它们是显示周期，不等于应用可独占
+的渲染预算；Runtime 合成、安全余量和 Scanout 都要占用时间。平均低于一帧也不够，超过
+deadline 的长尾会造成掉帧、重复帧或依赖重投影。
+
+降低 Queue Depth 能减少输入到显示的排队延迟，却也减少吸收抖动的余量；增加缓冲可提高
+吞吐稳定性，却可能显示更旧的姿态。应同时记录提交时间、GPU fence、预期/实际显示时刻和
+丢帧分布，不能只用 CPU 帧耗时推断 Motion-to-Photon。
+
+## 34.3 姿态预测与 Late Latching
+
+渲染需要提前开始，而用户在渲染期间仍会运动。Runtime 因此根据角速度、加速度和运动模型，
+把最新跟踪结果预测到目标显示时刻。预测跨度越长，可供渲染的时间越多，但急停、急转和模型
+误差也越大；预测跨度太短则 GPU 来不及完成。
+
+OpenXR 的典型帧循环是：
+
+    xrWaitFrame()       // 得到 predictedDisplayTime
+    xrBeginFrame()
+    xrLocateViews(..., predictedDisplayTime, ...)
+    update_simulation()
+    render_left_and_right_views()
+    xrEndFrame()        // 提交图层
+
+xrWaitFrame 还承担 Runtime 的节拍控制。应用应使用 Runtime 给出的预测显示时间定位视图，
+而不是用当前墙上时钟猜测。把 Pose、传感器样本和 Trace 事件放进不同时间域却不转换，是
+常见的“看似延迟很大”或预测方向错误的原因。
+
+Late Latching/late update 在更接近提交或显示时刻，用更新的姿态修改少量常量、View Matrix
+或合成参数，而不重新运行整帧场景逻辑。它能减少姿态陈旧时间，但不能修复已经基于错误位置
+完成的可见性、动画和复杂光照结果。
+
+## 34.4 Reprojection
+
+Reprojection 使用已完成的上一张图像和更晚姿态，变换图像使其更接近当前视点：
+
+- Rotational Timewarp 根据方向变化旋转已有画面，成本低，对纯转头有效；
+- Positional/Depth Reprojection 借助深度处理平移，但新暴露区域没有原始像素；
+- Spacewarp/Frame Synthesis 可结合深度和 Motion Vector 合成中间帧，降低应用实际渲染率；
+- 异步重投影由 Runtime 独立于应用帧率执行，应用暂时错过 deadline 时仍尽量按显示频率提交。
+
+它们无法凭空恢复 disocclusion 后的新内容。错误深度、透明物、反射、粒子、UI Layer 和不准
+的 Motion Vector 会产生拉伸、重影或边缘裂缝。重投影是时延和稳定性的补救机制，不是允许
+应用长期超预算的替代品。
+
+## 34.5 CPU、GPU 与显示流水
+
+CPU 负责输入、跟踪消费、仿真、可见性和提交；GPU 负责双眼几何、光栅/计算和后处理；
+Runtime Compositor 在最后期限前组合图层并等待 fence。常见瓶颈包括：
+
+- Main/Render Thread 被 Binder、锁、GC 或后台任务阻塞；
+- Draw Call 和驱动提交开销使 CPU 不能及时喂满 GPU；
+- 片元、带宽、过度绘制或 Shader 导致 GPU 超预算；
+- BufferQueue、GPU Queue 或 fence 形成多帧积压；
+- Camera/IMU 时间戳不同步使跟踪抖动；
+- 持续高负载触发 thermal throttling，稳定运行后帧率下降。
+
+固定注视点渲染、可变分辨率、动态分辨率和多视图渲染可以减少 GPU 工作，但都有边界：
+注视点预测或眼动数据错误会降低视觉质量；降分辨率不能解决 CPU 瓶颈；多视图减少重复工作，
+却仍受目标 GPU 和 Shader 支持约束。
+
+## 34.6 用 Perfetto 对齐端到端链路
+
+一次有效 Trace 应尽量包含传感器/相机事件、应用自定义阶段、sched、CPU/GPU 频率、GPU
+fence、FrameTimeline、Runtime Compositor 和显示事件。按以下顺序核对：
+
+1. 传感器 Sample Timestamp 属于哪个时钟域，何时到达 Tracking；
+2. Tracking 输出 Pose 的样本时刻、预测目标和置信度；
+3. 应用何时从 xrWaitFrame 被唤醒，CPU 仿真和提交各耗时多少；
+4. GPU 何时真正开始、何时完成，是否在队列中等待；
+5. Runtime 何时取得 Late Pose，是否执行重投影；
+6. 图像的期望显示时刻、实际 Present 和 Scanout 是否一致；
+7. Missed Frame 是 CPU、GPU、合成、调度、频率还是 Thermal 所致。
+
+优化后要比较 Motion-to-Photon 分布、Pose Age、丢帧率、重投影比例、图像伪影和热稳态，
+而不是只展示一段 GPU 时间下降。降低一层耗时却增加排队、预测跨度或功耗，端到端体验可能
+反而更差。
+
+---
+
 # 参考资料
 
 1. [Android Open Source Project: Kernel overview](https://source.android.com/docs/core/architecture/kernel)
@@ -3161,3 +3815,18 @@ flowchart LR
 10. [Linux Kernel Documentation: Utilization Clamping](https://docs.kernel.org/scheduler/sched-util-clamp.html)
 11. [Linux Kernel Documentation: CPUFreq](https://docs.kernel.org/admin-guide/pm/cpufreq.html)
 12. [Linux Kernel Documentation: CPUIdle](https://docs.kernel.org/admin-guide/pm/cpuidle.html)
+13. [Android Open Source Project: BufferQueue and Gralloc](https://source.android.com/docs/core/graphics/arch-bq-gralloc)
+14. [Android Open Source Project: Synchronization framework](https://source.android.com/docs/core/graphics/sync)
+15. [Android NDK: Native Hardware Buffer](https://developer.android.com/ndk/reference/group/a-hardware-buffer)
+16. [Android Open Source Project: Neural Networks API drivers](https://source.android.com/docs/core/interaction/neural-networks)
+17. [Android Developers: App compatibility](https://developer.android.com/guide/app-compatibility)
+18. [Android Developers: Test and debug platform behavior changes](https://developer.android.com/guide/app-compatibility/test-debug)
+19. [Android Open Source Project: Runtime resource overlays](https://source.android.com/docs/core/runtime/rros)
+20. [Android Open Source Project: OTA updates](https://source.android.com/docs/core/ota)
+21. [Android Open Source Project: A/B system updates](https://source.android.com/docs/core/ota/ab)
+22. [Android Open Source Project: Virtual A/B overview](https://source.android.com/docs/core/ota/virtual_ab)
+23. [Perfetto: Recording system traces](https://perfetto.dev/docs/getting-started/system-tracing)
+24. [Perfetto: Trace Processor](https://perfetto.dev/docs/analysis/trace-processor)
+25. [Khronos: OpenXR 1.1 specification](https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html)
+26. [Android Developers: OpenXR frame synthesis](https://developer.android.com/develop/xr/openxr/extensions/XR_EXT_frame_synthesis)
+27. [Google AR: Fundamental concepts](https://developers.google.com/ar/develop/fundamentals)

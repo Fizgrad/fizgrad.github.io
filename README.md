@@ -24,6 +24,9 @@ David 的个人主页,托管在 GitHub Pages:https://fizgrad.github.io
 index.html              页面主结构
 assets/css/style.css    样式
 assets/js/main.js       i18n 字典、项目数据、卡片渲染、动画背景
+blog/<slug>.md          中文博客正文
+blog/<slug>.en.md       对应英文正文
+tools/translate-blog.mjs  博客翻译、断点续跑与结构校验
 systems-lab.html        系统编程练习与 AI 评审页面
 tools/systems-lab/      题目契约、本地 runner、测试与参考实现
 ```
@@ -38,6 +41,23 @@ python3 -m http.server 8000
 ## 部署
 
 推送到 `main` 分支后,GitHub Pages 自动构建发布。
+
+## 博客双语正文
+
+博客语言按钮会在 `blog/<slug>.md` 和 `blog/<slug>.en.md` 之间切换。英文文件缺失时页面会明确提示并回退到中文，不会把 API Key 发送到浏览器。
+
+在本地生成英文稿：
+
+```bash
+export DEEPSEEK_API_KEY='...'
+node tools/translate-blog.mjs --dry-run
+node tools/translate-blog.mjs
+node tools/translate-blog.mjs --check
+```
+
+也可以通过 `DEEPSEEK_API_KEY_FILE` 指向一个仓库外、权限为 `0600` 的密钥文件，避免把密钥写进 Shell 历史。
+
+翻译工具会保护普通代码块、公式、行内代码和链接目标，保留 Mermaid 结构并翻译其中的可读标签。中间结果保存在已忽略的 `tools/.translation-cache/`，失败后可以断点续跑。单篇更新可以使用 `--slug <slug>`，源文变更后使用 `--force` 重新生成。
 
 ## 自定义
 

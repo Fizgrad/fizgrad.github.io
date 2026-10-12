@@ -2957,9 +2957,9 @@ IRTranslator 把 LLVM IR 翻译成 gMIR：
 x0~x7：整数/指针参数前 8 个；返回整数/指针也优先放 x0 / x1
 w0~w7：同上对应 32 位视图（实际仍是 x0~x7）
 v0~v7：浮点与 SIMD 参数前 8 个；返回浮点/向量常走 v0 / v1
-x8：隐式返回（sret/indirect result）或平台工具寄存器（具体取决于 ABI 约定细节）
+x8：间接返回地址寄存器；返回值需要调用方提供存储时传入该地址
 x16/x17：过程内临时寄存器（IP0/IP1），通常由调用序列中的链接器胶水使用
-x18：平台保留寄存器（Linux 常见用于 TP 相关访问）
+x18：平台寄存器，是否保留和具体用途由平台 ABI 决定；可移植底层代码不应自行占用
 x19~x28：callee-saved，需要被调用者保存恢复
 x29：frame pointer（如果启用）
 x30：link register（返回地址）
@@ -2968,14 +2968,14 @@ x30：link register（返回地址）
 V 寄存器侧重点：
 
 ```text
-v8~v15：callee-saved（调用者可以假设被保存）
+v8~v15：基准 AAPCS64 只要求 callee 保存低 64 位，高 64 位仍可能被破坏
 v0~v7、v16~v31：caller-saved
 ```
 
 参数溢出和栈对齐：
 
 ```text
-前 8 个 GPR / 前 8 个 V 寄存器用完后，参数才按 8 字节槽位入栈传递
+前 8 个 GPR / 前 8 个 V 寄存器无法继续容纳参数后，按参数分类、大小和对齐放入栈参数区
 call 前 SP 通常要求 16 字节对齐（对应 AAPCS64 的基本规则）
 目标没有 red zone，不能依赖“调用边界下方的天然空隙”
 ```
@@ -2983,10 +2983,10 @@ call 前 SP 通常要求 16 字节对齐（对应 AAPCS64 的基本规则）
 返回规则（常见）：
 
 ```text
-标量 / 指针：x0
-两个标量：x0 + x1
-标量 + 向量：x0 + v0
-超过寄存器承载能力的返回：采用间接返回（sret）方式
+整数 / 指针标量：x0；最多 128 位的整数结果可使用 x0 + x1
+浮点 / SIMD 标量或短向量：v0；HFA/HVA 可使用 v0~v3
+符合条件且不超过 16 字节的普通 composite：按规则使用 x0 + x1
+需要间接返回的结果：调用方提供存储并通过 x8 传入地址
 ```
 
 在 LLVM 中可以按这条链路理解：
@@ -3002,7 +3002,172 @@ flowchart LR
 
 这段逻辑解释了一个关键现象：为什么同样一段 LLVM IR，换目标（x86、AArch64）后参数布局、栈帧形态会变化，但语义仍一致——语义在 IR，位置在 ABI/后端。
 
-### 10.3.5 Legalizer
+### 10.3.5 不定参数从 Clang、LLVM IR 到 ABI
+
+C/C++ 的 `...` 只告诉编译器“固定形参之后还有匿名实参”，不会自动传递参数数量和类型。
+前端、LLVM IR 与目标后端分别承担不同工作：
+
+```mermaid
+flowchart LR
+    SRC["C/C++：int sum(int count, ...)"] --> FE["Clang：类型检查与默认参数提升"]
+    FE --> IR["LLVM IR：vararg FunctionType + va_start/va_end"]
+    IR --> CL["CallLowering：区分 named / anonymous arguments"]
+    CL --> ABI["目标 ABI：寄存器、保存区、栈参数"]
+    ABI --> VA["va_arg：按类型分类并推进游标"]
+```
+
+#### 10.3.5.1 调用方先完成默认参数提升
+
+例如：
+
+```c
+int sum_ints(int count, ...);
+
+sum_ints(3, (char)10, (short)20, 30);
+```
+
+Clang 在生成调用前已经把 `char`、`short` 等执行整型提升。`float` 匿名参数会提升为
+`double`。后端接收到的是提升后的机器类型，不会在被调用函数的 `va_arg` 处重新猜测源语言
+类型。
+
+函数类型还会区分 fixed parameters 与 vararg 部分。LLVM C++ API 中可以通过
+`FunctionType::isVarArg()` 判断函数是否接受不定参数，但 IR 不记录一次具体调用究竟传了
+多少匿名参数。数量和读取类型仍由 count、format、tag 或 sentinel 等上层协议决定。
+
+#### 10.3.5.2 LLVM IR 怎样表示不定参数
+
+函数声明和调用在固定参数类型后保留 `...`：
+
+```llvm
+declare i32 @printf(ptr, ...)
+
+call i32 (ptr, ...) @printf(
+    ptr @format,
+    i32 42,
+    double 2.500000e-01
+)
+```
+
+这里的 `i32` 和 `double` 已经是调用方提升后的类型。一个读取 `int` 参数的可变参数函数可
+概念化为：
+
+```llvm
+%va_list = type { ptr } ; 仅作示意，真实布局由目标 ABI 决定
+
+define i32 @read_one(i32 %tag, ...) {
+entry:
+  %args = alloca %va_list
+  call void @llvm.va_start.p0(ptr %args)
+  %value = va_arg ptr %args, i32
+  call void @llvm.va_end.p0(ptr %args)
+  ret i32 %value
+}
+
+declare void @llvm.va_start.p0(ptr)
+declare void @llvm.va_end.p0(ptr)
+declare void @llvm.va_copy.p0(ptr, ptr)
+```
+
+- `llvm.va_start` 按目标方式初始化 `va_list`；与 C 宏不同，IR intrinsic 不需要显式传入
+  最后一个 named parameter，编译器已经知道函数签名。
+- `va_arg` 指令接收目标相关的 `va_list` 地址和要读取的 IR 类型，返回值并推进游标。
+- `llvm.va_copy` 创建相同读取位置的独立游标；`llvm.va_end` 结束由 start/copy 初始化的游标。
+
+LangRef 定义了 `va_arg` 指令，但当前代码生成器并没有在所有目标上完整支持所有类型，尤其
+不能把 aggregate 的处理一概交给这条指令。Clang 常在前端 CodeGen 阶段就把 `va_arg`
+展开成目标 ABI 相关的字段访问、分支、对齐和 load；生成的 IR 仍保留 `llvm.va_start`、
+`llvm.va_end`，却不一定出现字面上的 `va_arg` 指令。
+
+#### 10.3.5.3 AAPCS64 的 `va_list` 为什么是结构体
+
+Linux/ELF 上常见的 AAPCS64 `va_list` 可以按以下逻辑字段理解：
+
+```text
+stack    → 下一个栈上传入的匿名参数
+gr_top   → 通用参数寄存器保存区末端
+vr_top   → FP/SIMD 参数寄存器保存区末端
+gr_offs  → 下一个可用 GPR 参数相对 gr_top 的偏移
+vr_offs  → 下一个可用 FP/SIMD 参数相对 vr_top 的偏移
+```
+
+字段名和 C 头文件中的包装形式属于实现细节，不能在业务代码中直接访问。需要这些字段是
+因为下一个匿名参数可能处在三个位置之一：
+
+```mermaid
+flowchart TD
+    T["va_arg(args, T)"] --> C{"T 的 ABI 参数分类"}
+    C -->|"整数 / 指针等"| G{"GPR 保存区还有空间?"}
+    C -->|"浮点 / SIMD / HFA/HVA"| V{"FP/SIMD 保存区还有空间?"}
+    G -->|是| GR["gr_top + gr_offs；推进 gr_offs"]
+    V -->|是| VR["vr_top + vr_offs；推进 vr_offs"]
+    G -->|否| S["按 T 的对齐读取 stack；推进 stack"]
+    V -->|否| S
+```
+
+若函数执行了 `va_start`，函数序言通常会把仍可能承载匿名参数的 `xN~x7` 保存进 GPR save
+area，把相应的 `vN~v7` 保存进 FP/SIMD save area。以 `sum_ints(int count, ...)` 为例，
+`count` 已占用 `w0`，匿名整数可能先位于 `x1~x7`：
+
+```asm
+sub sp, sp, #frame_size
+str x1, [sp, #gr_save]
+str x2, [sp, #gr_save + 8]
+...
+str x7, [sp, #gr_save + 48]
+str q0, [sp, #vr_save]
+...
+str q7, [sp, #vr_save + 112]
+```
+
+这是示意布局，真实偏移、是否省略不需要的保存区和保存指令由优化等级及实现决定。
+存在相应可用寄存器参数时，`va_start` 会把 `gr_offs/vr_offs` 初始化为负偏移；每次
+`va_arg` 先根据 `T` 选择寄存器类别，完成大小与对齐计算。如果相应 offset 已用尽，就
+转到 `stack` 路径。
+
+Clang 为 AArch64 展开 `va_arg(args, int)` 时，常见 IR 形状是：
+
+```text
+读取 gr_offs
+  → gr_offs < 0 且增加 8 后仍未越界？
+      → 是：从 gr_top + old_gr_offs 读取，并更新 gr_offs
+      → 否：从 stack 读取，并把 stack 向后推进 8 字节
+```
+
+读取 `double` 会查询 FP/SIMD 保存区并按相应槽宽推进；aggregate、HFA/HVA、大对齐类型和
+大端模式还有额外分类与地址调整，不能把所有 `va_arg(T)` 都实现成“指针加 8”。
+
+#### 10.3.5.4 为什么 `va_list` 不能假定为裸指针
+
+不同目标 ABI 选择不同布局。例如 x86-64 System V 常见结构包含：
+
+```text
+gp_offset
+fp_offset
+overflow_arg_area
+reg_save_area
+```
+
+调用可变参数函数时还会通过 `%al` 携带本次调用使用的向量参数寄存器数量上界，帮助
+callee 决定 FP/SIMD 保存行为。某些只从栈读取匿名参数的平台，`va_list` 可能接近一个栈
+游标；Windows、Darwin 和不同 AArch64 平台变体也不应直接套用 Linux/ELF 的结构。
+
+因此 target-independent LLVM Pass 必须把 `va_list` 当作目标相关对象：
+
+- 不根据某个目标的 struct 字段数识别所有 `va_list`；
+- 不用普通赋值或自行拼出的 `memcpy` 替换前端语义，跨目标复制应保留 `llvm.va_copy`；
+- 不让 `va_list` 活过创建它的可变参数函数，因为寄存器保存区和栈参数属于当前调用帧；
+- 修改函数签名或 calling convention 后，重新检查 named/anonymous 参数分界和所有 call site；
+- 不能因为 IR 中没有 `va_arg` 指令，就断言函数没有读取匿名参数：访问可能已经被前端展开。
+
+源码层的类型读取错误通常在进入 LLVM 前就已经构成未定义行为。优化器不需要为
+`va_arg(args, float)` 实际面对调用方传入的 promoted `double` 保留可预期结果。
+
+相关定义可对照 [LLVM LangRef 的 Variable Argument Handling](https://llvm.org/docs/LangRef.html#variable-argument-handling-intrinsics)、
+[Clang 的 variadic builtins](https://clang.llvm.org/docs/LanguageExtensions.html#variadic-function-builtins)和
+[AAPCS64 的 variadic subroutines](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#variadic-subroutines)，
+x86-64 则可对照 [System V psABI](https://gitlab.com/x86-psABIs/x86-64-ABI)。
+
+### 10.3.6 Legalizer
 
 Legalizer 判断：这个 `G_* opcode + LLT` 组合目标机器是否支持。
 
@@ -3020,7 +3185,7 @@ Unsupported
 
 例如目标不支持 `s7` 加法，可能 widen 到 `s32`，计算后再 truncate。
 
-### 10.3.6 RegBankSelect
+### 10.3.7 RegBankSelect
 
 RegBankSelect 不是寄存器分配。它只是选择寄存器银行：
 
@@ -3040,7 +3205,7 @@ flowchart LR
 
 真正的物理寄存器分配发生在 Register Allocation。
 
-### 10.3.7 InstructionSelect
+### 10.3.8 InstructionSelect
 
 最后把 generic opcode 换成目标 opcode：
 
@@ -3054,7 +3219,7 @@ flowchart LR
 
 > GlobalISel 直接在 MIR 体系里完成指令选择。它先用 IRTranslator 把 LLVM IR 翻译成带 `G_*` opcode 的 gMIR，再由 Legalizer 合法化类型和操作，由 RegBankSelect 选择寄存器银行，最后由 InstructionSelect 选择目标机器指令。RegBankSelect 不是寄存器分配，它只是决定 GPR/FPR 等寄存器银行。
 
-### 10.3.8 Register Bank、Register Class 与 Physical Register
+### 10.3.9 Register Bank、Register Class 与 Physical Register
 
 三者不要混为一谈：
 
@@ -3633,13 +3798,7 @@ New PM：
 opt -S -passes='instcombine,simplifycfg' input.ll -o output.ll
 ```
 
-Legacy PM，老版本常见形式：
-
-```bash
-opt -S -load ./MyPass.so -my-pass input.ll -o output.ll
-```
-
-具体命令会随 LLVM 版本和 Pass 注册方式变化，重点是理解完整机制：
+对于仍使用 Legacy PM 的旧工程，加载形式见 15.5.2。具体命令会随 LLVM 版本和 Pass 注册方式变化，完整机制都是：
 
 ```mermaid
 flowchart LR
@@ -3840,7 +3999,291 @@ for (Instruction *I : ToErase)
 
 
 
-# 17. 常用命令清单
+# 17. LLVM 工程实践：从复现问题到验证修改
+
+LLVM 开发中，理解 IR 和 Pass 只是起点。一个修改真正可用，还要经过下面这条闭环：
+
+```mermaid
+flowchart LR
+    A[保留原始编译条件] --> B[固定可复现输入]
+    B --> C[确定出错阶段]
+    C --> D[缩减最小用例]
+    D --> E[修复并检查 IR]
+    E --> F[补回归测试]
+    F --> G[验证语义与调试信息]
+    G --> H[测量运行时间、代码体积与编译时间]
+```
+
+这套流程适用于自定义 Pass、LLVM 上游修改、目标后端开发以及编译器升级后的回归定位。
+
+## 17.1 先保存复现条件，再观察 IR
+
+同一份源代码在不同编译条件下可能进入完全不同的 pipeline。开始定位前，至少保存：
+
+```text
+编译器版本与 commit
+完整命令行
+target triple 与 -mcpu/-march/-mattr
+优化等级和 LTO/PGO 配置
+输入源码、预处理结果或 bitcode
+链接器及运行时库版本
+触发问题所需的环境变量和 profile 数据
+```
+
+`clang -###` 可以显示 driver 最终拆出的前端、汇编和链接命令：
+
+```bash
+clang -### -O2 --target=aarch64-linux-gnu test.cpp
+clang --version
+```
+
+定位宏、头文件或条件编译问题时，可以先固定预处理结果：
+
+```bash
+clang++ -E test.cpp -o test.ii
+```
+
+定位中端问题时保存 bitcode；定位后端问题时再保存 MIR：
+
+```bash
+clang++ -O2 -emit-llvm -c test.ii -o test.bc
+llc -stop-after=finalize-isel test.bc -o test.mir
+```
+
+这些输入并非无条件可移植。bitcode、文本 IR、intrinsic、attribute 和 MIR 都可能随 LLVM 版本变化，MIR 还与具体 target 和后端实现紧密绑定。因此复现包需要同时记录生成它的 LLVM 版本，不能只留下一个 `.bc` 或 `.mir` 文件。
+
+## 17.2 用编译阶段切分问题
+
+不要从最终的错误结果直接猜某个 Pass。先找到最后一个正确阶段和第一个错误阶段：
+
+```mermaid
+flowchart LR
+    A[C/C++ 源码] --> B[Clang AST/前端]
+    B --> C[未优化 LLVM IR]
+    C --> D[优化后 LLVM IR]
+    D --> E[MIR/机器指令]
+    E --> F[汇编与目标文件]
+    F --> G[链接结果]
+    G --> H[运行时行为]
+```
+
+- 未优化 IR 已经错误，优先检查前端 lowering、语言语义和 builtin/intrinsic 生成。
+- 未优化 IR 正确、优化后 IR 错误，优先检查中端 Transform、Analysis 或错误的 poison/UB 推理。
+- 优化后 IR 正确、MIR 或汇编错误，优先检查 legalization、instruction selection、寄存器分配和目标相关 peephole。
+- 目标文件正确、链接结果错误，检查 relocation、COMDAT、visibility、LTO 与链接脚本。
+- 编译结果本身看似正确但运行不稳定，还要排除源程序 UB、数据竞争、运行库差异和测试环境噪声。
+
+`verify-each` 能把 verifier 插到 pipeline 的各个 Pass 之后，适合寻找第一个破坏 IR 结构的 Pass：
+
+```bash
+opt -S -passes='default<O2>' -verify-each input.ll -o output.ll
+```
+
+它能发现类型、SSA、PHI、dominance 等结构性错误，却不能证明变换前后语义等价。一个 Pass 完全可能生成“合法但算错”的 IR，因此 verifier 通过只是第一层检查。
+
+对可疑 pipeline，可同时查看实际执行顺序和 Pass 前后 IR：
+
+```bash
+opt -passes='default<O2>' -debug-pass-manager input.ll -disable-output
+opt -S -passes='default<O2>' -print-before-all -print-after-all input.ll -disable-output
+```
+
+完整输出通常很大。定位到可疑 Pass 后，应改用该 Pass 的名字过滤输出，或把 pipeline 缩小到能触发问题的最短组合，避免在几万行 IR 中人工搜索。
+
+## 17.3 用 `llvm-reduce` 缩减失败输入
+
+大型程序能复现问题，并不等于适合作为调试用例。[`llvm-reduce`](https://llvm.org/docs/CommandGuide/llvm-reduce.html) 会反复删除 IR 或 MIR 中的内容，并调用一个 *interestingness test* 判断问题是否仍然存在：
+
+```bash
+llvm-reduce --test=interesting.sh large.ll
+```
+
+例如，若目标是保留某个稳定的编译器崩溃特征，脚本可以写成：
+
+```bash
+#!/usr/bin/env bash
+set -o pipefail
+opt -passes='default<O2>' -disable-output "$1" 2>&1 \
+  | grep -q 'specific assertion text'
+```
+
+脚本返回 `0` 表示“当前输入仍然有趣”，非零表示问题已经消失。判断条件必须刻画真正的问题：
+
+- 只判断 `opt` 返回非零，可能把原来的错误缩减成另一个无关崩溃。
+- 只搜索过于宽泛的 `error`，可能保留解析失败而不是原始 miscompile。
+- 语义错误没有固定崩溃文本时，应在脚本里分别生成基线结果和待测结果，再比较退出码、输出或校验值。
+- 输入程序含 UB、未初始化读取或数据竞争时，两个版本输出不同不一定说明 LLVM 错误；应先用 sanitizer、语言规则和人工检查排除这些因素。
+- 后端问题可以让 `llvm-reduce -x=mir` 处理 MIR，但 interestingness test 必须保留 target triple、CPU feature 和必要的机器函数属性。
+
+缩减结束后仍要人工整理：删除无关 attribute 和 metadata，为值和 block 使用稳定名称，并把完整 `-O2` pipeline 缩小为最少的 Pass 组合。这样测试失败时才能直接指向被修改的功能。
+
+## 17.4 用 lit 与 FileCheck 固定行为
+
+LLVM 的变换和 CodeGen 通常使用 [`lit`](https://llvm.org/docs/CommandGuide/lit.html) 驱动回归测试，并用 [`FileCheck`](https://llvm.org/docs/CommandGuide/FileCheck.html) 检查文本输出。一个中端测试可以写成：
+
+```llvm
+; RUN: opt -S -passes='my-pass' %s | FileCheck %s
+
+define i32 @fold_zero(i32 %x) {
+; CHECK-LABEL: define i32 @fold_zero(
+; CHECK-NEXT:    ret i32 %x
+  %sum = add i32 %x, 0
+  ret i32 %sum
+}
+
+define i32 @keep_nonzero(i32 %x) {
+; CHECK-LABEL: define i32 @keep_nonzero(
+; CHECK:         %sum = add i32 %x, 1
+; CHECK-NEXT:    ret i32 %sum
+  %sum = add i32 %x, 1
+  ret i32 %sum
+}
+```
+
+测试不只要覆盖“应该变换”的正例，还要覆盖最容易误优化的反例，例如：
+
+```text
+不同类型或 address space
+可能 alias 的内存
+volatile / atomic / fence
+poison、undef 与特殊算术 flag
+异常边、invoke、musttail、convergent call
+目标 feature 不满足
+变换收益不足或超过代码体积阈值
+```
+
+FileCheck 的边界同样重要：
+
+- 它验证输出是否匹配文本约束，不证明两段程序语义等价。
+- 不要检查与目标行为无关的全部 IR，否则一次正常的 canonicalization 也会让测试破碎。
+- `CHECK-LABEL` 用于隔离函数，`CHECK-NOT` 只在相邻正向检查界定的范围内生效。
+- 除非顺序本身就是被测语义，不要把可交换指令的偶然打印顺序写死。
+- 中端测试尽量直接运行最小 Pass，而不是用完整 `default<O3>`；完整 pipeline 只适合确实要验证 Phase Ordering 的情况。
+
+LLVM 的[测试指南](https://llvm.org/docs/TestingGuide.html)更偏向用小型 IR/MIR regression test 检查变换和分析；只有要直接测试通用 C++ 数据结构或支持库 API 时，才通常使用 gtest 单元测试。
+
+## 17.5 正确性验证需要多层证据
+
+不同检查覆盖的问题不同，不能互相替代：
+
+| 检查手段 | 主要发现的问题 | 不能单独证明什么 |
+| --- | --- | --- |
+| `verify` / `verify-each` | 非法 IR、SSA、类型和 CFG 约束 | 变换前后语义等价 |
+| lit + FileCheck | 指定输入产生预期结构 | 任意输入都正确、运行结果正确 |
+| sanitizer | 测试运行中触发的 UB、越界等 | 未覆盖路径没有问题 |
+| differential test | 基线与修改版输出差异 | 基线一定正确、输入不含 UB |
+| LLVM test-suite | 较大范围正确性和性能回归 | 所有目标、所有语言特性均被覆盖 |
+| `debugify` | Pass 是否丢失或破坏调试信息 | 原始源码调试体验完全正确 |
+
+修改 IR 时还要检查调试信息。一个优化即使生成正确机器码，如果把变量位置、scope 或 instruction location 丢掉，仍可能造成单步调试和 profiling 体验退化。LLVM 提供 `debugify` 为 IR 注入合成调试信息，再检查 Pass 是否不必要地将其丢失；具体选项会随 Pass Manager 和 LLVM 版本变化，应以当前版本的[调试信息维护指南](https://llvm.org/docs/HowToUpdateDebugInfo.html)为准。
+
+对于等价性敏感的算术变换，还应专门检查：
+
+```text
+有符号与无符号溢出
+nsw / nuw / exact
+fast-math flags 与 NaN/Inf/signed zero
+inbounds GEP
+poison 是否提前传播到控制流或副作用
+不同整数位宽和 vector/scalable vector
+```
+
+变换能够在常见输入上得到相同结果，不代表它保留了 LLVM IR 的全部语义集合。
+
+## 17.6 不要凭汇编行数判断优化收益
+
+优化是否有效至少有三个维度：
+
+```text
+运行时间 / 吞吐与尾延迟
+代码体积和工作集
+编译时间与峰值内存
+```
+
+先用优化备注理解“为什么做了或没做”，再进行测量：
+
+```bash
+clang++ -O2 -Rpass='loop-vectorize|inline' \
+  -Rpass-missed='loop-vectorize|inline' \
+  -Rpass-analysis='loop-vectorize|inline' test.cpp
+
+clang++ -O2 -fsave-optimization-record test.cpp
+opt -passes='default<O2>' -time-passes input.bc -disable-output
+```
+
+[`Optimization Remarks`](https://llvm.org/docs/Remarks.html) 可以报告优化成功、失败原因和分析信息；带 PGO 时还可以结合 hotness 聚焦热代码。但 remark 只是 Pass 的决策解释，不是性能结论。某次 inlining 或 vectorization 成功，仍可能因为寄存器压力、I-cache、频率变化或后续 CodeGen 产生负收益。
+
+可靠的 A/B 测量需要保持以下条件一致：
+
+- 基线和修改版使用相同源码、链接方式、目标 CPU feature、profile 和运行库。
+- 分离冷启动与稳态结果，进行多次重复并报告分布，而不是只取最好的一次。
+- 使用代表性 workload；极小 microbenchmark 适合解释机制，不足以替代完整程序结果。
+- 同时观察运行时间、代码体积和编译时间，避免只把成本转移到另一个维度。
+- PGO 数据必须来自与实际输入接近的 workload；失真的 profile 可能让 inlining、layout 和冷热划分都走向错误方向。
+- 对噪声接近收益幅度的结果，不应下确定结论；需要扩大样本或使用更稳定的环境。
+
+如果结果退化，先区分是中端决策、后端实现还是布局变化：
+
+```text
+Optimization Remark / IR diff
+            ↓
+MIR 与寄存器压力、spill/reload
+            ↓
+汇编、代码体积和基本块布局
+            ↓
+硬件计数器：cycles、instructions、cache miss、branch miss
+```
+
+汇编少几条并不一定更快，IR 多几条也不一定更慢；现代处理器上的收益最终取决于关键路径、吞吐、内存层级、分支预测和代码布局。
+
+## 17.7 同时保留 baseline 与 candidate 编译器
+
+调试 LLVM 修改时，最好维护两个独立 build directory：
+
+```text
+build-baseline   未修改或已知正确的版本
+build-candidate  当前修改版本
+```
+
+两边应使用相同 CMake 选项和目标列表。日常开发通常可以使用带调试符号并开启 assertions 的构建，在保留可定位性的同时避免纯 Debug 构建过慢：
+
+```bash
+cmake -G Ninja -S llvm -B build-candidate \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DLLVM_ENABLE_ASSERTIONS=ON \
+  -DLLVM_ENABLE_PROJECTS='clang;lld'
+```
+
+开发自定义 Pass plugin 时，编译 plugin 使用的 headers、`llvm-config`、CMake package 与加载它的 `opt` 应来自同一套 LLVM build。LLVM 的 C++ ABI、Pass API 和 plugin API 会演进，不能假设不同大版本甚至不同构建配置产生的动态库可以安全混用。
+
+升级 LLVM 时也不要把完整默认 pipeline 顺序当成稳定接口。Pass 名称、顺序、默认阈值、IR attribute 和 intrinsic 都可能变化；更稳妥的策略是：
+
+```text
+对外固定真正需要的输入输出语义
+对内用小测试覆盖关键变换与边界
+单独记录 pipeline 或 cost model 变化
+重新生成而不是机械复制旧版本的检查行
+```
+
+## 17.8 提交一个 Transform 前的检查表
+
+```text
+1. 是否有最小正例，能证明变换确实发生？
+2. 是否有反例，覆盖 alias、poison、atomic、异常边或 target feature？
+3. 新定义是否支配所有普通 use，PHI incoming value 是否在对应 edge 上可用？
+4. 删除或替换指令后，use-list、metadata 和 debug info 是否仍然正确？
+5. 是否错误复制或丢失 nsw、nuw、exact、fast-math、inbounds 等语义承诺？
+6. 修改 CFG 后是否同步更新 PHI、DominatorTree、LoopInfo 和 MemorySSA？
+7. PreservedAnalyses 是否只保留了真正仍然有效的分析？
+8. verifier 通过后，是否还有运行结果或等价性验证？
+9. 是否为代码体积、运行时间或编译时间变化提供了可重复的数据？
+10. 测试是否只约束目标行为，而没有绑定无关的 IR 打印细节？
+```
+
+这份检查表的重点是把“IR 看起来合理”推进到“变换合法、分析有效、行为可验证、收益可复现”。
+
+
+# 18. 常用命令清单
 
 ```bash
 # 生成 IR

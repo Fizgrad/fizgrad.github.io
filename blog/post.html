@@ -150,6 +150,7 @@
           lang: "zh-CN", blogTitle: "博客", home: "← 主页", homeAria: "返回主页",
           tocTitle: "目录", footerBuilt: "使用 GLM-5.2 构建", backHome: "← 返回主页",
           loading: "加载中...", notFound: "未找到文章", loadFailed: "文章加载失败",
+          translationMissing: "这篇文章的英文版本尚未生成，当前显示中文原文。",
           copy: "复制", copied: "已复制", copyFailed: "复制失败",
           zoomIn: "放大图表", zoomOut: "缩小图表", fullscreen: "网页全屏查看图表", exitFullscreen: "返回正文",
           diagramControls: "图表控制", expandCode: "展开（共 {lines} 行）", collapseCode: "收起",
@@ -160,6 +161,7 @@
           lang: "en", blogTitle: "Blog", home: "← Home", homeAria: "Back to home",
           tocTitle: "Contents", footerBuilt: "Built with GLM-5.2", backHome: "← Back to home",
           loading: "Loading...", notFound: "Post not found", loadFailed: "Failed to load post",
+          translationMissing: "The English version of this post is not available yet. Showing the Chinese original.",
           copy: "Copy", copied: "Copied!", copyFailed: "Failed",
           zoomIn: "Zoom in", zoomOut: "Zoom out", fullscreen: "Expand diagram to fill page", exitFullscreen: "Back to document",
           diagramControls: "Diagram controls", expandCode: "Expand ({lines} lines)", collapseCode: "Collapse",
@@ -245,8 +247,32 @@
       document.getElementById("lang-toggle").addEventListener("click", function () {
         lang = lang === "zh" ? "en" : "zh";
         try { localStorage.setItem("lang", lang); } catch (e) {}
-        applyI18n();
+        if (currentPost) window.location.reload();
+        else applyI18n();
       });
+
+      function fetchPostMarkdown(post) {
+        var encodedSlug = encodeURIComponent(post.slug);
+        var requestedLanguage = lang;
+        var requestedPath = encodedSlug + (requestedLanguage === "en" ? ".en" : "") + ".md";
+
+        return fetch(requestedPath).then(function (response) {
+          if (response.ok) {
+            return response.text().then(function (markdown) {
+              return { markdown: markdown, contentLanguage: requestedLanguage, fallback: false };
+            });
+          }
+          if (requestedLanguage !== "en" || response.status !== 404) {
+            throw new Error("Not found");
+          }
+          return fetch(encodedSlug + ".md").then(function (fallbackResponse) {
+            if (!fallbackResponse.ok) throw new Error("Not found");
+            return fallbackResponse.text().then(function (markdown) {
+              return { markdown: markdown, contentLanguage: "zh", fallback: true };
+            });
+          });
+        });
+      }
 
       if (!slug) {
         showPostStatus("notFound");
@@ -268,14 +294,12 @@
           }
           currentPost = post;
           applyI18n();
-          return fetch(encodeURIComponent(post.slug) + ".md");
+          return fetchPostMarkdown(post);
         })
-        .then(function (r) {
-          if (!r.ok) throw new Error("Not found");
-          return r.text();
-        })
-        .then(function (md) {
+        .then(function (payload) {
           var container = document.getElementById("post-content");
+          var md = payload.markdown;
+          container.setAttribute("lang", payload.contentLanguage === "en" ? "en" : "zh-CN");
           if (markedReady && sanitizerReady) {
             mathItems.clear();
             mathSeq = 0;
@@ -293,6 +317,12 @@
             pre.textContent = md;
             container.replaceChildren(pre);
             return;
+          }
+          if (payload.fallback) {
+            var translationNotice = document.createElement("p");
+            translationNotice.className = "post-translation-notice";
+            translationNotice.textContent = t("translationMissing");
+            container.insertBefore(translationNotice, container.firstChild);
           }
           if (typeof hljs !== "undefined") {
             container.querySelectorAll("pre code:not(.language-mermaid)").forEach(function (block) {
