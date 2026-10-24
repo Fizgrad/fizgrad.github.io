@@ -141,9 +141,58 @@ std::vector<BlockId> reverse_postorder(const ControlFlowGraph& cfg,
 
 ## 2.4 RPO 为什么有用
 
-在无环图中，RPO 是一种拓扑序。带环 CFG 中它不是严格拓扑序，但通常会让信息沿前向边快速传播，因此前向数据流分析用 RPO 往往比任意顺序更快收敛。
+对于从入口可达的无环子图，RPO 是一种拓扑序。带环 CFG 中它不是严格拓扑序，但通常会让信息沿前向边快速传播，因此前向数据流分析用 RPO 往往比任意顺序更快收敛。
 
-反向数据流分析常考虑 postorder。遍历顺序影响收敛速度，不改变有限单调数据流问题的最终 fixed point。
+先看一个没有环的 CFG：
+
+```mermaid
+flowchart LR
+    E["Entry: x = 1"] --> A["A"]
+    A --> B["B"]
+    B --> X["Exit"]
+```
+
+DFS 从 Entry 出发，依次进入 A、B、Exit；返回时才记录节点，所以 postorder 是 `Exit → B → A → Entry`，反转后得到 RPO：`Entry → A → B → Exit`。每条边的来源都排在目标前面，因此这个 RPO 也是拓扑序。
+
+用一个简化的到达定值分析观察信息传播：`OUT(b)` 表示离开基本块 b 时可能到达的定义集合。把 `x = 1` 这条定义记作 `d0`，初始 `OUT(Entry) = {d0}`，其余块的 `OUT` 都为空。A、B 和 Exit 没有新的赋值，只把前驱的定义集合向后传递。这里每一轮按指定顺序处理所有块，每处理一个块就立即写回结果，后面的块可以读到本轮已经更新的信息。
+
+按 RPO 处理时，A 先从 Entry 得到 `{d0}`，B 随即从 A 得到 `{d0}`，Exit 再从 B 得到 `{d0}`；一轮就能把入口信息传到出口。
+
+如果改成 `Entry → Exit → B → A`，Exit 和 B 被处理得太早，只能读到尚未更新的前驱结果：
+
+| 扫描轮次 | OUT(A) | OUT(B) | OUT(Exit) |
+|---|---|---|---|
+| 初始 | 空集 | 空集 | 空集 |
+| 第 1 轮 | `{d0}` | 空集 | 空集 |
+| 第 2 轮 | `{d0}` | `{d0}` | 空集 |
+| 第 3 轮 | `{d0}` | `{d0}` | `{d0}` |
+
+同一组方程、同一个最终结果，处理顺序却让信息多等了两轮。这依赖“更新立即可见”的求解方式；如果每轮都只读取上一轮的快照，调整本轮访问顺序就没有这个效果。
+
+再看一个带回边的 CFG：
+
+```mermaid
+flowchart TD
+    E["Entry: x = 1"] --> H["Header: 循环条件"]
+    H -->|"继续循环"| B["Body: y = 2"]
+    B -->|"回边"| H
+    H -->|"退出循环"| X["Exit"]
+```
+
+假设 DFS 在 Header 处先访问 Exit，再访问 Body，则 postorder 是 `Exit → Body → Header → Entry`，RPO 是 `Entry → Header → Body → Exit`。Header 排在 Body 前面，有利于沿 `Header → Body` 传播信息；但 `Body → Header` 指向顺序中更早的节点，因此这个顺序不是拓扑序。实际上，环同时要求 Header 在 Body 前、Body 又在 Header 前，任何线性顺序都无法满足。
+
+把 Body 中另一个变量的定义 `y = 2` 记作 `d1`。这里只追踪 `d0`、`d1`，每个块合并前驱 `OUT` 的并集，再加入本块产生的定义。仍从 `OUT(Entry) = {d0}`、其余块为空开始，按上述 RPO 扫描：
+
+| 扫描轮次 | OUT(Header) | OUT(Body) | OUT(Exit) |
+|---|---|---|---|
+| 第 1 轮 | `{d0}` | `{d0, d1}` | `{d0}` |
+| 第 2 轮 | `{d0, d1}` | `{d0, d1}` | `{d0, d1}` |
+
+第一轮处理 Header 时，Body 还没有产生 `d1`；Body 随后产生的信息只能等 Header 再次处理时，沿回边传回来。第二轮 Header 接收到 `d1`，再把它传播到 Exit，得到最终结果。求解器仍要按停止条件确认状态不再变化。Exit 中的 `{d0, d1}` 表示这两个定义都**可能**到达这里，并不表示运行时循环一定执行过：到达定值分析使用并集，保留各条路径上的可能性。
+
+实际实现可以只重新处理受影响的块，而不是每轮扫描整个 CFG。例如 Clang 的 [ForwardDataflowWorklist](https://clang.llvm.org/doxygen/structclang_1_1ForwardDataflowWorklist.html) 按 RPO 优先级取出待处理块。RPO 能减少许多不必要的重复处理，但不能保证带环分析一轮结束，也不保证对所有 CFG 和分析都是最快顺序；更复杂的循环还可以结合 SCC 等方式组织迭代。
+
+反向数据流分析常考虑 postorder，例如 Clang 的 [BackwardDataflowWorklist](https://clang.llvm.org/doxygen/structclang_1_1BackwardDataflowWorklist.html)。在初始化正确、有限单调并且所有受影响的块最终都会被处理的前提下，遍历顺序影响收敛速度，不改变最终 fixed point。前面的 `reverse_postorder` 只覆盖入口可达块，不可达块需要另外处理。
 
 ## 2.5 边分类
 
@@ -437,6 +486,8 @@ Intersection 分析不能把所有节点随意初始化为空集，否则可能�
 - 仅单调但不 distributive 时，固定点结果可能比理想路径解更保守。
 
 理解“保守”方向非常重要：优化不能因为分析过度乐观而改变语义，但可以因为分析保守而错过优化。
+
+区间域怎样表达数值范围，widening/narrowing 怎样处理循环，以及路径敏感、符号执行和跨函数分析怎样扩展这些框架，见 [Clang 静态分析](post.html?slug=clang_static_analysis)。本文接着实现位集合与活跃变量传播，避免把分析原理与具体工具混为一层。
 
 ---
 

@@ -43,6 +43,11 @@
   </header>
 
   <main id="main" class="post-page">
+    <nav class="blog-breadcrumb" id="post-breadcrumb" data-i18n-aria="blogNavigation" aria-label="博客导航" hidden>
+      <a href="../#blog" data-i18n="blogTitle">博客</a>
+      <span aria-hidden="true">/</span>
+      <a id="post-category-link" href="index.html"></a>
+    </nav>
     <div class="post-layout">
       <article class="markdown-body post-wrap post-main" id="post-content">
         <p class="post-loading" data-i18n="loading">加载中...</p>
@@ -58,9 +63,10 @@
 
   <footer class="footer">
     <p>&copy; <span id="year"></span> Fizgrad · <span data-i18n="footerBuilt">使用 GLM-5.2 构建</span></p>
-    <a href="../" class="back-top" data-i18n="backHome">← 返回主页</a>
+    <a href="index.html" id="post-back-list" class="back-top" data-i18n="backToList">← 返回文章列表</a>
   </footer>
 
+  <script src="../assets/js/blog-catalog.js"></script>
   <script src="../assets/js/markdown-code.js"></script>
   <script src="../assets/js/mermaid-viewer.js"></script>
   <script>
@@ -149,6 +155,7 @@
         zh: {
           lang: "zh-CN", blogTitle: "博客", home: "← 主页", homeAria: "返回主页",
           tocTitle: "目录", footerBuilt: "使用 GLM-5.2 构建", backHome: "← 返回主页",
+          backToList: "← 返回文章列表", blogNavigation: "博客导航",
           loading: "加载中...", notFound: "未找到文章", loadFailed: "文章加载失败",
           translationMissing: "这篇文章的英文版本尚未生成，当前显示中文原文。",
           copy: "复制", copied: "已复制", copyFailed: "复制失败",
@@ -160,6 +167,7 @@
         en: {
           lang: "en", blogTitle: "Blog", home: "← Home", homeAria: "Back to home",
           tocTitle: "Contents", footerBuilt: "Built with GLM-5.2", backHome: "← Back to home",
+          backToList: "← Back to articles", blogNavigation: "Blog navigation",
           loading: "Loading...", notFound: "Post not found", loadFailed: "Failed to load post",
           translationMissing: "The English version of this post is not available yet. Showing the Chinese original.",
           copy: "Copy", copied: "Copied!", copyFailed: "Failed",
@@ -186,6 +194,21 @@
       function updateTitle() {
         var title = currentPost ? (lang === "en" ? (currentPost.titleEn || currentPost.title) : currentPost.title) : t("blogTitle");
         document.title = title + " - Fizgrad";
+      }
+
+      function updateBlogNavigation() {
+        if (!currentPost) return;
+        var topic = BlogCatalog.categoryFor(currentPost);
+        var requested = params.get("category");
+        var state = requested === "all" || requested === topic.id
+          ? BlogCatalog.readState(window.location.search)
+          : { category: topic.id, page: 1, query: "" };
+        var category = BlogCatalog.category(state.category);
+        var link = document.getElementById("post-category-link");
+        link.textContent = BlogCatalog.localized(category, "title", lang);
+        link.href = BlogCatalog.listURL(state);
+        document.getElementById("post-back-list").href = link.href;
+        document.getElementById("post-breadcrumb").hidden = false;
       }
 
       function updateCodeExpandButton(btn) {
@@ -229,6 +252,7 @@
         var btn = document.getElementById("lang-toggle");
         btn.textContent = lang === "zh" ? "EN" : "中";
         btn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
+        updateBlogNavigation();
         updateDynamicLabels();
       }
 

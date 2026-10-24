@@ -548,6 +548,92 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 }
 .blog-page-ellipsis { color: var(--text-dim); padding: 0 0.2rem; }
 
+.blog-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+.blog-all-link { color: var(--accent-2); font-size: 0.9rem; white-space: nowrap; }
+.blog-all-link:hover { color: var(--text); }
+.blog-folder-grid { gap: 1.8rem 1.2rem; padding-top: 0.7rem; }
+.blog-folder {
+  overflow: visible;
+  min-width: 0;
+  padding: 1.5rem;
+}
+.blog-folder::after { display: none; }
+.blog-folder-tab {
+  position: absolute;
+  top: -10px;
+  left: 22px;
+  width: 66px;
+  height: 10px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: #14141e;
+  transition: border-color 0.25s;
+}
+.blog-folder:hover .blog-folder-tab { border-color: var(--card-glow); }
+.blog-folder-icon { color: var(--card-glow); display: inline-flex; }
+.blog-folder-icon svg { width: 32px; height: 32px; }
+.blog-folder-count { color: var(--text-dim); font-family: var(--font-mono); font-size: 0.75rem; }
+.blog-folder .card-desc { margin-bottom: 0; }
+.blog-folder:focus-visible, .blog-all-link:focus-visible, .blog-article-link:focus-visible,
+.blog-breadcrumb a:focus-visible, .blog-category-field select:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 4px;
+}
+.blog-list-page { padding-top: 6.5rem; padding-bottom: 3rem; min-height: calc(100vh - 8rem); }
+.blog-breadcrumb {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-bottom: 1.6rem;
+  overflow-wrap: anywhere;
+}
+.blog-breadcrumb[hidden] { display: none; }
+.blog-breadcrumb a:hover { color: var(--accent-2); }
+.blog-breadcrumb > [aria-hidden] { color: var(--text-faint); }
+.blog-list-heading { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 2rem; }
+.blog-list-heading h1 { font-size: clamp(1.5rem, 4vw, 2rem); line-height: 1.35; overflow-wrap: anywhere; }
+.blog-heading-icon { display: flex; padding-top: 0.1rem; }
+.blog-heading-icon svg { width: 38px; height: 38px; }
+.blog-category-field { display: flex; flex-direction: column; gap: 0.45rem; color: var(--text-dim); font-size: 0.85rem; }
+.blog-category-field select {
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0.65rem 2rem 0.65rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #14141e;
+  color: var(--text);
+  font: inherit;
+  color-scheme: dark;
+}
+.blog-list-page .blog-toolbar { justify-content: flex-start; }
+.blog-list-page .blog-search { max-width: none; }
+.blog-list-page .blog-status { margin-bottom: 0.75rem; }
+.blog-article-list { list-style: none; border-top: 1px solid var(--border-strong); }
+.blog-article { border-bottom: 1px solid var(--border); }
+.blog-article-link {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.4rem 0.8rem;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+.blog-article-link:hover { background: rgba(124, 140, 255, 0.05); }
+.blog-file-icon { display: flex; flex-shrink: 0; color: var(--topic-color, var(--accent)); }
+.blog-file-icon svg { width: 22px; height: 22px; }
+.blog-article-body { flex: 1; min-width: 0; }
+.blog-article-title { font-size: 1.05rem; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.blog-article-link:hover .blog-article-title { color: var(--accent-2); }
+.blog-article-description { color: var(--text-dim); font-size: 0.88rem; margin-top: 0.35rem; overflow-wrap: anywhere; }
+.blog-article-topic { display: inline-block; margin-top: 0.55rem; font-size: 0.75rem; color: var(--topic-color); }
+.blog-article-number { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-faint); }
+.blog-article-arrow { color: var(--text-dim); }
+
 .post-wrap {
   max-width: 800px;
   margin: 0 auto;
@@ -1506,6 +1592,12 @@ body.mermaid-page-fullscreen-open {
   .blog-pagination { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
   .blog-page-list { grid-column: 1 / -1; grid-row: 2; gap: 0.25rem; }
   .blog-page-list .blog-page { min-width: 36px; padding: 0.5rem 0.35rem; }
+  .blog-section-head { align-items: flex-start; flex-wrap: wrap; }
+  .blog-category-field { width: 100%; min-width: 0; }
+  .blog-category-field select { width: 100%; }
+  .blog-article-link { gap: 0.65rem; padding: 1.1rem 0; }
+  .blog-article-number { display: none; }
+  .blog-list-page { padding-top: 5.75rem; }
   .socials a span { display: none; }
   .socials a { padding: 0.6rem; }
 }

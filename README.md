@@ -11,6 +11,7 @@ David 的个人主页,托管在 GitHub Pages:https://fizgrad.github.io
 - 更多仓库区:其他开源项目,链接到 GitHub
 - 中英双语切换,自动记忆语言偏好
 - Systems Lab：系统编程练习、DeepSeek 静态评审与 Linux 本地测试
+- 博客按主题文件夹浏览，主题内支持文章列表、搜索和分页
 - 粒子连线背景、卡片悬浮渐变描边、滚动渐入动画
 - 响应式布局,支持 `prefers-reduced-motion`
 
@@ -24,6 +25,10 @@ David 的个人主页,托管在 GitHub Pages:https://fizgrad.github.io
 index.html              页面主结构
 assets/css/style.css    样式
 assets/js/main.js       i18n 字典、项目数据、卡片渲染、动画背景
+assets/js/blog-catalog.js  博客主题定义与共用导航逻辑
+assets/js/blog-list.js   文章列表、主题切换、搜索与分页
+blog/index.html         主题文章列表
+blog/posts.json         文章元数据与 category 分类
 blog/<slug>.md          中文博客正文
 blog/<slug>.en.md       对应英文正文
 tools/translate-blog.mjs  博客翻译、断点续跑与结构校验
@@ -64,3 +69,6 @@ node tools/translate-blog.mjs --check
 - 个人信息 / 社交链接:编辑 `index.html`
 - 项目数据与描述(中英文):编辑 `assets/js/main.js` 中的 `pagesProjects` 与 `otherRepos`
 - UI 文案翻译:编辑 `assets/js/main.js` 中的 `I18N` 字典
+- 博客分类：在 `assets/js/blog-catalog.js` 中维护主题，在 `blog/posts.json` 中给文章设置 `category`。每篇文章只有一个主分类，未分类文章会自动进入“其他文章”，不会从列表丢失。
+
+分类与导航检查：`node tools/check-blog-catalog.mjs`。本机安装 Chrome 后可加 `--browser`，验证页面导航、双语、搜索、分页和手机布局。

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Fizgrad 的技术博客，按编译器、GPU、Linux 等主题浏览。" />
+  <title>博客 - Fizgrad</title>
+  <link rel="icon" href="../assets/img/avatar.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <script src="../assets/js/blog-catalog.js" defer></script>
+  <script src="../assets/js/blog-list.js" defer></script>
+</head>
+<body>
+  <div class="grid-overlay" aria-hidden="true"></div>
+  <a class="skip-link" href="#main" data-i18n="skip">跳到主内容</a>
+  <header class="nav scrolled">
+    <a href="../" class="nav-logo">&lt;fizgrad/&gt;</a>
+    <nav class="nav-links">
+      <a href="../#blog"><span data-i18n="backFolders">← 主题目录</span></a>
+      <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
+    </nav>
+  </header>
+
+  <main id="main" class="blog-list-page">
+    <nav class="blog-breadcrumb" data-i18n-aria="breadcrumb" aria-label="博客导航">
+      <a href="../" data-i18n="home">主页</a>
+      <span aria-hidden="true">/</span>
+      <a href="../#blog" data-i18n="blog">博客</a>
+      <span aria-hidden="true">/</span>
+      <span id="blog-current-category" aria-current="page"></span>
+    </nav>
+    <header class="blog-list-heading">
+      <span class="blog-heading-icon" id="blog-heading-icon" aria-hidden="true"></span>
+      <div>
+        <h1 id="blog-category-title">博客</h1>
+        <p class="section-sub" id="blog-category-description"></p>
+      </div>
+    </header>
+
+    <div class="blog-toolbar">
+      <label class="blog-category-field" for="blog-category">
+        <span data-i18n="topic">主题</span>
+        <select id="blog-category" aria-controls="blog-list"></select>
+      </label>
+      <label class="blog-search" for="blog-search">
+        <span data-i18n="search">搜索文章</span>
+        <input id="blog-search" type="search" placeholder="标题或简介" data-i18n-placeholder="searchPlaceholder" aria-controls="blog-list" />
+      </label>
+    </div>
+    <p id="blog-status" class="blog-status" role="status" aria-live="polite" aria-atomic="true"></p>
+    <button id="blog-retry" class="blog-page" type="button" data-i18n="retry" hidden>重试</button>
+    <ol id="blog-list" class="blog-article-list" aria-busy="true"></ol>
+    <p id="blog-empty" class="blog-empty" data-i18n="empty" hidden>没有找到相关文章</p>
+    <nav id="blog-pagination" class="blog-pagination" data-i18n-aria="pagination" aria-label="文章分页" hidden>
+      <button id="blog-prev" class="blog-page blog-page-step" type="button" data-blog-action="prev" aria-controls="blog-list" disabled>
+        <span aria-hidden="true">←</span> <span data-i18n="previous">上一页</span>
+      </button>
+      <div id="blog-page-list" class="blog-page-list"></div>
+      <button id="blog-next" class="blog-page blog-page-step" type="button" data-blog-action="next" aria-controls="blog-list" disabled>
+        <span data-i18n="next">下一页</span> <span aria-hidden="true">→</span>
+      </button>
+    </nav>
+    <noscript><p>请启用 JavaScript 以浏览文章列表。Please enable JavaScript to browse articles.</p></noscript>
+  </main>
+
+  <footer class="footer">
+    <p>&copy; <span id="year"></span> Fizgrad · <span data-i18n="footerBuilt">使用 GLM-5.2 构建</span></p>
+    <a href="../#blog" class="back-top" data-i18n="backFolders">← 主题目录</a>
+  </footer>
+</body>
+</html>

@@ -3,6 +3,7 @@
     "title": "编译器与高性能系统算法",
     "titleEn": "Algorithms for Compilers and High-Performance Systems",
     "slug": "compiler_algorithms",
+    "category": "compilers",
     "description": "CFG、数据流、SSA、寄存器分配与指令调度",
     "descriptionEn": "CFGs, data flow, SSA, register allocation, and instruction scheduling."
   },
@@ -10,6 +11,7 @@
     "title": "张量计算、融合与性能算法",
     "titleEn": "Tensor Computation, Fusion, and Performance Algorithms",
     "slug": "tensor_compiler_algorithms",
+    "category": "ai",
     "description": "张量布局、GEMM、算子融合、CPU 缓存、成本模型与验证",
     "descriptionEn": "Tensor layouts, GEMM, fusion, CPU caches, cost models, and validation."
   },
@@ -17,6 +19,7 @@
     "title": "CUDA 编程模型：从向量加法开始",
     "titleEn": "CUDA Programming Model: Starting with Vector Addition",
     "slug": "cuda_programming",
+    "category": "gpu",
     "description": "从可运行的 CUDA C++ 示例理解线程层级、内存、同步与 Stream",
     "descriptionEn": "A runnable CUDA C++ introduction to thread hierarchy, memory, synchronization, and streams."
   },
@@ -24,6 +27,7 @@
     "title": "CUDA 执行与内存模型",
     "titleEn": "CUDA Execution and Memory Model",
     "slug": "cuda_execution_model",
+    "category": "gpu",
     "description": "Grid、Block、Warp、SM、SIMT、同步与内存层级",
     "descriptionEn": "Grids, blocks, warps, SMs, SIMT, synchronization, and memory hierarchy."
   },
@@ -31,6 +35,7 @@
     "title": "CUDA 并行原语与性能分析",
     "titleEn": "CUDA Parallel Primitives and Performance Analysis",
     "slug": "cuda_parallel_primitives",
+    "category": "gpu",
     "description": "Reduction、Scan、Histogram、Softmax、Occupancy 与 Roofline",
     "descriptionEn": "Reduction, scan, histogram, softmax, occupancy, and roofline analysis."
   },
@@ -38,6 +43,7 @@
     "title": "GPU Kernel 编译与 Lowering",
     "titleEn": "GPU Kernel Compilation and Lowering",
     "slug": "gpu_kernel_lowering",
+    "category": "gpu",
     "description": "PTX、MLIR GPU 路径、Tiling、Tensor Core 与软件流水",
     "descriptionEn": "PTX, MLIR GPU lowering, tiling, tensor cores, and software pipelining."
   },
@@ -45,6 +51,7 @@
     "title": "GPU Compiler 工程实践",
     "titleEn": "GPU Compiler Engineering",
     "slug": "gpu_compiler_engineering",
+    "category": "gpu",
     "description": "动态形状、资源模型、版本选择、正确性验证与性能归因",
     "descriptionEn": "Dynamic shapes, resource models, versioning, correctness, and performance attribution."
   },
@@ -52,6 +59,7 @@
     "title": "AI Compiler：从计算图到硬件执行",
     "titleEn": "AI Compilers: From Computational Graphs to Hardware Execution",
     "slug": "ai_compiler",
+    "category": "ai",
     "description": "模型捕获、多层 IR、图优化、Kernel 生成、Runtime 与主流技术栈",
     "descriptionEn": "Model capture, multi-level IR, graph optimization, kernel generation, runtimes, and mainstream stacks."
   },
@@ -59,6 +67,7 @@
     "title": "MLIR：多层中间表示与渐进式 Lowering",
     "titleEn": "MLIR: Multi-Level IR and Progressive Lowering",
     "slug": "mlir",
+    "category": "compilers",
     "description": "Operation、Dialect、ODS、Rewrite、Bufferization 与 CPU/GPU Lowering",
     "descriptionEn": "Operations, dialects, ODS, rewriting, bufferization, and CPU/GPU lowering."
   },
@@ -66,6 +75,7 @@
     "title": "算法与数据结构",
     "titleEn": "Algorithms and Data Structures",
     "slug": "algorithms_review",
+    "category": "languages",
     "description": "C/C++ 算法与数据结构的系统复习与实现",
     "descriptionEn": "A systematic C/C++ review of algorithms and data structures."
   },
@@ -73,6 +83,7 @@
     "title": "安卓🤖",
     "titleEn": "Android🤖",
     "slug": "Android",
+    "category": "android",
     "description": "安卓是一个面向各种不同形态设备的操作系统。",
     "descriptionEn": "Android is an operating system for a wide array of devices with different form factors."
   },
@@ -80,6 +91,7 @@
     "title": "Android Connectivity：蜂窝、Wi-Fi、Bluetooth、GNSS 与 NFC",
     "titleEn": "Android Connectivity: Cellular, Wi-Fi, Bluetooth, GNSS, and NFC",
     "slug": "android_connectivity",
+    "category": "android",
     "description": "从 Framework、协议栈、HAL 到驱动与控制器，串联 Android 的通信与定位链路",
     "descriptionEn": "Android communication and positioning paths from framework and protocol stacks to HALs, drivers, and controllers."
   },
@@ -87,6 +99,7 @@
     "title": "我的NebulaIM",
     "titleEn": "My NebulaIM",
     "slug": "nebula",
+    "category": "backend",
     "description": "NebulaIM后端设计与实现",
     "descriptionEn": "Design and implementation of the NebulaIM backend."
   },
@@ -94,6 +107,7 @@
     "title": "杂七杂八的计算机网络",
     "titleEn": "Miscellaneous Computer Networking",
     "slug": "Network",
+    "category": "backend",
     "description": "计算机网络基础知识杂记",
     "descriptionEn": "Miscellaneous notes on computer networking fundamentals."
   },
@@ -101,6 +115,7 @@
     "title": "C++ 后端服务开发教程",
     "titleEn": "Building Production C++ Backend Services",
     "slug": "cpp_backend",
+    "category": "backend",
     "description": "从一次 HTTP 请求出发，串联 CMake、异步 I/O、RPC、数据访问、测试、诊断和部署",
     "descriptionEn": "From one HTTP request to CMake, async I/O, RPC, data access, testing, diagnostics, and deployment."
   },
@@ -108,13 +123,31 @@
     "title": "LLVM而不是LLM",
     "titleEn": "LLVM, Not LLM",
     "slug": "llvm_review",
+    "category": "compilers",
     "description": "LLVM编译器基础设施",
     "descriptionEn": "The LLVM Compiler Infrastructure Project."
+  },
+  {
+    "title": "Clang 前端：从源码、语法分析到 LLVM IR",
+    "titleEn": "Clang Frontend: From Source and Parsing to LLVM IR",
+    "slug": "clang_frontend",
+    "category": "compilers",
+    "description": "Token、文法、FIRST/FOLLOW、LL/LR、名字与类型检查，用 Clang 观察 AST 与 IR",
+    "descriptionEn": "Tokens, grammars, FIRST/FOLLOW, LL/LR, name lookup, and type checking, with Clang AST and IR examples."
+  },
+  {
+    "title": "Clang 静态分析：数据流、抽象解释与符号执行",
+    "titleEn": "Clang Static Analysis: Data Flow, Abstract Interpretation, and Symbolic Execution",
+    "slug": "clang_static_analysis",
+    "category": "compilers",
+    "description": "从空指针示例理解抽象域、区间、拓宽、路径与上下文敏感、跨函数分析和污点追踪",
+    "descriptionEn": "Abstract domains, intervals, widening, path and context sensitivity, interprocedural analysis, and taint tracking."
   },
   {
     "title": "Linux 系统基础复习",
     "titleEn": "Linux System Fundamentals Review",
     "slug": "os_review",
+    "category": "linux",
     "description": "Linux系统基础复习笔记",
     "descriptionEn": "Linux System Fundamentals review notes."
   },
@@ -122,6 +155,7 @@
     "title": "ARM64 异常、中断、内存序与锁",
     "titleEn": "ARM64 Exceptions, Interrupts, Memory Ordering, and Locks",
     "slug": "arm64_exception_interrupt_lock",
+    "category": "linux",
     "description": "从异常向量、GIC、内存屏障和原子指令理解 Linux 锁的实现",
     "descriptionEn": "Linux locking from exception vectors and the GIC to memory barriers and atomic instructions."
   },
@@ -129,6 +163,7 @@
     "title": "Linux 虚拟化：KVM、QEMU 与 virtio",
     "titleEn": "Linux Virtualization: KVM, QEMU, and virtio",
     "slug": "linux_virtualization",
+    "category": "linux",
     "description": "vCPU、两阶段地址转换、virtio/vhost、VFIO、迁移与性能定位",
     "descriptionEn": "vCPUs, two-stage translation, virtio/vhost, VFIO, migration, and performance analysis."
   },
@@ -136,6 +171,7 @@
     "title": "Linux GPU 驱动",
     "titleEn": "Linux GPU Drivers",
     "slug": "linux_gpu_driver",
+    "category": "linux",
     "description": "DRM/KMS、GEM/TTM、dma-buf、Fence、GPU VM、调度与故障恢复",
     "descriptionEn": "DRM/KMS, GEM/TTM, dma-buf, fences, GPU VMs, scheduling, and recovery."
   },
@@ -143,6 +179,7 @@
     "title": "大模型之火",
     "titleEn": "The Fire of LLMs",
     "slug": "fuck_ai",
+    "category": "ai",
     "description": "干啥都离不开大模型了现在，该学学了", 
     "descriptionEn": "Everything is about LLMs now, it's time to learn."
   },
@@ -150,6 +187,7 @@
     "title": "WASM虚拟机",
     "titleEn": "WASM Virtual Machine",
     "slug": "wasm",
+    "category": "languages",
     "description": "WASM简介",
     "descriptionEn": "Introduction to WASM."
   },
@@ -157,6 +195,7 @@
     "title": "数据库探微",
     "titleEn": "Database Exploration",
     "slug": "database",
+    "category": "backend",
     "description": "SQL、InnoDB、Redis、MongoDB...",
     "descriptionEn": "SQL, InnoDB, Redis, MongoDB..."
   },
@@ -164,6 +203,7 @@
     "title": "我使用的C++入土笔记",
     "titleEn": "My C++ Review Notes",
     "slug": "cpp_review",
+    "category": "languages",
     "description": "C++入土笔记",
     "descriptionEn": "C++ review notes."
   },
@@ -171,6 +211,7 @@
     "title": "JVM里面长啥样",
     "titleEn": "What JVM Looks Like Inside",
     "slug": "jvm_notes",
+    "category": "languages",
     "description": "JVM复习笔记",
     "descriptionEn": "JVM review notes."
   }

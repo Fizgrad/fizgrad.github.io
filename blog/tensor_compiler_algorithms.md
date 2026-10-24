@@ -66,18 +66,101 @@ std::optional<std::size_t> linear_offset(
 
 ## 1.3 Contiguous 不是唯一 Layout
 
-真实布局可能包含：
+Shape 描述逻辑上有多少元素、各轴有多长；layout 描述这些元素如何存放，或如何分配到线程与寄存器。两个张量都叫 `[M, N]`，下标对应的物理地址却可能不同。真实布局中的这些名称分别解决不同问题，也可以组合使用。
 
-- padding；
-- blocked / tiled layout；
-- channels-last；
-- vector lane packing；
-- swizzle；
-- GPU shared-memory bank-aware layout；
-- 稀疏格式 CSR/CSC/BSR；
-- quantized packed int4/int8。
+**Padding** 是在物理存储中预留额外槽位。例如逻辑矩阵每行有 3 个元素，却为每行分配 4 个元素的空间：
 
-因此“shape 相同”不代表可直接复用同一 kernel，“转置”也不一定需要物理 copy。
+```text
+逻辑 shape = [2, 3]，物理 stride = [4, 1]
+
+存储：[a00 a01 a02 pad] [a10 a11 a12 pad]
+地址：offset(i, j) = i * 4 + j
+```
+
+它可以让行起点满足对齐要求，也可以把长度补到向量宽度或 tile 大小的整数倍。代价是额外空间；kernel 若仍按 `i * 3 + j` 寻址，就会读错第二行。Padding 槽位不属于逻辑元素，也不一定已初始化，不能直接参与计算；需要屏蔽尾部，或按算子语义填入合适的中性值，例如求和用 0、最大值归约用负无穷。这里的存储 padding 与卷积在逻辑输入边界补零不是同一个概念。
+
+**Blocked / Tiled Layout** 把矩阵按小块连续存放，而不是把完整的一行连续存放。例如一个 `[4, 4]` 矩阵按 `[2, 2]` 分块，并按块行顺序、块内行主序存储：
+
+```text
+普通行主序：a00 a01 a02 a03 | a10 a11 a12 a13 | ...
+分块存储：  a00 a01 a10 a11 | a02 a03 a12 a13 | ...
+
+offset(i, j) = ((i / 2) * 2 + j / 2) * 4
+             + (i % 2) * 2 + j % 2
+```
+
+这里 `/` 是非负整数除法。小块中的数据相邻，适合缓存复用、向量加载或矩阵指令，但原来二维下标的固定 stride 公式不足以表达这个地址映射，需要拆成块坐标与块内坐标。尺寸不能整除块大小时，还要处理 padding 或尾块。它与“循环先按 tile 遍历”需要区分：循环分块可以沿用原来的行主序存储，blocked layout 则改变元素的实际位置。[oneDNN 的 blocked format](https://uxlfoundation.github.io/oneDNN/dev_guide_understanding_memory_formats.html) 就会把通道轴拆成外层块与块内通道。
+
+**Channels-last** 让同一个空间位置的不同通道连续存放。四维图像张量中，N 是批次，C 是通道数，H/W 是高/宽。以逻辑 shape `[N, C, H, W] = [1, 2, 2, 3]` 为例：
+
+```text
+NCHW 连续布局：stride = [12, 6, 3, 1]
+              同一个通道内，相邻 W 元素连续
+
+Channels-last：stride = [12, 1, 6, 2]
+              同一个 (n, h, w) 下，相邻 C 元素连续
+```
+
+这有利于沿通道向量化，以及使用某些卷积和矩阵计算 kernel，但跨格式算子可能需要转换布局。在 [PyTorch 的 channels-last 表示](https://docs.pytorch.org/tutorials/intermediate/memory_format_tutorial.html)中，逻辑轴顺序仍可保持 NCHW，只通过 stride 表达物理上类似 NHWC 的存储。不能只看 `shape` 或轴名称判断连续访问方向，也不能假设所有算子都会因此更快。
+
+**Vector Lane Packing** 把多个标量组织成一次向量操作的分量。例如 CPU 上把 `a[i]` 到 `a[i + 3]` 放入一个四分量 SIMD 向量，可以一次完成四个加法。GPU 中也可能让一个线程通过向量加载取得多个相邻元素。对齐满足指令要求、数据连续且尾部处理正确时，可以减少加载或计算指令；否则可能需要拆成标量操作，或增加 gather、重排和掩码。它可以只是寄存器表示或加载策略，也可以配合分块存储，不能一概视为新的内存格式。这里的向量 lane 是一条向量指令的数据分量，与 warp 中代表不同线程的 lane 需要区分。
+
+**Swizzle** 用一个确定的重排规则，把逻辑位置映射到不同物理位置。例如在 `[4, 4]` 小块内使用 `physical_col = logical_col ^ row`，其中 `^` 是按位异或：
+
+```text
+逻辑列： 0 1 2 3
+第 0 行映射到物理列：0 1 2 3
+第 1 行映射到物理列：1 0 3 2
+第 2 行映射到物理列：2 3 0 1
+第 3 行映射到物理列：3 2 1 0
+```
+
+每一行的映射都是置换，不会丢失元素。GPU 常通过类似的地址位重排分散 shared-memory bank 访问，或满足矩阵指令的读取模式。代价是额外的地址计算，以及读写两端都必须使用匹配的映射；一端按普通行主序访问会读错数据。这个小例子只说明重排机制，实际 swizzle 要结合 tile 大小、指令和目标硬件选择，不能随意套用一个异或公式就认为性能一定更好。
+
+**GPU Shared-memory Bank-aware Layout** 是按 shared memory 的硬件 bank 组织选择布局。Bank 可以理解成能够提供并行访问的存储分区；同一 warp 在一次事务中访问同一个 bank 的不同字，可能需要分多轮完成，形成 bank conflict。在常见的 32 个 bank、连续 32-bit 字依次映射到不同 bank 的模型下，假设数组起点映射到 bank 0，若 lane `r` 读取矩阵的第 `r` 行、第 0 列：
+
+```text
+tile[32][32]：bank(r, 0) = (r * 32) % 32 = 0
+             所有 lane 访问同一 bank 的不同地址
+
+tile[32][33]：bank(r, 0) = (r * 33) % 32 = r
+             不同 lane 分散到不同 bank
+```
+
+多加一列 padding 就能改变这个访问模式的 bank 映射；swizzle 是另一种办法。因此 bank-aware layout 是设计目标，padding 和 swizzle 是实现手段。效果取决于元素宽度、实际内存事务和访问模式，不能只看数组声明；同址读取的广播也不能简单算作上述冲突。Shared-memory bank conflict 与 global-memory coalescing 是不同问题，优化前者不自动保证后者。相关规则和 padding 示例见 [CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#shared-memory-and-memory-banks)。
+
+**CSR / CSC / BSR** 是稀疏矩阵的存储格式。CSR（Compressed Sparse Row，压缩稀疏行）按行保存非零值，并用行偏移和列下标定位：
+
+```text
+矩阵：                  CSR（下标从 0 开始）：
+0 5 0 0                 row_ptr = [0, 1, 3, 4]
+2 0 0 7                 col_idx = [1, 0, 3, 2]
+0 0 4 0                 values  = [5, 2, 7, 4]
+```
+
+第 1 行使用 `values[row_ptr[1] : row_ptr[2]]`，得到值 2、7，对应列 0、3。CSC（Compressed Sparse Column，压缩稀疏列）把同样的组织方式改成按列保存；BSR（Block Sparse Row，块稀疏行）则按非空小块保存，块内部通常使用稠密存储，因而也可能存有零。它们减少零值存储和部分无效运算，但会增加索引开销、间接访问与负载不均；BSR 还要权衡块内填零。Kernel 必须理解索引数组和块大小，不能沿用稠密矩阵的 `base + i * stride_i + j * stride_j` 直接寻址；稀疏程度不高时，稀疏格式也可能更慢。格式定义见 [cuSPARSE Storage Formats](https://docs.nvidia.com/cuda/cusparse/storage-formats.html)。
+
+**Quantized Packed INT4 / INT8** 同时涉及数值表示与存储打包。INT4 用 4 bit 表示一个量化整数，常把两个值装进一个字节。例如约定第一个值占低 4 bit，则 `[3, 7]` 打包成 `0x73`；访问第 `i` 个值，需要读取第 `i / 2` 个字节，再取对应的高半字节或低半字节。有符号 INT4 还必须按约定解释符号。INT8 的一个值通常已经占一个字节，也可以把多个字节组成适合向量或点积指令的打包单元，不能把 INT8 理解为“一个字节存多个 8-bit 值”。这里的 INT4 指 4-bit 整数，不是 CUDA 中包含四个 32-bit `int` 分量的 `int4` 类型。
+
+量化值还要结合 scale，有些方案还包含 zero point，例如反量化 `x ≈ scale * (q - zero_point)`。参数可能按整个张量、通道或小组保存，具体规则必须与 kernel 匹配。压缩可以减少带宽与存储，但要付出解包、转换和参数读取的成本；量化本身还可能引入数值误差，单纯打包则不改变已有整数值。INT4 的元素也不能直接用“元素数 × 整数字节数”寻址，需要处理位偏移。具体量化约定可参考 [TensorRT Quantization Schemes](https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/quantized-types-schemes.html)。
+
+因此，“shape 相同”不代表可直接复用同一 kernel。例如 `[3, 3]` 行主序矩阵的 stride 是 `[3, 1]`，其转置 view 的 shape 仍为 `[3, 3]`，stride 却是 `[1, 3]`；假设行主序的 kernel 会把转置矩阵的 `(0, 1)` 读成原矩阵的 `(0, 1)`，而正确结果应来自原矩阵的 `(1, 0)`。通用的 stride-aware kernel 可以接受两者，只是性能可能不同；针对连续、blocked、稀疏或量化格式生成的专用 kernel，则需要匹配相应的布局与参数。选择实现或缓存编译结果时，应区分实际使用到的 stride、对齐、分块或打包规则和量化方案等条件。
+
+“转置”也不一定需要物理 copy。对于支持 stride view 的稠密张量，转置可以只交换 shape 和 stride，继续共享原来的存储：
+
+```text
+原张量 A：shape = [2, 3]，stride = [3, 1]
+逻辑内容：[[0, 1, 2], [3, 4, 5]]
+
+转置 view T：shape = [3, 2]，stride = [1, 3]
+逻辑内容：[[0, 3], [1, 4], [2, 5]]
+A 和 T 共享存储：[0, 1, 2, 3, 4, 5]
+
+若把 T 转为行主序连续存储：stride = [2, 1]
+新存储：[0, 3, 1, 4, 2, 5]
+```
+
+前一种转置只改元数据，后一种才搬移元素。若消费者支持转置 stride，或允许在加载时调整下标，就可以直接使用 view；若接口要求特定连续格式、矩阵指令要求特定 packing，或反复跨步访问的成本更高，就可能值得做 copy 或 repack。创建 view 的成本小，不代表后续计算也一定快；共享存储还意味着修改 view 会影响原张量。这个结论不能直接推广到所有稀疏或特殊格式，具体 API 是否共享存储需要查看契约，例如 [PyTorch transpose](https://docs.pytorch.org/docs/stable/generated/torch.transpose.html) 对 strided 与 sparse 张量就有不同约定。
 
 ## 1.4 Broadcasting
 

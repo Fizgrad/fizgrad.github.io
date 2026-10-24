@@ -974,24 +974,11 @@ flowchart LR
 
     GM["Global Memory<br/>A / B"]
 
-    GM
-      -->|"Cooperative Load"| SM[
-        "Shared Memory<br/>A Tile / B Tile"
-      ]
-
-    SM
-      -->|"Fragment Load"| REG[
-        "Registers"
-      ]
-
-    REG
-      --> MMA["FMA / MMA"]
-
-    MMA
-      --> ACC["Register Accumulator"]
-
-    ACC
-      --> OUT["Global Memory<br/>C"]
+    GM -->|"Cooperative Load"| SM["Shared Memory<br/>A Tile / B Tile"]
+    SM -->|"Fragment Load"| REG["Registers"]
+    REG --> MMA["FMA / MMA"]
+    MMA --> ACC["Register Accumulator"]
+    ACC --> OUT["Global Memory<br/>C"]
 ```
 
 一个完整 Tile 生命周期通常是：
@@ -1526,13 +1513,7 @@ Compute Tile 1
 
 Load 和 Compute 基本串行。
 
-如果：
-
-```text
-Memory Latency
-```
-
-很长，就会浪费计算资源。
+若内存延迟较长，当前 Warp 可能无法继续；调度器可以运行其他就绪 Warp，但没有足够独立工作时，计算单元仍可能闲置。
 
 Async Copy 的目标是让：
 
@@ -1547,6 +1528,36 @@ Async Copy 的目标是让：
 ```
 
 发生重叠。
+
+## 20.1 Ampere 的 `cp.async` 与 Hopper 的 TMA
+
+普通 Global → Shared 搬运往往生成“加载到通用寄存器，再写入 Shared”的指令。Ampere（`sm_80`）引入的 `cp.async` 可以直接搬运小块数据，减少数据中转占用；线程仍需要生成地址并提交指令。多个请求可提交为拷贝组，稍后等待所需组完成，或者将完成事件关联到 `mbarrier`。`mbarrier` 是 Shared Memory 中维护阶段和完成条件的硬件屏障状态。[PTX 的异步拷贝与完成组](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async)
+
+Hopper（`sm_90`）进一步引入 TMA（Tensor Memory Accelerator）：一个线程可以提交较大的搬运请求，由专门的硬件单元执行，并将 Global → Shared 的完成进度通知给事务屏障。这与 Tensor Core 的矩阵计算是不同能力；搬运与计算能否重叠还取决于数据依赖和可用资源。Blackwell 等后续目标需要按具体指令支持继续选择，不能只根据产品代际套用完全相同的 Kernel。[Hopper 的 TMA](https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html#tensor-memory-accelerator)
+
+在 C++ 中可以使用 `cuda::memcpy_async` 表达拷贝，再由实现按架构和参数选择路径；它不是“只要调用就必定生成 TMA”。其 Barrier 重载在满足 Shared Barrier、Global → Shared、16 字节对齐等条件时可使用 Hopper 的 Bulk Copy，而旧目标或不适合硬件路径的参数可能使用其他实现。拆分到达、等待和一个具体 Kernel 见[CUDA 编程模型第 6.4 节](post.html?slug=cuda_programming)。
+
+## 20.2 Tensor Map 与多维 Tile
+
+TMA 包含连续一维 Bulk Copy，也包含用 Tensor Map 描述符的多维 Tensor Copy，后者可支持最多五维。Tensor Map 记录全局内存基址、维度、Stride、Tile 形状及可选 Swizzle 等布局信息，通常由 Host 通过 `cuTensorMapEncodeTiled` 等接口构造；设备端提交 Tile 坐标后，硬件按描述符生成地址。这减轻了线程逐元素做多维索引计算的负担，但不等于可以搬运任意不规则指针集合。
+
+例如按行存储的矩阵 `A[M][N]`，可用描述符记录元素类型、行间距和一个 `32 × 32` Tile。加载位于 `(row, col)` 的 Tile 时，硬件按行间距取得各行片段，而不是误把它们当作一段连续的 1024 个元素。若启用了 Shared Memory Swizzle，消费者也必须按对应布局读取；不能仍使用旧的线性下标。
+
+普通一维 Bulk Copy 与多维 Tensor Copy 的对齐要求不同。以基础多维 Tensor 路径为例，全局基址要求 16 字节对齐、字节 Stride 要是 16 的倍数，Shared 目的地址要求 128 字节对齐；Swizzle 模式还可能提高对齐要求。Tensor Map 的编码必须成功，类型、边界填充和布局也必须匹配目标，不能照抄一维拷贝的对齐承诺。[TMA 的描述符与对齐约束](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#using-tma-to-transfer-multi-dimensional-arrays)
+
+## 20.3 Lowering 时保留同步与完成语义
+
+Compiler 不能只把 `copy` 换成一条异步指令，还必须保留它何时可被消费、何时可覆盖源或目的 Buffer 的信息。
+
+| 高层信息 | Lowering 必须保留的约束 |
+|---|---|
+| 源、目的与布局 | 地址空间、有效范围、对齐及 Tensor Map / Swizzle 的对应关系 |
+| 提交者与协作组 | 哪些线程发起请求，哪些线程到达或等待，是否会重复写同一范围 |
+| 完成条件 | 对应拷贝组，或 Barrier 的到达次数与预期事务字节数 |
+| Stage 与 Buffer | 等待的是哪一轮，是否还有未结束的读取或搬运 |
+| 指令目标 | Compute Capability、PTX 与工具链支持，必要时保留普通搬运版本 |
+
+Hopper 的事务屏障同时维护线程到达和异步事务记账；Global → Shared TMA 的记账单位是字节，阶段只有在两项完成条件都满足后才能结束。这里的事务字节数不是 Coalescing 的内存事务个数，也不能仅用一个“已发起拷贝”的 Boolean 替代。[事务 Barrier 的完成规则](https://nvidia.github.io/cccl/unstable/libcudacxx/extended_api/synchronization_primitives/barrier.html)
 
 ---
 
@@ -1706,6 +1717,8 @@ Pipeline Depth
 
 # 24. Async Copy 的正确性
 
+## 24.1 数据到达与槽位复用是两种条件
+
 Async Copy 会引入新的依赖问题。
 
 不能：
@@ -1759,6 +1772,26 @@ Buffer Lifetime
 ```
 
 问题。
+
+双缓冲只是提供两个槽位，不会自动保护它们。生产者等待 `empty` 后才写入槽位，消费者等待 `full` 后才读取；全部消费者结束读取后再通知 `empty`。`full` 不能代替 `empty`，否则下一轮搬运可能覆盖当前轮仍在使用的数据。
+
+Warp Specialization（Warp 专职分工）可以让部分 Warp 负责提交搬运，其他 Warp 消费 Tile，但 Barrier 的到达计数必须匹配实际协议，不是固定填 `blockDim.x`。例如只要求一个生产者到达、消费者按阶段变化等待的协议，应与“全部线程都 arrive”的协议区分。环形槽位复用还要跟踪 Phase 或 Parity（阶段奇偶标记），不能把上一轮已经完成的阶段当成这一轮的数据就绪。[CUTLASS 的流水线状态与通知协议](https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/pipeline.html)
+
+## 24.2 拷贝组与事务屏障不能混用
+
+Ampere 的原始 `cp.async.commit_group` / `cp.async.wait_group` 管理调用线程提交的非 Bulk 拷贝组。`wait_group 0` 等待此前已提交的组全部完成；若允许保留更新的若干未完成组，Compiler 必须证明当前消费者用的是已完成的旧 Stage。一个线程等待自己的请求完成，并不代表其他线程的数据都已经搬完；跨线程消费还需合适的同步，或者改用正确关联全部请求的 Barrier。
+
+TMA 的 Global → Shared 可以通过事务 Barrier 通知完成。使用低层接口时，需要将实际提交字节数登记到本阶段，且不能在登记前让最后一次线程到达提前结束阶段；高层 API 自动记账时也不能重复登记。Tail Tile 缩小了实际搬运量，却仍登记完整 Tile 的字节数，会让等待无法完成；填充模式等路径则要按所用指令的实际事务记账规则计算，不能一律只数有效元素。
+
+Shared → Global 的 TMA Store 使用 Bulk Async Group，而不是上述加载屏障。`cp.async.bulk.wait_group.read` 等待搬运结束读取 Shared 源数据，可以用于确认源 Buffer 可复用；它不等价于目标 Global 数据已写完并向其他消费者发布。反向拷贝组也不能交给 `cp.async.wait_group` 等待，两套组是不同机制。[TMA 加载与存储的完成协议](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#using-tma-to-transfer-one-dimensional-arrays)
+
+## 24.3 Proxy Fence 与异步消费者
+
+Proxy 在这里指硬件内存访问路径，不是网络代理。线程的普通 Shared Memory 访问走 Generic Proxy，而 TMA 等异步操作通过 Async Proxy 访问；不能只凭“线程都到齐了”推断不同路径之间的数据顺序已经建立。
+
+例如全部线程先写 Shared Tile，再由一个线程启动 TMA Store，需要使这些写入对异步引擎可见。典型顺序是每个写入线程执行对应的 `fence.proxy.async.shared::cta`，再通过 Block 同步汇合，最后由提交者启动搬运。Fence 建立跨路径的顺序，Block Barrier 汇合线程的工作，两者各自承担不同任务；任意删掉一个都可能破坏协议。C++ 可通过 `<cuda/ptx>` 中的 `cuda::ptx::fence_proxy_async` 包装接口表达它。[PTX Proxy Fence](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-membar-fence)
+
+TMA 写入 Shared 后，通过正确关联的事务 Barrier 等待该阶段完成，可按其完成语义消费数据，不需要机械地在每一次读取前再加一个 Proxy Fence。若接下来是异步矩阵指令消费 Tile，还需满足该矩阵指令自己的布局、Fence、提交和完成协议；TMA 完成只说明输入已到达，不能说明矩阵计算已完成。复用 Tile 前要确认所有硬件消费者都不再读取它，而不是只确认线程已经提交了指令。
 
 ---
 

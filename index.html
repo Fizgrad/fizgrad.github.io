@@ -87,28 +87,15 @@
     </section>
 
     <section class="section" id="blog">
-      <div class="section-head">
-        <h2 class="section-title"><span class="hash">#</span> <span data-i18n="blogTitle">博客</span></h2>
-        <p class="section-sub" data-i18n="blogSub">所思所写</p>
+      <div class="section-head blog-section-head">
+        <div>
+          <h2 class="section-title"><span class="hash">#</span> <span data-i18n="blogTitle">博客</span></h2>
+          <p class="section-sub" data-i18n="blogSub">按主题整理的技术笔记</p>
+        </div>
+        <a href="blog/index.html" class="blog-all-link" data-i18n="blogAll">全部文章 →</a>
       </div>
-      <div class="blog-toolbar">
-        <label class="blog-search" for="blog-search">
-          <span data-i18n="blogSearchLabel">搜索文章</span>
-          <input id="blog-search" type="search" placeholder="标题或简介" data-i18n-placeholder="blogSearchPlaceholder" aria-controls="blog-grid" />
-        </label>
-        <p id="blog-status" class="blog-status" role="status" aria-live="polite" aria-atomic="true"></p>
-      </div>
-      <div class="card-grid" id="blog-grid"></div>
-      <p id="blog-empty" class="blog-empty" data-i18n="blogEmpty" hidden>没有找到相关文章</p>
-      <nav id="blog-pagination" class="blog-pagination" data-i18n-aria="blogPaginationAria" aria-label="博客分页" hidden>
-        <button id="blog-prev" class="blog-page blog-page-step" type="button" data-blog-action="prev" aria-controls="blog-grid" disabled>
-          <span aria-hidden="true">←</span> <span data-i18n="blogPrevious">上一页</span>
-        </button>
-        <div id="blog-page-list" class="blog-page-list"></div>
-        <button id="blog-next" class="blog-page blog-page-step" type="button" data-blog-action="next" aria-controls="blog-grid" disabled>
-          <span data-i18n="blogNext">下一页</span> <span aria-hidden="true">→</span>
-        </button>
-      </nav>
+      <p id="blog-status" class="blog-status" role="status" aria-live="polite" aria-atomic="true"></p>
+      <div class="card-grid blog-folder-grid" id="blog-grid"></div>
     </section>
 
     <section class="section" id="tools">
@@ -133,6 +120,7 @@
     <a href="#top" class="back-top" data-i18n="backTop">回到顶部 ↑</a>
   </footer>
 
+  <script src="assets/js/blog-catalog.js"></script>
   <script src="assets/js/main.js"></script>
 </body>
 </html>

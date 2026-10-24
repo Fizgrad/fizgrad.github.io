@@ -107,8 +107,9 @@ LLVM 官方 Pass 文档把 pass 分为 analysis pass 和 transform pass：analys
 flowchart TD
     A[LLVM IR] --> B[Instruction Selection]
     B --> C[Machine IR]
-    C --> D[Register Allocation]
-    D --> E[Machine Scheduling]
+    C --> PRE[Pre-RA Scheduling]
+    PRE --> D[Register Allocation]
+    D --> E[Post-RA Scheduling 按目标启用]
     E --> F[Peephole Optimization]
     F --> G[Frame Lowering]
     G --> H[AsmPrinter 与 MC Layer]
@@ -116,6 +117,8 @@ flowchart TD
 ```
 
 LLVM 后端有 target-independent code generator 和 target-specific backend 两部分；后端需要定义 `TargetMachine`、`DataLayout` 等接口，复用代码生成框架来支持具体架构。
+
+调度可以发生在寄存器分配前后，具体启用哪些调度 Pass、与其他机器级 Pass 如何排列，由目标和优化配置决定；不是所有后端都只有一次分配后的调度。
 
 
 
@@ -135,8 +138,9 @@ flowchart TD
     H --> I[SelectionDAG 或 GlobalISel]
     I --> J[MachineInstr 与虚拟寄存器]
     J --> K[PHI Elimination 与 Two-address Lowering]
-    K --> L[Register Allocation]
-    L --> M[Machine Scheduling]
+    K --> PRE[Pre-RA Scheduling]
+    PRE --> L[Register Allocation]
+    L --> M[Post-RA Scheduling 按目标启用]
     M --> N[Frame Lowering 与 Branch Relaxation]
     N --> O[AsmPrinter 与 MC Layer]
     O --> P[目标文件]
@@ -786,6 +790,10 @@ clang -### test.c
 > AST 更接近源代码，适合做代码检查、重构、语义分析；LLVM IR 更接近机器无关的低级程序表示，适合做优化和代码生成。例如检查“函数命名规范”应该用 AST，而做循环优化、死代码删除、内联分析应该用 LLVM IR。
 
 
+
+## 4.4 从 Clang 观察前端编译原理
+
+字符如何变成 Token、表达式如何按优先级构成 AST、FIRST/FOLLOW 与 LL/LR 分别解决什么问题，以及名字查找、类型检查和 AST 到 IR 的衔接，见 [Clang 前端：从源码、语法分析到 LLVM IR](post.html?slug=clang_frontend)。文章使用同一段 C 代码观察预处理、Token、AST 和 mem2reg 前后的 IR，并区分教学文法与 Clang 对真实 C++ 的实现。
 
 # 5. Pass Manager
 
@@ -2485,6 +2493,10 @@ MemorySSA 名字中有 SSA，但它并不是“每个字节都有一个版本号
 
 
 
+## 7.7 从优化分析到缺陷检查
+
+AA、SCEV、MemorySSA 和活跃变量分析都属于静态分析，但所保存的信息和服务的决策不同。若需要理解抽象域、区间、widening/narrowing、路径与上下文敏感、过程间分析、符号执行和污点追踪，见 [Clang 静态分析：数据流、抽象解释与符号执行](post.html?slug=clang_static_analysis)。其中从可运行的空指针检查开始，也说明了实际分析器的预算与模型边界。
+
 # 8. 优化等级：O0 / O1 / O2 / O3 / Os / Oz
 
 ## 8.1 基本区别
@@ -3357,6 +3369,102 @@ flowchart TD
 
 因此寄存器分配不是单纯的“把虚拟寄存器编号替换成物理寄存器编号”，而是复杂的全函数成本权衡。
 
+### 10.6.2 LLVM Greedy 分配器如何腾出寄存器
+
+Greedy 是 LLVM 常见的优化级寄存器分配器，不是第 10.6 节流程图中的一次简单扫描，也不是直接运行一遍图着色。它维护待分配的 live interval，按优先级逐个处理，并允许已经分配的结果被撤销和调整。
+
+理解实现时先区分几个对象：
+
+| 对象 | 保存什么 | 为什么需要 |
+|---|---|---|
+| LiveIntervals | 虚拟寄存器在哪些指令区间存活；可能有多个不连续段 | 判断时间上的重叠，而非只比较变量名字 |
+| SlotIndexes | 机器指令附近的有序位置编号 | 精确描述定义、使用与区间边界 |
+| LiveRegMatrix | 已分配区间与物理寄存器单元的占用关系 | 快速查询某个候选物理寄存器是否冲突 |
+| VirtRegMap | 虚拟寄存器到物理寄存器或栈槽的映射信息 | 后续重写操作数和追踪 spill |
+
+Register unit，寄存器单元，用来表达物理寄存器之间的重叠；例如 AArch64 的 `w0` 与 `x0` 不能当成两份完全独立的存储。调用指令还携带 register mask，寄存器掩码，描述哪些寄存器按调用约定得到保留。一个值跨越调用时，不能继续留在会被调用破坏的位置。
+
+分配一个 interval 时，可以按下面的决策理解源码；实际阶段与策略还受目标、版本和 advisor 配置影响：
+
+1. 尝试合法的空闲物理寄存器，并考虑 copy hint，尽量让原本的复制双方使用同一个位置。
+2. 没有空闲候选时，尝试 eviction，驱逐：撤销某些冲突 interval 的分配，把它们重新入队，为当前更值得保留的 interval 腾出空间。
+3. 若不能以合适成本驱逐，尝试 splitting，切分：把一个长 interval 分成热区、冷区或局部短段，重新分配新产生的区间。
+4. 仍无可行方案时，spill 到栈，并在需要值的位置 reload；某些情况可 rematerialize，重新计算一个便宜的值，避免读取栈。
+
+驱逐不等于立即 spill：被驱逐区间可能换一个物理寄存器，或经过切分后仍留在寄存器中。切分也不是把区间随意截断，分割点必须通过 copy、store/reload 等保持值的传递。Greedy 使用处理阶段和驱逐约束等机制限制反复重试，不能无限让两个区间互相驱逐。[Greedy 分配器源码](https://github.com/llvm/llvm-project/blob/main/llvm/lib/CodeGen/RegAllocGreedy.cpp)
+
+Spill weight，溢出权重，估计把值移出寄存器的代价，会考虑使用、定义及执行频率等因素，不是“区间最长的一定先 spill”。首次使用某个 callee-saved 寄存器还可能引入函数入口保存与出口恢复的固定成本；短小函数中，这个成本可能比少量 spill 更不划算。
+
+边界也不只是寄存器数量：register class、固定操作数、early-clobber、子寄存器重叠、inline asm 和调用掩码都可能限制候选。某个区间不能合法 spill 时，分配器还可能尝试受限的 recoloring，重新安排其他区间的分配；无法满足真实硬约束时不能凭空生成一个额外物理寄存器。
+
+### 10.6.3 用 Clang 观察真实的 Spill / Reload
+
+保存为 `pressure.c`：
+
+```c
+extern unsigned long get_salt(void);
+
+unsigned long mix(volatile const unsigned long *p) {
+    unsigned long a0 = p[0],   a1 = p[1];
+    unsigned long a2 = p[2],   a3 = p[3];
+    unsigned long a4 = p[4],   a5 = p[5];
+    unsigned long a6 = p[6],   a7 = p[7];
+    unsigned long a8 = p[8],   a9 = p[9];
+    unsigned long a10 = p[10], a11 = p[11];
+    unsigned long a12 = p[12], a13 = p[13];
+    unsigned long a14 = p[14], a15 = p[15];
+    unsigned long salt = get_salt();
+    return (a0 ^ salt) + (a1 ^ salt) + (a2 ^ salt) + (a3 ^ salt)
+         + (a4 ^ salt) + (a5 ^ salt) + (a6 ^ salt) + (a7 ^ salt)
+         + (a8 ^ salt) + (a9 ^ salt) + (a10 ^ salt) + (a11 ^ salt)
+         + (a12 ^ salt) + (a13 ^ salt) + (a14 ^ salt) + (a15 ^ salt);
+}
+```
+
+这些读取发生在 `get_salt()` 前，异或的计算又依赖它返回后的 salt，所以有多个值需要跨调用存活。`volatile` 保留这里的实际读取约束，**不提供线程同步或原子性**；示例使用无符号加法，避免把整数回绕写成有符号溢出。
+
+```bash
+clang --target=aarch64-linux-gnu -mcpu=neoverse-n1 -O2 \
+  -S -emit-llvm pressure.c -o pressure.ll
+
+llc -O2 -regalloc=greedy -stop-before=greedy \
+  pressure.ll -o pressure.before.mir
+llc -O2 -regalloc=greedy -stop-after=virtregrewriter \
+  pressure.ll -o pressure.after.mir
+
+rg -n 'spill-slot|STRX|LDRX|BL|stack\.' pressure.after.mir
+```
+
+这里只生成 IR/MIR，不链接程序，不需要在 AArch64 设备上运行，也不需要提供 `get_salt` 的定义。工具链必须包含 AArch64 后端；这些停止点是机器代码生成 Pass 名称，可能随版本变化。Clang、llc 与 IR 版本应匹配。
+
+在一份 LLVM 22 开发版输出中，16 个跨调用值中的部分放入 `x19`～`x28`，另外产生 6 个 spill slot。下面截取其中一个值的路径，中间其他指令省略；寄存器和栈槽编号不是稳定接口：
+
+```text
+调用前：
+  $x8 = LDRXui $x0, 10        // 从 p[10] 读取一个 64 位值
+  STRXui $x8, %stack.5, 0     // spill 到编号为 5 的栈槽
+
+调用：
+  BL @get_salt               // 调用约定允许破坏部分物理寄存器
+
+调用后：
+  $x10 = LDRXui %stack.5, 0   // reload，此次可以使用另一个寄存器
+  ...                        // 与 salt 异或，再累加
+```
+
+`LDRXui` 的地址立即数按该指令的元素大小缩放，上面的 `10` 对应字节偏移 80，不是偏移 10。`%stack.5` 是 FrameIndex，抽象栈对象编号，不是最终 `sp + 5`；栈帧布局稍后才决定字节偏移。
+
+选择 `virtregrewriter` 后观察，是因为 Greedy 完成分配时，MIR 文本中的虚拟寄存器操作数还不一定已全部换成物理寄存器。Virtual Register Rewriter 随后应用分配映射；此停止点又早于完整的 Frame Lowering，所以不要把它当成最终汇编。
+
+最终汇编中的 callee-saved 保存/恢复是在保护调用者原本的寄存器值，和上面因本函数寄存器压力生成的 spill slot 不是同一原因。也不能只数所有 `str/ldr` 判断分配质量：其中还可能包含正常数组访问、栈参数和 ABI 保存恢复。MIR 的内存注释和栈对象类型更有助于区分。
+
+### 10.6.4 切分为什么可能比整段 Spill 更便宜
+
+设某个值在一个热循环中反复使用，但在循环之后的冷路径上还要经过一次调用。若必须让整个 interval 使用同一个位置，跨调用约束可能迫使它一直占用 callee-saved 寄存器，或者产生昂贵的反复访栈。
+
+切分可以让热循环的短区间留在寄存器里，仅在冷边界保存，经过调用后再恢复。这样增加了边界上的传递，却减少了高频路径的 load/store。反过来，分割点落在热循环内、循环每轮都 reload，或因新短区间增加了其他值的冲突，就可能变差。
+
+因此比较收益要看执行频率、插入位置、区间冲突和重新计算成本，不能把“切得越碎”当成更好的分配。算法层面的 Linear Scan 与冲突图见 [编译器算法，第 8 章](post.html?slug=compiler_algorithms)。
 
 
 
@@ -3399,6 +3507,66 @@ flowchart LR
 
 调度器必须同时满足数据依赖、内存依赖、隐式寄存器依赖、目标执行单元资源和延迟模型。只追求最短关键路径可能造成寄存器压力上升，因此调度与寄存器分配之间存在天然耦合。
 
+### 10.7.2 MachineScheduler 如何选择下一条指令
+
+LLVM MachineScheduler 通常在一个调度区域内建立依赖 DAG；区域经常是基本块的一段，由调用或其他调度边界分隔，并不是任意跨函数搬动指令。
+
+- SUnit，Scheduling Unit，调度单元，代表要参与调度的机器指令等节点。
+- SDep，Scheduling Dependency，调度依赖，描述节点之间的数据、反依赖、输出或顺序关系，并可携带延迟。
+- Scheduling model 描述目标处理器的指令延迟、执行资源、资源占用和发射宽度等；同一条 ISA 指令在不同 CPU 上可以有不同模型。
+
+Latency 是生产结果到依赖指令可使用结果的时间；throughput 描述连续处理独立指令的能力。一个乘法单元可能允许每周期接收一个新乘法，却要 3 个周期才返回各自结果，两者不能混同。
+
+在概念性的正向 list scheduling 中：先把没有未完成前驱的节点放入 ready 集合，再在资源与时序允许的候选中挑选指令，更新已调度节点的后继，释放新的候选。LLVM 的通用策略还可以从顶部、底部或双向调度，维护 Available 与 Pending 等队列，结合关键路径、资源压力和寄存器压力做决策，不是按原代码顺序逐条发射。[MachineScheduler 实现](https://github.com/llvm/llvm-project/blob/main/llvm/lib/CodeGen/MachineScheduler.cpp)
+
+下面仅用“单发射、顺序执行、流水单元可接收新操作”的教学模型说明延迟。假设 load 延迟为 4 周期，mul 延迟为 3 周期：
+
+```text
+I1: r1 = load [p]     ──┐
+                       ├──> I3: r3 = xor r1, r2
+I2: r2 = mul a, b     ──┘
+
+顺序 I1、I2、I3：
+cycle 0: issue load → r1 在 cycle 4 可用
+cycle 1: issue mul  → r2 在 cycle 4 可用
+cycle 2～3: 还不能 issue xor
+cycle 4: issue xor
+
+顺序 I2、I1、I3：
+cycle 0: issue mul  → r2 在 cycle 3 可用
+cycle 1: issue load → r1 在 cycle 5 可用
+cycle 2～4: 还不能 issue xor
+cycle 5: issue xor
+```
+
+两条生产指令没有相互数据依赖，先发出较长延迟的 load 可以让它与乘法更好地重叠。真实 CPU 可能乱序、多发射，load 还可能 cache miss，所以这个周期表不是 Neoverse N1 的实测延迟；源码或汇编顺序也不等于硬件完成顺序。
+
+边界上，即使 DAG 允许交换，提前 load 也可能延长结果的存活时间、增加 spill；越过不能安全推测的分支还可能引入原路径不会发生的访存。对未知别名、volatile、atomic、fence、调用和隐式 flags 依赖，不能用“隐藏延迟”作为改变语义的理由。普通块内调度也不等于自动完成跨循环迭代的软件流水。
+
+### 10.7.3 用 Clang 比较调度前后的 MIR
+
+保存为 `schedule.c`：
+
+```c
+unsigned long scheduled(const unsigned long *p,
+                        unsigned long a, unsigned long b) {
+    unsigned long loaded = *p;
+    unsigned long product = a * b;
+    return loaded ^ product;
+}
+```
+
+```bash
+clang --target=aarch64-linux-gnu -mcpu=neoverse-n1 -O2 \
+  -S -emit-llvm schedule.c -o schedule.ll
+llc -O2 -stop-before=machine-scheduler schedule.ll -o schedule.before.mir
+llc -O2 -stop-after=machine-scheduler schedule.ll -o schedule.after.mir
+diff -u schedule.before.mir schedule.after.mir
+```
+
+观察 `body` 中的 load、乘法和异或，以及 `COPY`、`killed` 标记和操作数顺序。指令顺序未变化也可以是合理结果：指令选择阶段可能已经给出适合的排列；调度器不需要为了展示效果强制重排。若改成返回 `loaded + product`，AArch64 指令选择还可能生成一条 `madd`，因此不能把 C 中三条表达式直接当成三条固定机器指令。
+
+`-mcpu` 决定目标 CPU 的特性与调度模型，但模型预测不代替基准测量。固定优化等级、CPU 和输入后，再看最终汇编、spill 数量与运行性能，才能判断调度变化是否有收益。
 
 
 
@@ -3528,6 +3696,67 @@ AArch64CallingConvention.td
 
 > TableGen 不是普通配置文件，而是一种声明式 DSL。LLVM 用它描述 target 的寄存器、指令、匹配规则、调度信息，然后生成大量重复 C++ 代码，降低后端维护成本。
 
+## 11.1 一条可生成匹配器的加法规则
+
+下面定义一个教学用的 Demo 目标，不是直接覆盖 Clang 的 AArch64 后端。保存为 `demo.td`：
+
+```tablegen
+include "llvm/Target/Target.td"
+
+let Namespace = "Demo" in {
+  def R0 : Register<"r0">;
+  def R1 : Register<"r1">;
+  def R2 : Register<"r2">;
+  def R3 : Register<"r3">;
+}
+
+def GPR : RegisterClass<"Demo", [i32], 32, (add R0, R1, R2, R3)>;
+
+def ADDrr : Instruction {
+  let Namespace = "Demo";
+  let OutOperandList = (outs GPR:$dst);
+  let InOperandList = (ins GPR:$lhs, GPR:$rhs);
+  let AsmString = "add $dst, $lhs, $rhs";
+  let Pattern = [(set GPR:$dst, (add GPR:$lhs, GPR:$rhs))];
+  let hasSideEffects = 0;
+  let mayLoad = 0;
+  let mayStore = 0;
+}
+
+def DemoInstrInfo : InstrInfo;
+def Demo : Target {
+  let InstructionSet = DemoInstrInfo;
+}
+```
+
+`class` 是记录模板，`def` 定义具体记录，`let` 给字段赋值，`$lhs` 等名字标记模式操作数。GPR 是允许 i32 值使用的寄存器类；这里的 32 是位单位的对齐参数，不是“有 32 个寄存器”。
+
+`Pattern` 中的 `set` 表示把普通 DAG 的整数 `add` 结果映射到目标指令输出；两个输入与一个输出都受 GPR 的类型与寄存器类约束。它匹配的是选择阶段的 DAG 节点，不是直接对 C 源码字符串做替换。RegisterClass 定义中 `(add R0, R1, ...)` 是构建寄存器集合的操作，与 Pattern 中的算术 `add` 不属于同一个解释上下文。[TableGen 语言参考](https://llvm.org/docs/TableGen/ProgRef.html)
+
+工具链安装了 Target `.td` 文件时，可以生成匹配器：
+
+```bash
+llvm-tblgen -I "$(llvm-config --includedir)" \
+  -gen-dag-isel demo.td -o DemoGenDAGISel.inc
+```
+
+若安装包未包含这些 `.td` 文件，把 include 路径换成相应 LLVM 源码的 `llvm/include`。生成的 C++ 匹配表会检查 DAG opcode、类型和操作数等条件，再产生 Demo 的 `ADDrr` 节点；规则不是在用户程序运行时解释执行的。
+
+本例能够生成 SelectionDAG 匹配器，但还不是可供 `clang --target=demo` 使用的完整后端：没有注册 TargetMachine、调用约定 lowering、指令编码、MC 发射和完整合法化等实现。
+
+## 11.2 为什么写了 Pattern 仍然可能选不中
+
+从 Clang 到 AArch64 时，`a + b` 在合适条件下可以选成寄存器加法；`a + 常量` 则可能使用立即数形式。但规则能否生效还取决于：
+
+- 节点进入选择器之前是否已经被 combine、合法化或变成 target-specific 节点；
+- 值类型、寄存器类、subtarget feature 和 predicates 是否满足；
+- 常量是否符合立即数编码，例如范围、移位和符号约束；
+- 多输出、Chain、Glue 与隐式寄存器是否得到正确建模；
+- 更具体的模式是否优先覆盖了当前形状。
+
+`AsmString` 只说明如何打印，不足以定义机器语义。若指令修改 flags 或隐式寄存器，必须正确声明相关 Defs/Uses；访存与副作用信息不能为了让优化更激进而错误设为 0。漏掉这些约束可能让后续调度或删除指令改变程序行为。
+
+AArch64 实际定义大量复用的 `class/multiclass/defm`，可以从 `AArch64InstrInfo.td` 中的 ADD 指令族追到具体模式，再用 Clang 生成 IR、llc 检查选择后的 MIR。SelectionDAG 模式有一部分可导入 GlobalISel，也存在专用 MIR 模式和手写规则；不能承诺每条 DAG Pattern 会自动成为可用的 GlobalISel 规则。[AArch64 指令描述](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AArch64/AArch64InstrInfo.td)、[GlobalISel 指令选择](https://llvm.org/docs/GlobalISel/InstructionSelect.html)
 
 
 # 12. Machine Outliner

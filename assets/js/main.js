@@ -23,17 +23,12 @@
       ctaBtn: "联系我",
       navBlog: "博客",
       blogTitle: "博客",
-      blogSub: "所思所写",
-      blogReadMore: "阅读全文",
-      blogSearchLabel: "搜索文章",
-      blogSearchPlaceholder: "标题或简介",
-      blogPaginationAria: "博客分页",
-      blogPrevious: "上一页",
-      blogNext: "下一页",
-      blogPageAria: "第 {page} 页",
-      blogResults: "第 {start}–{end} 篇，共 {total} 篇",
-      blogNoResults: "共 0 篇",
-      blogEmpty: "没有找到相关文章",
+      blogSub: "按主题整理的技术笔记",
+      blogAll: "全部文章 →",
+      blogCount: "{count} 篇",
+      blogCountOne: "1 篇",
+      blogOverview: "{topics} 个主题 · {total} 篇文章",
+      blogLoading: "加载中...",
       blogLoadError: "博客列表加载失败，请刷新重试",
       toolsTitle: "工具",
       toolsSub: "站内小工具",
@@ -65,17 +60,12 @@
       ctaBtn: "Contact me",
       navBlog: "Blog",
       blogTitle: "Blog",
-      blogSub: "Thoughts and writings",
-      blogReadMore: "Read more",
-      blogSearchLabel: "Search articles",
-      blogSearchPlaceholder: "Title or description",
-      blogPaginationAria: "Blog pagination",
-      blogPrevious: "Previous",
-      blogNext: "Next",
-      blogPageAria: "Page {page}",
-      blogResults: "{start}–{end} of {total} articles",
-      blogNoResults: "0 articles",
-      blogEmpty: "No matching articles",
+      blogSub: "Technical notes, organized by topic",
+      blogAll: "All articles →",
+      blogCount: "{count} articles",
+      blogCountOne: "1 article",
+      blogOverview: "{topics} topics · {total} articles",
+      blogLoading: "Loading...",
       blogLoadError: "Could not load articles. Please refresh to try again.",
       toolsTitle: "Tools",
       toolsSub: "Built-in utilities",
@@ -272,15 +262,10 @@
   var phrases = dict.phrases;
   var typePi = 0, typeCi = 0, typeDeleting = false, typeTimer = null;
   var blogPosts = null;
-  var BLOG_PAGE_SIZE = 9;
-  var blogPage = 1;
-  var blogSearch = "";
   var blogLoadFailed = false;
 
   function detectLang() {
-    var stored = localStorage.getItem("lang");
-    if (stored === "en" || stored === "zh") return stored;
-    return (navigator.language || "zh").toLowerCase().indexOf("en") === 0 ? "en" : "zh";
+    return BlogCatalog.detectLang();
   }
 
   function t(key) { return I18N[lang][key]; }
@@ -366,49 +351,28 @@
     return card;
   }
 
-  function buildBlogCard(post) {
-    var card = el("article", { class: "card blog-card" });
-    card.style.setProperty("--card-glow", "#c084fc");
-
-    var top = el("div", { class: "card-top" }, [
-      el("div", { class: "card-icon" }, post.slug.charAt(0).toUpperCase()),
-      arrow()
-    ]);
-
-    var title = el("h3", { class: "card-title" }, lang === "en" ? (post.titleEn || post.title) : post.title);
-    var descText = lang === "en" ? (post.descriptionEn || post.description) : post.description;
-    var desc = el("p", { class: "card-desc" }, descText);
-
-    var tags = el("div", { class: "card-tags" }, [
-      el("span", { class: "tag blog-tag" }, t("blogReadMore"))
-    ]);
-
-    var link = el("a", {
-      class: "card-link",
-      href: "blog/post.html?slug=" + post.slug,
-      target: "_blank",
-      rel: "noopener",
-      "aria-label": (lang === "en" ? (post.titleEn || post.title) : post.title)
-        + (lang === "en" ? " (opens in a new tab)" : "（在新标签页打开）")
+  function buildBlogFolder(group) {
+    var category = group.category;
+    var card = el("a", {
+      class: "card blog-folder reveal",
+      href: BlogCatalog.listURL({ category: category.id }, "blog/")
     });
-
-    card.appendChild(top);
-    card.appendChild(title);
-    card.appendChild(desc);
-    card.appendChild(tags);
-    card.appendChild(link);
+    card.style.setProperty("--card-glow", category.color);
+    card.appendChild(el("span", { class: "blog-folder-tab", "aria-hidden": "true" }));
+    card.appendChild(el("div", { class: "card-top" }, [
+      el("span", { class: "blog-folder-icon" }, BlogCatalog.icon("folder")),
+      el("span", { class: "blog-folder-count" }, group.posts.length === 1 ? t("blogCountOne")
+        : t("blogCount").replace("{count}", group.posts.length))
+    ]));
+    card.appendChild(el("h3", { class: "card-title" }, BlogCatalog.localized(category, "title", lang)));
+    card.appendChild(el("p", { class: "card-desc" }, BlogCatalog.localized(category, "description", lang)));
     return card;
   }
 
   function loadBlogPosts(callback) {
     if (blogPosts) return callback(blogPosts);
-    fetch("blog/posts.json")
-      .then(function (r) {
-        if (!r.ok) throw new Error("Could not load blog posts");
-        return r.json();
-      })
+    BlogCatalog.loadPosts("blog/posts.json")
       .then(function (data) {
-        if (!Array.isArray(data)) throw new Error("Invalid blog post list");
         blogPosts = data;
         blogLoadFailed = false;
         callback(blogPosts);
@@ -416,127 +380,21 @@
       .catch(function () { blogLoadFailed = true; callback(null); });
   }
 
-  function blogText(key, values) {
-    return t(key).replace(/\{(\w+)\}/g, function (_, name) { return values[name]; });
-  }
-
-  function readBlogLocation() {
-    var params = new URLSearchParams(window.location.search);
-    var page = params.get("blogPage") || "1";
-    blogPage = /^[1-9]\d{0,5}$/.test(page) ? Number(page) : 1;
-    blogSearch = (params.get("blogSearch") || "").trim();
-    var input = document.getElementById("blog-search");
-    if (input) input.value = blogSearch;
-  }
-
-  function writeBlogLocation(push) {
-    var url = new URL(window.location.href);
-    if (blogPage > 1) url.searchParams.set("blogPage", String(blogPage));
-    else url.searchParams.delete("blogPage");
-    if (blogSearch) url.searchParams.set("blogSearch", blogSearch);
-    else url.searchParams.delete("blogSearch");
-    if (push) url.hash = "blog";
-    if (url.href !== window.location.href) {
-      window.history[push ? "pushState" : "replaceState"](window.history.state, "", url.href);
-    }
-  }
-
-  function filteredBlogPosts() {
-    var terms = blogSearch.toLowerCase().split(/\s+/).filter(Boolean);
-    return blogPosts.filter(function (post) {
-      var searchable = [post.title, post.titleEn, post.description, post.descriptionEn, post.slug]
-        .join(" ").toLowerCase();
-      return terms.every(function (term) { return searchable.indexOf(term) !== -1; });
-    });
-  }
-
-  function blogPageNumbers(total) {
-    var pages = [];
-    var start = 1;
-    var end = total;
-    if (total > 7) {
-      start = blogPage <= 4 ? 1 : (blogPage >= total - 3 ? total - 4 : blogPage - 1);
-      end = blogPage <= 4 ? 5 : (blogPage >= total - 3 ? total : blogPage + 1);
-      if (start > 1) pages.push(1, null);
-    }
-    for (var page = start; page <= end; page++) pages.push(page);
-    if (end < total) pages.push(null, total);
-    return pages;
-  }
-
-  function renderBlogCards() {
+  function renderBlogFolders() {
     var grid = document.getElementById("blog-grid");
     var status = document.getElementById("blog-status");
     if (!grid) return;
     if (!blogPosts) {
-      if (status && blogLoadFailed) status.textContent = t("blogLoadError");
+      if (status) status.textContent = t(blogLoadFailed ? "blogLoadError" : "blogLoading");
       return;
     }
-    var posts = filteredBlogPosts();
-    var totalPages = Math.ceil(posts.length / BLOG_PAGE_SIZE);
-    blogPage = Math.min(Math.max(1, blogPage), Math.max(1, totalPages));
-    var start = (blogPage - 1) * BLOG_PAGE_SIZE;
-    var end = Math.min(start + BLOG_PAGE_SIZE, posts.length);
-    grid.innerHTML = "";
-    posts.slice(start, end).forEach(function (post) {
-      var card = buildBlogCard(post);
-      card.classList.add("reveal");
-      grid.appendChild(card);
+    var groups = BlogCatalog.groups(blogPosts);
+    grid.replaceChildren();
+    groups.forEach(function (group) {
+      grid.appendChild(buildBlogFolder(group));
     });
-    if (status) status.textContent = posts.length
-      ? blogText("blogResults", { start: start + 1, end: end, total: posts.length })
-      : t("blogNoResults");
-    document.getElementById("blog-empty").hidden = posts.length !== 0;
-    document.getElementById("blog-pagination").hidden = totalPages <= 1;
-    document.getElementById("blog-prev").disabled = blogPage <= 1;
-    document.getElementById("blog-next").disabled = blogPage >= totalPages;
-    var pageList = document.getElementById("blog-page-list");
-    pageList.innerHTML = "";
-    blogPageNumbers(totalPages).forEach(function (page) {
-      if (page === null) {
-        pageList.appendChild(el("span", { class: "blog-page-ellipsis", "aria-hidden": "true" }, "…"));
-        return;
-      }
-      var attrs = {
-        class: "blog-page",
-        type: "button",
-        "data-blog-page": String(page),
-        "aria-label": blogText("blogPageAria", { page: page }),
-        "aria-controls": "blog-grid"
-      };
-      if (page === blogPage) attrs["aria-current"] = "page";
-      pageList.appendChild(el("button", attrs, String(page)));
-    });
-  }
-
-  function setupBlogPagination() {
-    readBlogLocation();
-    var input = document.getElementById("blog-search");
-    var pagination = document.getElementById("blog-pagination");
-    if (!input || !pagination) return;
-    input.addEventListener("input", function () {
-      blogSearch = input.value.trim();
-      blogPage = 1;
-      renderBlogCards();
-      writeBlogLocation(false);
-    });
-    pagination.addEventListener("click", function (event) {
-      var button = event.target.closest("button");
-      if (!button || button.disabled || !blogPosts) return;
-      var action = button.getAttribute("data-blog-action");
-      var page = action === "prev" ? blogPage - 1 : (action === "next" ? blogPage + 1 : Number(button.getAttribute("data-blog-page")));
-      if (page === blogPage) return;
-      blogPage = page;
-      renderBlogCards();
-      writeBlogLocation(true);
-      var focused = action ? document.getElementById("blog-" + action) : null;
-      if (!focused || focused.disabled) focused = pagination.querySelector('[aria-current="page"]');
-      if (focused) focused.focus({ preventScroll: true });
-    });
-    window.addEventListener("popstate", function () {
-      readBlogLocation();
-      renderBlogCards();
-    });
+    if (status) status.textContent = t("blogOverview")
+      .replace("{topics}", groups.length).replace("{total}", blogPosts.length);
   }
 
   function renderToolsCards() {
@@ -745,11 +603,11 @@
     updStaticText();
     renderCards(!isInitial);
     if (!isInitial) {
-      renderBlogCards();
+      renderBlogFolders();
       document.querySelectorAll(".card").forEach(function (c) { c.classList.add("reveal"); });
     }
     startTyping();
-    localStorage.setItem("lang", lang);
+    try { localStorage.setItem("lang", lang); } catch (e) {}
   }
 
   function navScroll() {
@@ -859,14 +717,19 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    setupBlogPagination();
+    // Keep bookmarked links to the former homepage search/pagination usable.
+    var legacy = new URLSearchParams(window.location.search);
+    if (legacy.has("blogPage") || legacy.has("blogSearch")) {
+      window.location.replace(BlogCatalog.listURL(BlogCatalog.readState(window.location.search), "blog/"));
+      return;
+    }
     applyLang(lang, true);
+    renderBlogFolders();
     navScroll();
     footerYear();
     bgCanvas();
     loadBlogPosts(function () {
-      renderBlogCards();
-      if (blogPosts) writeBlogLocation(false);
+      renderBlogFolders();
       observeCards();
     });
     var toggle = document.getElementById("lang-toggle");
