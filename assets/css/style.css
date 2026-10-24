@@ -13,8 +13,8 @@
   --shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.7);
   --radius: 16px;
   --maxw: 1120px;
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-sans: "Ubuntu", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Ubuntu Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -32,6 +32,9 @@ body {
 }
 
 a { color: inherit; text-decoration: none; }
+
+button, input, select, textarea { font-family: inherit; }
+code, kbd, pre, samp, tt { font-family: var(--font-mono); }
 
 #bg-canvas {
   position: fixed;
@@ -642,7 +645,14 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 5vw, 2.5
 .post-page { padding-top: 5rem; }
 .post-wrap.markdown-body {
   background: transparent;
-  font-family: "JetBrains Mono", var(--font-mono);
+  font-family: var(--font-sans);
+}
+.markdown-body {
+  --fontStack-monospace: var(--font-mono);
+  font-family: var(--font-sans);
+}
+.markdown-body pre, .markdown-body code, .markdown-body kbd, .markdown-body samp, .markdown-body tt {
+  font-family: var(--font-mono);
 }
 .markdown-body div.math-slot {
   min-width: 0;

@@ -24,6 +24,8 @@ David 的个人主页,托管在 GitHub Pages:https://fizgrad.github.io
 ```
 index.html              页面主结构
 assets/css/style.css    样式
+assets/css/fonts.css    Ubuntu / Ubuntu Mono 可变字体
+assets/fonts/           本地字体文件与许可证
 assets/js/main.js       i18n 字典、项目数据、卡片渲染、动画背景
 assets/js/blog-catalog.js  博客主题定义与共用导航逻辑
 assets/js/blog-list.js   文章列表、主题切换、搜索与分页

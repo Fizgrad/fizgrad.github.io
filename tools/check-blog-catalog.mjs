@@ -43,7 +43,7 @@ if (!process.argv.includes('--browser')) process.exit(0);
 const output = mkdtempSync('/tmp/blog-catalog-check-');
 let fixture = null;
 let failPosts = false;
-const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.md': 'text/plain', '.png': 'image/png' };
+const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.md': 'text/plain', '.png': 'image/png', '.woff2': 'font/woff2' };
 const server = createServer((request, response) => {
   let pathname;
   try { pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname); }

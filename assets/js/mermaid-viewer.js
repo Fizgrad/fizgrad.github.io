@@ -13,6 +13,29 @@
   var listenersReady = false;
   var resizePending = false;
 
+  function config() {
+    var font = global.getComputedStyle(document.documentElement).getPropertyValue("--font-sans").trim()
+      || '"Ubuntu", sans-serif';
+    return {
+      startOnLoad: false,
+      theme: "dark",
+      securityLevel: "strict",
+      fontFamily: font,
+      themeVariables: { fontFamily: font }
+    };
+  }
+
+  function render() {
+    function run() { return global.mermaid.run(); }
+    // Measure diagram labels with the web font, not a temporary fallback font.
+    if (document.fonts && typeof document.fonts.load === "function") {
+      return document.fonts.load("16px " + config().fontFamily)
+        .catch(function () {})
+        .then(run);
+    }
+    return run();
+  }
+
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
   }
@@ -387,6 +410,8 @@
   }
 
   global.MermaidViewer = Object.freeze({
+    config: config,
+    render: render,
     createDiagram: createDiagram,
     refresh: refresh,
     updateLabels: updateLabels
