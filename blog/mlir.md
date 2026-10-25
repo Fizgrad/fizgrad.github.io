@@ -377,6 +377,9 @@ Trait 主要声明局部且静态的性质，Interface 则带有可调用的方�
 Operation 实现 Interface 后，仍需要提供符合契约的行为实现；写上名字并不会自动
 生成完整算法。
 
+第 14.5 节在 Mini Dialect 中实现一个具体内存效果接口，用标准 Canonicalizer/CSE
+观察“纯计算被合并、两次写入保留、未知效果保守处理”的差别。
+
 # 5. Tensor、Shape 与 Linalg
 
 Tensor 编译最容易混淆三件事：Type 中知道多少 Shape、运行期怎样取得动态维度，以及
@@ -1258,9 +1261,9 @@ build/bin/llc output.ll -filetype=obj -o output.o
 
 ## 14.4 一个可编译的最小 Dialect 工程
 
-下面不是只供阅读的 ODS 片段，而是一套在 LLVM/MLIR 22 上实际完成 TableGen、C++
-编译、Dialect Conversion、LLVM IR 翻译和本机执行的独立工程。为了让关键依赖集中可见，
-文件采用扁平布局；大型项目再拆成 `include/`、`lib/`、`tools/` 和 `test/`。
+下面的独立工程面向 LLVM/MLIR 22，依次完成 TableGen、C++ 编译、Dialect Conversion、
+LLVM IR 翻译和本机执行。文件采用扁平布局；大型项目再拆成 `include/`、`lib/`、`tools/`
+和 `test/`。
 
 ```text
 mini-mlir/
@@ -1291,6 +1294,10 @@ include(TableGen)
 include(AddLLVM)
 include(AddMLIR)
 include(HandleLLVMOptions)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  add_compile_options(-fno-rtti)
+endif()
 
 include_directories(${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR})
@@ -1383,6 +1390,8 @@ def Mini_AddOp : Mini_Op<"add", [Pure, SameOperandsAndResultType]> {
 
 ```cpp
 #include "MiniDialect.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "mlir/IR/OpImplementation.h"
 
 using namespace mlir;
@@ -1507,8 +1516,10 @@ cmake --build build --target mini-opt
 ```
 
 如果链接器报告 `typeinfo for mlir::Pass` 等错误，通常是工程的 RTTI/异常选项与所链接
-MLIR 不一致。应使用同一 Build/Install Tree，并让 `LLVMConfig.cmake` 和
-`HandleLLVMOptions` 传播一致选项；不要混用另一份 LLVM 头文件或静态库。
+MLIR 不一致。应使用同一 Build/Install Tree；本例不使用 C++ `dynamic_cast/typeid`，
+用 `-fno-rtti` 避免为派生类生成对基础库 C++ typeinfo 的额外依赖。MLIR 自己的 TypeID
+机制仍然可用，不等于关闭了 Operation 的类型识别。不要混用另一份 LLVM 头文件或
+静态库，也不要用这个选项掩盖真正的 ABI 不匹配。
 
 只运行自定义 Pass，可以直接看到阶段出口：
 
@@ -1580,6 +1591,115 @@ MiniOps.td
 这套工程为了最小化只实现 `mini.add`。真正扩展时，应把 Dialect、Conversion、工具和
 测试拆成独立 Target，并为每个阶段分别添加 parser/verifier、Conversion 残留检查、
 `lit`/`FileCheck` 与端到端执行测试。
+
+## 14.5 给 Mini Operation 实现副作用接口
+
+接口的价值在于让通用 Pass 读取自定义语义。扩展版工程在
+[mlir-effects](../tools/compiler-lab/mlir-effects/CMakeLists.txt)，仍使用 `mini` Dialect，
+但增加 `mini.touch` 和 `mini.unknown`，工具名为 `mini-effects-opt`。它独立构建，不要
+把两份 Mini Dialect 的定义同时链接到一个工具中。
+
+### 14.5.1 定义三类不同契约的 Operation
+
+[MiniOps.td](../tools/compiler-lab/mlir-effects/MiniOps.td) 中的关键定义是：
+
+```tablegen
+def Mini_AddOp : Mini_Op<"add", [Pure]> {
+  let arguments = (ins I32:$lhs, I32:$rhs);
+  let results = (outs I32:$result);
+  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+}
+
+def Mini_TouchOp : Mini_Op<"touch", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let arguments = (ins I32:$value);
+  let assemblyFormat = "$value attr-dict";
+}
+
+def Mini_UnknownOp : Mini_Op<"unknown"> {
+  let arguments = (ins I32:$value);
+  let assemblyFormat = "$value attr-dict";
+}
+```
+
+`mini.add` 表示不带额外溢出承诺的 i32 模加法，没有内存效果，可以安全推测执行。
+`mini.touch` 表示向一个外部可观察资源写入数值；`mini.unknown` 暂不提供效果模型。
+写出正确的参数类型和 parser 语法，仍不足以告诉优化器这两种操作能否删除。
+
+### 14.5.2 声明接口后还要提供方法
+
+`DeclareOpInterfaceMethods` 生成 C++ 方法声明，具体效果由
+[MiniDialect.cpp](../tools/compiler-lab/mlir-effects/MiniDialect.cpp) 返回：
+
+```cpp
+void TouchOp::getEffects(
+    llvm::SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
+  effects.emplace_back(MemoryEffects::Write::get(),
+                       SideEffects::DefaultResource::get());
+}
+```
+
+TableGen 中的名字是 `MemoryEffectsOpInterface`，生成的 C++ 接口叫
+`MemoryEffectOpInterface`。Write 和 DefaultResource 表示对默认抽象资源的写效果，
+不是说所有操作真的访问同一个物理地址。这是一个保守的模型：通用 Pass 不必认识
+`mini.touch` 的类名，也能得知它不是无效果的纯计算。
+
+把 EffectInstance 关联到具体 SSA 值或更细的资源，可以暴露更精确的依赖；但不能为了
+让 CSE 生效，就把日志、设备 I/O、原子通知等操作声明为无效果。
+
+### 14.5.3 运行通用 Pass 观察结果
+
+```bash
+cmake -S tools/compiler-lab/mlir-effects -B /tmp/mlir-effects-lab -G Ninja \
+  -DMLIR_DIR=/path/to/llvm-install/lib/cmake/mlir \
+  -DCMAKE_CXX_COMPILER=/path/to/llvm-install/bin/clang++
+cmake --build /tmp/mlir-effects-lab --target mini-effects-opt
+
+/tmp/mlir-effects-lab/bin/mini-effects-opt \
+  tools/compiler-lab/mlir-effects/effects.mlir --canonicalize --cse
+```
+
+输入含一个不用的 Add、两个相同的 Add、两次 Touch 和一个 Unknown。核心输出是：
+
+```mlir
+func.func @effects(%x: i32, %y: i32) -> i32 {
+  %sum = mini.add %x, %y : i32
+  mini.touch %sum
+  mini.touch %sum
+  mini.unknown %x
+  return %sum : i32
+}
+```
+
+纯 Add 合并为一个，Touch 即使参数相同也保留两次，Unknown 因缺少可证明的效果信息
+而保守保留。本工具只观察优化后的自定义 IR，没有实现 Touch/Unknown 的 LLVM Lowering；
+它们不能直接交给 `mlir-translate --mlir-to-llvmir`。增加 Lowering 时，还要让实际生成的
+操作兑现这里声明的效果。
+
+### 14.5.4 无内存效果与可推测执行要分开
+
+`NoMemoryEffect` 只说明内存效果为空；`Pure` 还包含始终可推测执行的约束。一个可能
+因非法参数触发 UB 的计算，不应因为“不读写内存”就无条件移到原本不会执行它的路径，
+例如将条件分支内的除法提前到分支前，可能引入原程序没有的除零。
+
+Region 内操作的效果需要通过正确的递归或 Region 接口暴露。只看一个外层 Operation
+没有直接 Store，就忽略其 Region 内的写入，也会让通用优化误删行为。效果、推测执行、
+控制流和同步语义共同限定变换，并非一个 Pure 标志能替整个 Dialect 完成建模。
+
+### 14.5.5 同样的方法用于 Shape、Tiling 和 Bufferization
+
+| 接口 | 自定义 Operation 需要回答的问题 | 通用算法如何使用 |
+|---|---|---|
+| `InferTypeOpInterface` | 给定输入和属性，能推出什么结果类型 | 推导并核对类型，而不是凭名字猜 Shape |
+| `TilingInterface` | 迭代域是什么，给定 Offset/Size 怎样生成分块操作 | 按统一接口执行 Tiling，不硬编码所有算子 |
+| `DestinationStyleOpInterface` | 哪些是目的操作数，结果与哪个目的值对应 | 表达 DPS 关联，但不单独证明可原地覆盖 |
+| `BufferizableOpInterface` | 哪些值别名，哪些操作读写内存，如何生成 Buffer 形式 | One-Shot Bufferize 据此分析冲突和复制需求 |
+
+例如一个结果与目标 Tensor 绑定，只说明存在目的关系；如果旧 Tensor 的值还被其他
+路径读取，原地更新仍可能冲突。动态 Shape 也必须生成或保留必要的运行期计算与检查，
+不能用类型推导接口凭空制造静态尺寸。接口实现错误会把错误假设传给多个通用 Pass，
+因此应该分别测试直接查询、标准优化和最终 Lowering 的行为。
+[MLIR 的接口与副作用模型](https://mlir.llvm.org/docs/Interfaces/)、[副作用与推测执行](https://mlir.llvm.org/docs/Rationale/SideEffectsAndSpeculation/)
 
 # 15. 测试与调试
 

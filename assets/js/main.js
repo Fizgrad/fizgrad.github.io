@@ -404,6 +404,20 @@
     grid.appendChild(buildReaderCard());
     grid.appendChild(buildChatCard());
     grid.appendChild(buildSystemsLabCard());
+    grid.appendChild(buildWordsCard());
+  }
+
+  function buildWordsCard() {
+    var title = lang === "en" ? "Word Practice" : "单词练习";
+    var card = el("article", { class: "card reader-card" });
+    card.style.setProperty("--card-glow", "#34d399");
+    card.appendChild(el("div", { class: "card-top" }, [el("div", { class: "card-icon" }, "Aa"), arrow()]));
+    card.appendChild(el("h3", { class: "card-title" }, title));
+    card.appendChild(el("p", { class: "card-desc" }, lang === "en"
+      ? "GRE vocabulary: meaning choices, spelling, and mistake review."
+      : "GRE 单词：选择释义、释义拼写与错词复习。"));
+    card.appendChild(el("a", { class: "card-link", href: "words.html", "aria-label": title }));
+    return card;
   }
 
   function buildSystemsLabCard() {

@@ -722,6 +722,168 @@ llvm.loop.mustprogress
 
 原则：**不能证明 metadata 仍然正确，就删除或更新它。**
 
+## 3.8 GlobalVariable、初始化与符号身份
+
+### 3.8.1 全局值表示地址，不是对象内容
+
+```llvm
+@counter = internal global i32 0, align 4
+@label = private unnamed_addr constant [3 x i8] c"hi\00"
+@external_count = external global i32
+
+define i32 @read_counter() {
+  %value = load i32, ptr @counter, align 4
+  ret i32 %value
+}
+```
+
+`@counter` 是指向存储区域的全局地址，`%value` 才是读取到的整数。
+`GV->getType()` 在 opaque pointer IR 中通常是 `ptr`，`GV->getValueType()` 才是 `i32`。
+创建 GlobalVariable 时传入的是内容类型，不应再包一层指针。`external_count` 没有
+initializer，是声明；有 initializer 的定义也不一定具有内部链接。
+
+initializer 必须是类型匹配的 LLVM Constant。整数、零初始化、数组和可表示为常量的
+地址表达式都可以，但任意 CallInst 不能放进去。“常量地址表达式”并不要求此刻已知道
+最终装载地址，相关地址可以在目标文件中留下重定位。
+
+### 3.8.2 从静态初值到运行期初始化
+
+若全局初值是函数调用的结果，应先定义存储和静态初值，再让初始化函数执行计算：
+
+```llvm
+@lab_counter = internal global i32 0
+
+declare i32 @lab_runtime_init()
+
+define internal void @lab.global.init() {
+  %value = call i32 @lab_runtime_init()
+  store i32 %value, ptr @lab_counter
+  ret void
+}
+```
+
+模块构造函数通过 `llvm.global_ctors` 注册，C++ API 可使用
+`appendToGlobalCtors(M, Init, 65535)`，不必手工重建数组。优先级数值小的先执行，相同
+优先级的顺序不保证；ELF 路径通常将其落实到初始化数组。它不是替源语言解决跨翻译
+单元初始化依赖的万能机制，函数内局部 static 的首次进入与 guard 协议也属于另一条路径。
+
+运行期初始化会写存储，所以不能把这类对象标为 LLVM `constant`。`isConstant=true`
+承诺对象内容不会被运行期修改，不只是说“这个 GlobalVariable 的地址固定”。
+
+完整的 [GlobalBuilder.cpp](../tools/compiler-lab/llvm-pass/GlobalBuilder.cpp) 从已有 IR
+读取 Module，沿用其 DataLayout，构造全局对象、初始化函数和验证结果的 main。核心
+对象创建是：
+
+```cpp
+auto *G = new GlobalVariable(
+    M, I32, false, GlobalValue::InternalLinkage,
+    ConstantInt::get(I32, 0), "lab_counter");
+G->setAlignment(M.getDataLayout().getABITypeAlign(I32));
+```
+
+上面是函数内片段；完整工具还创建函数类型、BasicBlock、调用与 Store，并调用
+`verifyModule`。用后文第 16.3 节的 CMake 工程构建 `make-global` 后，在仓库根目录执行：
+
+```bash
+clang -S -emit-llvm tools/compiler-lab/validation/base.c -o /tmp/base.ll
+/tmp/llvm-pass-lab/make-global /tmp/base.ll > /tmp/created.ll
+opt -passes=verify -disable-output /tmp/created.ll
+clang /tmp/created.ll tools/compiler-lab/validation/runtime.c -o /tmp/global-example
+/tmp/global-example
+```
+
+Runtime 返回 42，构造函数把它写入全局变量，main 检查值为 42 后返回 0。工具拒绝输入
+中与其保留符号冲突的实体，避免静默覆盖原来的 main 或误用已有的同名函数。
+
+### 3.8.3 Linkage、Visibility 与可去重对象
+
+| Linkage | 主要约束 | 不能据此推断什么 |
+|---|---|---|
+| `internal` | 实体只在当前 LLVM Module 内可见 | Module 永远等于一个源文件；LTO 可以合并 Module |
+| `private` | 更局部的编译器实体，通常不形成普通目标文件符号 | 它具有可供外部链接的稳定名字 |
+| `external` | 默认的外部链接关系，也可用于有初值的定义 | 它必定是一个无初值声明 |
+| `weak` | 链接选择可能换成另一个定义 | 当前看到的 initializer 必定是最终初值 |
+| `linkonce_odr` / `weak_odr` | 允许 ODR 等价的多份定义 | 可以让不同语义的定义随意合并 |
+| `common` | 零初值的暂定定义式合并，另有格式约束 | 可以用于任意非零、只读或指定 section 的对象 |
+| `available_externally` | 定义可供优化使用，但不在当前目标文件中发射该定义 | 编译器仍会输出一份可供链接的函数或数据 |
+
+Visibility，符号可见性，与 linkage 不是同一维度。`hidden` 的外部链接符号不等于
+`internal`；它可能在同一链接结果中被其他目标文件引用。COMDAT 则允许链接器按组选择
+等价定义，不能把一个独立数据表移入组后还假定它会单独存活。
+
+`unnamed_addr` 表示对象地址身份不重要，可支持内容相同常量的合并；若程序用地址作
+身份标识，就不能随手添加。`local_unnamed_addr` 只给出当前 Module 范围的较弱保证。
+这些属性与 relocation、符号查找的联系见
+[目标文件、链接与装载](post.html?slug=object_linking)。
+
+### 3.8.4 修改全局对象前要区分的条件
+
+`hasInitializer()` 只回答是否有初值。`hasDefinitiveInitializer()` 还要求可依赖这个
+initializer，而 `hasUniqueInitializer()` 适合判断修改该份初值是否会体现在最终程序中。
+例如 ODR 等价的多份定义可能具有确定初值，却不保证最终选中你修改的那一份。
+这些判断也不意味着一个可写全局对象在任意读取位置仍保持初值。
+
+`externally_initialized` 会限制对初始化阶段初值的假设；TLS 表示每线程各有一份对象；
+Address Space 则依目标含义区分存储空间。对齐和大小应使用 Module 的 DataLayout，
+不能用编译器宿主机的 `sizeof` 推测交叉目标布局。指定 section、复制 COMDAT 或改变
+TLS model 都涉及 ABI 和链接契约，不只是换一个打印属性。
+
+若运行库、汇编或特定 section 的消费者持有 IR 看不到的引用，可以通过 `llvm.used`
+或相关辅助 API 表达保留需求；`llvm.compiler.used` 主要约束编译器侧的删除。最终链接器
+的垃圾回收、保留 section 和目标格式规则仍需一并检查。
+[GlobalVariable API](https://llvm.org/doxygen/classllvm_1_1GlobalVariable.html)
+
+## 3.9 函数属性是可以被优化器依赖的契约
+
+### 3.9.1 读写效果不等于完整副作用
+
+```llvm
+declare void @observe(ptr captures(none)) memory(argmem: read)
+
+define i32 @read_twice(ptr %p) {
+  %before = load i32, ptr %p, align 4
+  call void @observe(ptr %p)
+  %after = load i32, ptr %p, align 4
+  %sum = add i32 %before, %after
+  ret i32 %sum
+}
+```
+
+`memory(argmem: read)` 限定调用的内存效果：它可以读取参数关联的内存，但不能在模型
+所覆盖的内存中写入。GVN 可以据此将第二次 Load 复用为 `%before`。示例保留了调用，
+因为内存属性没有同时承诺函数一定返回、不会展开异常等其他性质：
+
+```bash
+opt -passes='function(gvn),verify' -S \
+  tools/compiler-lab/validation/attributes.ll
+```
+
+`memory(none)` 也不能单独当成“可随意提前、删除、执行任意次数”的证明。可移动性还要
+考虑异常、终止、`convergent`、poison 以及具体调用协议；原子与同步语义更不能被一张
+读写效果表替代。
+
+### 3.9.2 参数保证与调用行为要分别理解
+
+| 属性 | 向优化器提供的信息 | 容易误用的地方 |
+|---|---|---|
+| `captures(none)` | 不捕获该指针的相应地址/访问能力 | 不表示函数不读、不写或不释放所指对象 |
+| `noalias` | 在规定的访问关系与动态作用域内，提供类似 restrict 的别名保证 | 不只是两个指针数值不相等，也不是任意场景都禁止两个只读指针相同 |
+| `nonnull` | 指针不能取空值，否则产生 poison | 不表示所指对象存活、足够大或一定能解引用 |
+| `dereferenceable(N)` | 满足规定条件下可安全读取 N 字节 | 不能从“地址看起来不空”推导出来 |
+| `noundef` | 传递的值不能含 undef/poison 的未定义位 | 与 `nonnull` 组合后，违反空值保证会在调用边界触发 UB |
+| `nounwind` | 调用不会按异常展开方式离开 | 不等于不会终止、不会死循环或没有其他副作用 |
+| `willreturn` | 按其语义保证控制流返回当前调用栈 | 不等于无内存效果或不展开异常 |
+| `speculatable` | 在其约束内允许推测执行 | 仍不能忽略指令依赖、内存同步及其他适用限制 |
+
+返回值上的 `noalias` 与参数上的规则也不同，例如用于描述类似分配器返回的新存储；不能
+把任意返回已有全局对象地址的函数标成它。`nonnull` 与 `dereferenceable` 的关系还受
+地址空间及 `null_pointer_is_valid` 等语义影响，不应在所有目标上一概互推。
+
+属性不是“希望编译器相信我的优化提示”。前端、分析或程序员必须先建立相应保证，
+Transform 复制函数或调用时也不能把只对原调用成立的属性无条件搬走。错误的强保证
+可能让后续 Pass 合法地删掉必要检查，而 Verifier 未必能发现运行期承诺被违背。
+[LLVM 参数与函数属性](https://llvm.org/docs/LangRef.html#parameter-attributes)
+
 # 4. Clang 前端知识点
 
 ## 4.1 Clang 编译流程
@@ -2324,6 +2486,65 @@ flowchart TD
 
 
 
+### 7.3.1 LoopSimplify 为什么先整理形状
+
+假设 `left` 和 `right` 都是循环外的块，并且分别直接进入 `header`。Header 既要区分
+两个外部入口，又要处理从 body 返回的回边；每个 Loop Pass 都单独处理这些形状会很
+复杂。LoopSimplify 建立规范入口和退出结构，通常包括 Preheader、唯一回边及 Dedicated
+Exits。Dedicated Exit 表示这个 Exit Block 的前驱都在循环内，而不是说只有一个退出块。
+
+对 [loop.ll](../tools/compiler-lab/validation/loop.ll) 执行：
+
+```bash
+opt -passes='function(loop-simplify,lcssa),verify' -S \
+  tools/compiler-lab/validation/loop.ll
+```
+
+原来 Header 的 i 有三个 incoming：
+
+```llvm
+%i = phi i32 [0, %left], [0, %right], [%next, %body]
+```
+
+规范化会把两个外部前驱接到 `header.preheader`，再进入 Header：
+
+```llvm
+header.preheader:
+  br label %header
+
+header:
+  %i = phi i32 [%next, %body], [0, %header.preheader]
+```
+
+规范化不代表循环一定至少执行一次，也不是在证明 Load 可以无条件移入 Preheader。
+零次循环、无效地址和异常行为仍是 LICM 的独立合法性条件。不可约控制流、间接跳转等
+也可能限制能建立的规范形状，Loop Pass 需要检查自己的输入契约，而不是假定任何 SCC
+都能变成这种自然循环。
+
+### 7.3.2 LCSSA 把跨循环使用收口到 Exit PHI
+
+LCSSA 是 Loop-Closed SSA。循环内定义、循环外使用的值，先经 Exit Block 的 PHI
+再被外部使用：
+
+```llvm
+; before
+exit:
+  ret i32 %acc
+
+; after
+exit:
+  %acc.lcssa = phi i32 [%acc, %header]
+  ret i32 %acc.lcssa
+```
+
+这个 PHI 即使只有一个 incoming 也有工程意义：复制、拆分或旋转循环时，外部 Use 先
+集中到明确的边界，不必在整个函数任意位置寻找每个循环内部定义的使用。不同退出路径
+可能带出不同的值，不能简单把一个 Exit PHI 的 incoming 值替换到全部路径。
+
+LoopSimplify 整理 CFG，LCSSA 整理循环与外部的 def-use 边界，SCEV 再分析数值变化；
+它们不互相替代。修改循环后，维护 LoopInfo/DT 也不代表 LCSSA 自动仍成立。
+[循环规范形式与 LCSSA](https://llvm.org/docs/LoopTerminology.html)
+
 ## 7.4 ScalarEvolution
 
 ScalarEvolution，简称 SCEV。
@@ -2434,6 +2655,47 @@ Instruction scheduling
 一句话：AA 能回答“可否证明不冲突”，不能单独回答“都能如何优化”；它需要和 Dominator、MemorySSA/ModRef、目标语义一起做最终裁决。
 
 
+
+### 7.5.2 循环依赖与运行期别名检查
+
+下面的数组相加每次写一个输出，但参数没有承诺互不重叠：
+
+```c
+void add_arrays(float *out, const float *a, const float *b, int n) {
+    for (int i = 0; i < n; ++i)
+        out[i] = a[i] + b[i];
+}
+```
+
+若 `out == a + 1`，一次迭代的写入可能改变下一次迭代的输入，不能把连续元素直接当作
+完全独立的 Lane。指针数值不同也不代表访问区间不重叠；还要结合长度、步长和访问大小。
+
+当静态分析无法直接排除重叠，Vectorizer 可以为已满足其他条件的循环生成版本选择：
+
+```mermaid
+flowchart TD
+    E["循环入口：保留零次执行检查"] --> C{"长度、地址依赖与目标条件满足"}
+    C -->|是| V["向量主循环与尾部处理"]
+    C -->|否| S["保持语义的标量路径"]
+    V --> X["退出"]
+    S --> X
+```
+
+LLVM 22 的 x86-64-v3 目标可以用以下命令观察本例的版本化；它只生成 IR，不要求本机
+CPU 实际执行 AVX2：
+
+```bash
+clang -O3 -march=x86-64-v3 -fno-discard-value-names -S -emit-llvm \
+  tools/compiler-lab/validation/vector.c -o /tmp/vector.ll
+```
+
+`vector.memcheck` 中检查相关地址关系，`vector.body` 使用宽向量 Load/Store，失败分支
+保留标量实现。目标、成本模型或循环形状不同，输出不保证总有这些块。运行期检查和
+尾循环本身也有成本，合法的循环可能仍不值得向量化。
+
+显式使用 restrict/noalias 可以提供更强的前提，但调用者必须真的满足契约，不能为了
+消除检查而给可能重叠的参数加标志。像 `a[i] = a[i-1] + 1` 这样的真实循环携带依赖，
+也不能仅靠一个地址不相等的判断就变成独立迭代。[LLVM 向量化与运行期检查](https://llvm.org/docs/Vectorizers.html)
 
 ## 7.6 MemorySSA
 
@@ -3661,6 +3923,132 @@ next_code:
 
 > Branch relaxation 主要不是高级性能优化，而是后端合法性修复。它根据最终或近似最终代码布局估算分支距离，如果短分支跳不到目标，就改写为反向条件分支加长跳转，必要时迭代处理，因为代码大小变化会影响其他分支距离。
 
+## 10.10 异常清理与栈展开
+
+### 10.10.1 一次调用有正常和异常两条后继
+
+在 Linux/ELF 的常见 C++ 异常实现中，函数里已经构造的局部对象需要在离开其作用域时
+析构；正常返回和异常传播都必须保持这个规则。
+[cleanup.cpp](../tools/compiler-lab/validation/cleanup.cpp) 中的关键部分是：
+
+```cpp
+struct Guard {
+    ~Guard() noexcept { ++cleaned; }
+};
+
+void work(bool fail) {
+    Guard guard;
+    maybe_throw(fail);
+}
+```
+
+在仓库根目录观察未优化 IR，并运行完整示例：
+
+```bash
+clang++ -O0 -S -emit-llvm tools/compiler-lab/validation/cleanup.cpp -o /tmp/cleanup.ll
+clang++ tools/compiler-lab/validation/cleanup.cpp -o /tmp/cleanup-example
+/tmp/cleanup-example
+```
+
+程序分别走一次正常路径和一次抛异常路径，打印 `2`。IR 中 `work` 的调用可以简化为
+以下结构，省略了具体 ABI 名字和临时对象的细节：
+
+```llvm
+invoke void @maybe_throw(i1 %fail)
+    to label %normal unwind label %cleanup
+
+normal:
+  call void @destroy_guard(ptr %guard)
+  ret void
+
+cleanup:
+  %exception = landingpad { ptr, i32 } cleanup
+  call void @destroy_guard(ptr %guard)
+  resume { ptr, i32 } %exception
+```
+
+`invoke` 是 Terminator，正常后继与异常后继都属于 CFG。`landingpad` 接收异常处理
+运行库提供的信息；清理完成后，`resume` 继续传播同一个异常。Personality Function，
+个性函数，参与异常类型匹配及处理动作选择，不能把它当成普通用户回调。
+
+这是 Itanium 风格 EH 的示意，不是所有目标的统一 IR 模板。Windows 等路径会使用
+funclet、`catchpad`、`cleanuppad` 等机制。`call` 没有本地 unwind 后继，也不自动表示
+“调用绝不抛异常”；若本地无需清理，异常仍可能继续向调用者展开。
+[LLVM 异常处理机制](https://llvm.org/docs/ExceptionHandling.html)
+
+### 10.10.2 异常表和恢复寄存器的规则不是一回事
+
+运行库既要知道“哪一段代码有清理或 catch”，也要知道“如何还原上一层栈帧”。常见
+ELF/DWARF 路径中，两类信息协作：
+
+| 信息 | 回答的问题 | 常见承载位置 |
+|---|---|---|
+| EH 区域与动作表 | 当前调用点需要执行什么清理、由谁匹配异常 | LSDA，常见于 `.gcc_except_table` |
+| Call Frame Information | 当前 PC 上如何计算 CFA、恢复保存的寄存器 | `.eh_frame` 中的 CIE/FDE |
+| Personality | 解释异常与动作信息，决定处理方式 | 运行库函数及表中的关联引用 |
+
+CFA 是 Canonical Frame Address，规范帧地址，是一条用寄存器和偏移计算出的展开基准，
+不是“当前 sp”的别名。FDE 将代码地址范围和 CFI 规则关联；规则在序言、函数体和尾声
+可能不同。有展开信息并不要求该函数一定包含 C++ catch。
+
+### 10.10.3 用 ARM64 的实际序言读取 CFI
+
+```bash
+clang++ -target aarch64-linux-gnu -O1 -S \
+  -fno-omit-frame-pointer -funwind-tables \
+  tools/compiler-lab/validation/frame.cpp -o /tmp/frame.s
+```
+
+本例调用其他函数后还要使用原参数，所以保存 x19，并形成 32 字节栈帧。下面保留
+序言及相应规则：
+
+```asm
+stp x29, x30, [sp, #-32]!
+.cfi_def_cfa_offset 32
+str x19, [sp, #16]
+mov x29, sp
+.cfi_def_cfa w29, 32
+.cfi_offset w19, -16
+.cfi_offset w30, -24
+.cfi_offset w29, -32
+```
+
+此位置的 CFA 等于 `x29 + 32`，保存的返回地址 x30 在 `CFA - 24` 的内存中，旧 x29
+在 `CFA - 32`，x19 在 `CFA - 16`。`.cfi_*` 是汇编指令流旁的元数据指令，不是 CPU
+执行的“栈恢复指令”。汇编器据此生成展开表，Unwinder 再按当前 PC 对应的规则读取。
+
+```mermaid
+flowchart TD
+    R["当前寄存器 x29"] --> C["按 CFI 计算 CFA = x29 + 32"]
+    C --> M["读取栈内存 CFA - 24"]
+    M --> P["恢复上一层返回地址 x30"]
+    T[".eh_frame 中按 PC 选择的规则"] --> C
+    T --> M
+```
+
+在 `stp` 执行前后，sp 和保存槽位的状态不同；不能用函数体中间的一套规则覆盖整个
+函数范围。尾声恢复寄存器后还要切回对应规则。省略帧指针也可以通过正确 CFI 展开，
+保留 x29 却不能替错误的 CFI 兜底。
+
+### 10.10.4 Transform 为什么需要关心展开
+
+新增调用、调整 sp、移动保存指令、Shrink Wrapping 或拆出 helper，都会改变某些 PC
+上的展开状态。不能移动机器指令而原样留下失配的 CFI，也不能把 caller 的恢复规则
+直接复制进拥有新栈帧的 helper。
+
+IR 阶段同样不能将有本地异常清理的 `invoke` 简化成不等价的 `call`，或删除异常边后
+忘记清理 PHI 与 EH 结构。`nounwind`、tail/musttail、目标 ABI 和异步采样/展开要求都会
+影响可做的变换。验证至少同时检查正常执行、异常清理、最终汇编和展开表：
+
+```bash
+clang++ -O1 -g -c tools/compiler-lab/validation/cleanup.cpp -o /tmp/cleanup.o
+llvm-dwarfdump --eh-frame /tmp/cleanup.o
+llvm-readobj --sections --relocations /tmp/cleanup.o
+```
+
+单次异常测试没失败，不保证序言或尾声每个指令边界都能正确展开。若变换要求支持
+异步展开，测试还需要覆盖相应边界；只比较 `.text` 大小也会漏掉新增展开表的成本。
+
 # 11. TableGen
 
 TableGen 是 LLVM 后端非常重要的描述语言。
@@ -4228,6 +4616,97 @@ for (Instruction *I : ToErase)
 
 
 
+## 16.3 一个可加载的 MulToShift 工程
+
+前面的 `run()` 说明 Pass 的接口，但还缺少构建、注册、加载和真正的变换。
+[llvm-pass 工程](../tools/compiler-lab/llvm-pass/CMakeLists.txt) 包含
+[MulToShift.cpp](../tools/compiler-lab/llvm-pass/MulToShift.cpp)、
+[cases.ll](../tools/compiler-lab/llvm-pass/cases.ll) 和前面使用的 GlobalBuilder。
+
+```bash
+cmake -S tools/compiler-lab/llvm-pass -B /tmp/llvm-pass-lab -G Ninja \
+  -DLLVM_DIR=/path/to/llvm-install/lib/cmake/llvm \
+  -DCMAKE_CXX_COMPILER=/path/to/llvm-install/bin/clang++
+cmake --build /tmp/llvm-pass-lab
+
+opt -load-pass-plugin /tmp/llvm-pass-lab/MulToShift.so \
+  -passes='function(mul-to-shift),verify' -S \
+  tools/compiler-lab/llvm-pass/cases.ll
+```
+
+这些命令面向 LLVM 22 与 Linux，头文件、`LLVMConfig.cmake` 和加载插件的 `opt` 必须
+来自兼容安装。CMake 使用 `add_llvm_pass_plugin`，为同目录多个 Target 声明
+`PARTIAL_SOURCES_INTENDED`，而不是手工猜 LLVM 静态库的链接顺序。
+
+Pass 将标量整数乘二变为左移一位：
+
+```llvm
+; before
+%result = mul nuw nsw i32 %x, 2
+
+; after
+%result = shl nuw nsw i32 %x, 1
+```
+
+源文件先识别 `mul`、内容类型和常量操作数，创建插在原指令前面的 Shl，转移名字、
+`nuw/nsw` 和 DebugLoc，再 RAUW 并删除旧指令。遍历器先前移，避免删除当前节点后
+继续访问失效的 iterator。寄存器分配和最终指令选择仍由后端完成，IR 中改成 Shl 不
+意味着目标一定变快；本例不宣称超越 InstCombine 的既有优化。
+
+这里故意只处理位宽至少为 3 的标量整数，不处理浮点、向量和其他常量。`i2` 尤其值得
+保留为反例：位模式 `10` 按有符号数是 -2，`mul nsw i2 %x, 2` 中的乘数并不是正二。
+当 x=1 时乘法结果 -2 合法，而附带 `nsw` 的左移会产生 poison，因此不能照搬 i32 的
+带 flag 变换。窄整数、负数、poison 和额外语义标志都应先明确，再谈代数等价。
+
+## 16.4 注册名称不等于加入默认 Pipeline
+
+动态插件通过 `llvmGetPassPluginInfo()` 返回 API 版本和注册 Callback。它不是 Pass 的
+`run()`：加载时先执行注册，解析 `-passes` 时才根据名称创建 Pass。
+
+```cpp
+PB.registerPipelineParsingCallback(
+    [](StringRef Name, FunctionPassManager &FPM,
+       ArrayRef<PassBuilder::PipelineElement>) {
+      if (Name != "mul-to-shift")
+        return false;
+      FPM.addPass(MulToShiftPass());
+      return true;
+    });
+```
+
+该工程只注册手工 Pipeline 的名称，不会因为 `clang -fpass-plugin=...` 成功加载，就
+自动在默认优化 Pipeline 执行。如果需要默认阶段插入，另行选择 PassBuilder 的扩展点，
+再决定模块/函数 adaptor 和执行位置；不能把“加载成功”当成“变换已运行”。
+
+未修改 IR 时返回 `PreservedAnalyses::all()`；修改算术、但没动 CFG 时，只保存
+`CFGAnalyses`。SCEV 等依赖值表达式的分析可能失效，不能一并声明仍有效。
+[New PM 插件与注册接口](https://llvm.org/docs/WritingAnLLVMNewPMPass.html)
+
+## 16.5 让测试覆盖不应变换的输入
+
+```bash
+opt -load-pass-plugin /tmp/llvm-pass-lab/MulToShift.so \
+  -passes='function(mul-to-shift),verify' -S \
+  tools/compiler-lab/llvm-pass/cases.ll \
+  | FileCheck tools/compiler-lab/llvm-pass/cases.ll
+```
+
+测试不仅检查普通乘二和交换操作数后的 flag 保留，还检查乘三、浮点、向量和 `i2 nsw`
+保持原状。`CHECK-LABEL` 划分函数，避免一个函数的输出误满足另一个测试。文件中的
+`RUN` 行描述 lit 管线；`%plugin` 是测试环境需要自行配置的替换项，不是 lit 内置变量。
+独立工程也可以直接运行上面的命令，或使用
+[compiler-lab 的统一检查入口](../tools/compiler-lab/README.md)：
+
+```bash
+node tools/compiler-lab/check.mjs --prefix /path/to/llvm-install
+```
+
+它还会构建 Clang 工具、资源 Checker 和 MLIR 示例，检查循环、异常与链接路径；
+可选 FileCheck 和 Alive2 的路径配置见该目录的说明。
+
+Verifier 检查 IR 的结构约束，FileCheck 检查输出形状，两者仍不能替代第 17.5 节的语义
+验证。修改本例条件或保留的 flag 后，必须重新检查变换的适用域。
+
 # 17. LLVM 工程实践：从复现问题到验证修改
 
 LLVM 开发中，理解 IR 和 Pass 只是起点。一个修改真正可用，还要经过下面这条闭环：
@@ -4418,6 +4897,74 @@ poison 是否提前传播到控制流或副作用
 ```
 
 变换能够在常见输入上得到相同结果，不代表它保留了 LLVM IR 的全部语义集合。
+
+### 17.5.1 用 Alive2 检查一个看似合理的算术变换
+
+有符号整数除二不能直接替换成算术右移：前者向零取整，后者对负奇数的结果不同。
+本例的源 IR 和错误候选分别是：
+
+```llvm
+; div2-src.ll
+define i32 @divide2(i32 %x) {
+  %r = sdiv i32 %x, 2
+  ret i32 %r
+}
+```
+
+```llvm
+; div2-bad.ll
+define i32 @divide2(i32 %x) {
+  %r = ashr i32 %x, 1
+  ret i32 %r
+}
+```
+
+输入 -3 时，源程序返回 -1，错误候选返回 -2。Arithmetic Shift 的符号扩展没有错，错在
+把两种取整规则当成了同一种运算。加入负数偏置可以得到另一个候选：
+
+```llvm
+; div2-good.ll
+define i32 @divide2(i32 %x) {
+  %negative = lshr i32 %x, 31
+  %biased = add i32 %x, %negative
+  %r = ashr i32 %biased, 1
+  ret i32 %r
+}
+```
+
+`%negative` 为负数产生 1，非负数产生 0，使负奇数在右移前先向零方向调整。不能随手
+给偏置加法加 `nuw`：例如 -1 的无符号位模式是全 1，加 1 会回绕，而原除法在该输入
+上完全合法。
+
+准备与所用 LLVM IR 兼容的 Alive2 后，从仓库根目录运行：
+
+```bash
+alive-tv tools/compiler-lab/validation/div2-src.ll \
+  tools/compiler-lab/validation/div2-bad.ll
+
+alive-tv tools/compiler-lab/validation/div2-src.ll \
+  tools/compiler-lab/validation/div2-good.ll
+```
+
+Alive2 进行 Translation Validation，翻译验证，用求解器检查候选变换是否满足 LLVM IR
+的细化关系，并可给出失败输入。它不是把常见输入跑一遍，也不能简单用“所有 bit 模式
+的普通整数相等”替代 poison/undef 语义。
+
+循环验证有展开界限，跨过程变换不在其通用支持范围内；不支持的指令、求解超时和
+Unknown 不能作为验证成功。验证一个局部片段，也不能自动证明删除异常清理、修改并发
+协议或整个编译 Pipeline 都正确。[Alive2 的支持范围](https://github.com/AliveToolkit/alive2)
+
+还可用普通执行观察这个反例：
+
+```bash
+clang tools/compiler-lab/validation/div2-bad.ll \
+  tools/compiler-lab/validation/div2-test.c -o /tmp/div2-bad
+/tmp/div2-bad
+```
+
+测试会在 -3 上打印 `actual=-2 expected=-1` 并返回非零；改用 `div2-good.ll` 则检查整数
+边界及一组连续输入。执行测试提供具体回归证据，形式验证检查其支持语义下的更广条件，
+两者应与 Verifier、负例和完整程序测试配合使用。
 
 ## 17.6 不要凭汇编行数判断优化收益
 

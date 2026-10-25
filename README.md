@@ -12,6 +12,7 @@ David 的个人主页,托管在 GitHub Pages:https://fizgrad.github.io
 - 中英双语切换,自动记忆语言偏好
 - Systems Lab：系统编程练习、DeepSeek 静态评审与 Linux 本地测试
 - 博客按主题文件夹浏览，主题内支持文章列表、搜索和分页
+- GRE 单词练习：选择释义、释义拼写、错词复习与主页今日单词
 - 粒子连线背景、卡片悬浮渐变描边、滚动渐入动画
 - 响应式布局,支持 `prefers-reduced-motion`
 
@@ -36,6 +37,10 @@ blog/<slug>.en.md       对应英文正文
 tools/translate-blog.mjs  博客翻译、断点续跑与结构校验
 systems-lab.html        系统编程练习与 AI 评审页面
 tools/systems-lab/      题目契约、本地 runner、测试与参考实现
+tools/compiler-lab/     LLVM/Clang/MLIR 教程示例与编译执行检查
+words.html             单词练习与可搜索词表
+assets/data/gre-words.json  从 GRE_Words.txt 导入的 300 个单词
+assets/js/words-core.js  出题、日期轮换与浏览器进度存储
 ```
 
 ## 本地预览
@@ -74,3 +79,19 @@ node tools/translate-blog.mjs --check
 - 博客分类：在 `assets/js/blog-catalog.js` 中维护主题，在 `blog/posts.json` 中给文章设置 `category`。每篇文章只有一个主分类，未分类文章会自动进入“其他文章”，不会从列表丢失。
 
 分类与导航检查：`node tools/check-blog-catalog.mjs`。本机安装 Chrome 后可加 `--browser`，验证页面导航、双语、搜索、分页和手机布局。
+
+## 单词表
+
+```bash
+node tools/import-gre-words.mjs /path/to/GRE_Words.txt
+node tools/check-words.mjs
+node tools/check-words.mjs --browser
+```
+
+导入器读取 Tab 分隔的“单词 + 英文释义”，保留原文，不改动输入文件。生成的 JSON 随网站
+发布，浏览器不需要访问本机 Downloads 目录或第三方 API。更新词表后，按单词标识保存的
+旧进度仍可继续使用。
+
+今日单词按本地日历日期轮换；今日练习含它和另外九词。选择与拼写分别记录，答错或显示
+答案后进入当前模式的错词复习；之后独立答对会移出待复习列表。进度仅存于当前浏览器的
+`fizgrad.gre-progress.v1`，没有跨设备同步。禁用存储时仍可进行当前页面内的练习。

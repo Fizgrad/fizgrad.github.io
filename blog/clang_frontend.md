@@ -463,3 +463,112 @@ AST Matchers 用声明式条件筛选节点；RecursiveASTVisitor 用 C++ 遍历
 同一个头文件在不同宏、include 路径、语言标准和 target 下可能得到不同 AST。静态检查时必须复现真实编译参数；不能把“工具默认参数下解析成功”当成它理解了项目的实际构建。
 
 结构匹配适合检查某类调用或编码规则；若要判断跨分支的空指针、资源状态和数据来源，还需要 [Clang 静态分析：数据流与符号执行](post.html?slug=clang_static_analysis)。
+
+# 7. 用 AST Matchers 写一个调用检查工具
+
+假设项目把全局函数 `legacy_log(int)` 替换为语义和签名兼容的 `modern_log(int)`。
+先定位调用并产生诊断，再判断能否提供 Fix-It，自动修复建议。不能直接搜索替换文本：
+注释、同名局部变量、其他命名空间中的函数和宏展开都可能包含同样的拼写。
+
+完整工程在 [clang-tools](../tools/compiler-lab/clang-tools/CMakeLists.txt)，主要文件是
+[FindLegacyCall.cpp](../tools/compiler-lab/clang-tools/FindLegacyCall.cpp) 与
+[calls.cpp](../tools/compiler-lab/clang-tools/calls.cpp)。它与资源检查器共用 CMake 工程，
+两者是独立 Target：
+
+```text
+clang-tools/
+├── CMakeLists.txt
+├── FindLegacyCall.cpp
+├── calls.cpp
+├── FileStateChecker.cpp
+└── files.c
+```
+
+## 7.1 从匹配条件到诊断
+
+工具使用 `CommonOptionsParser` 读取编译数据库或 `--` 后的参数，`ClangTool` 解析源文件，
+`MatchFinder` 把符合条件的节点交给 Callback。核心匹配条件是：
+
+```cpp
+Finder.addMatcher(
+    traverse(TK_IgnoreUnlessSpelledInSource,
+             callExpr(callee(functionDecl(hasName("::legacy_log"))),
+                      isExpansionInMainFile()).bind("call")),
+    &Callback);
+```
+
+`callee(functionDecl(...))` 匹配已经绑定到声明的调用，不是“函数表达式的文本等于某个
+字符串”。`::legacy_log` 限定全局名字；但若同名函数有多个重载，还应进一步检查参数、
+返回类型和声明来源，名字匹配本身不保证 API 契约相同。
+
+`bind("call")` 为匹配结果命名，Callback 再通过 `getNodeAs<CallExpr>("call")` 取得它。
+`isExpansionInMainFile()` 按展开位置限制本次检查范围；这不等于被调用函数也必须声明在
+主文件中。`TK_IgnoreUnlessSpelledInSource` 避免把大量隐式节点和模板实例化副本当成
+不同的源码修改点。[AST Matchers 的工具构建与遍历模式](https://clang.llvm.org/docs/LibASTMatchersTutorial.html)
+
+## 7.2 源位置为什么有两种
+
+```cpp
+#define LOG(value) legacy_log(value)
+
+void direct() { legacy_log(1); }
+void macro() { LOG(2); }
+```
+
+Spelling Location 是字符实际写在哪里，Expansion Location 是它在何处展开。
+`macro()` 中调用的名字写在宏定义里，调用的展开点却在 `LOG(2)`。直接把展开后的
+位置当作普通文件偏移，可能修改宏定义、错误替换参数，甚至无法构造合法文件范围。
+
+Callback 使用 `SourceManager` 获取文件和位置，诊断交给 `DiagnosticsEngine`。本例只对
+主文件中非宏展开的 `DeclRefExpr` 标识符提供替换建议：
+
+```cpp
+if (Ref && !Loc.isMacroID() && SM.isWrittenInMainFile(Loc))
+    Report << FixItHint::CreateReplacement(
+        SourceRange(Loc, Loc), "modern_log");
+```
+
+这里的 `SourceRange` 表示一个 Token 范围，不是随意写一个字符长度。若修改跨多个 Token，
+应使用 Lexer 的 Token/字符范围转换，并验证得到同一可写文件内的范围。系统头文件、
+宏、重叠修改以及一个头文件被多个翻译单元重复处理，都需要额外策略。
+
+本例对宏调用仍告警，但不给自动修复。产生 Fix-It 不会修改磁盘文件；真正应用之前还要
+确认新函数的声明可见、重载选择和返回类型保持兼容，重新编译并运行相关测试。
+
+## 7.3 编译和运行
+
+从仓库根目录配置，路径指向同一份 LLVM/Clang 22 安装：
+
+```bash
+cmake -S tools/compiler-lab/clang-tools -B /tmp/clang-lab -G Ninja \
+  -DLLVM_DIR=/path/to/llvm-install/lib/cmake/llvm \
+  -DClang_DIR=/path/to/llvm-install/lib/cmake/clang \
+  -DCMAKE_CXX_COMPILER=/path/to/llvm-install/bin/clang++
+cmake --build /tmp/clang-lab --target find-legacy-call
+
+/tmp/clang-lab/find-legacy-call tools/compiler-lab/clang-tools/calls.cpp \
+  -- -std=c++17 -fdiagnostics-parseable-fixits
+```
+
+示例包含直接调用、宏调用，以及被两种类型实例化的模板中的同一个非依赖调用。工具
+产生三处诊断，其中两处提供 Fix-It；不会因为模板实例化两次就把同一处修改重复提交。
+真实项目使用 `-p build` 读取 `compile_commands.json`，而不是把示例的标准和 include 路径
+硬套到每个源文件。
+
+遍历模式也决定能看到什么：尚未解析到具体声明的依赖调用、经函数指针发起的间接调用，
+不一定匹配这个规则。若目标是分析具体模板实例化行为，应选择相应遍历方式，再按源码
+位置归并诊断，不能把“忽略隐式节点”当成对所有检查都正确的默认答案。
+
+## 7.4 与 clang-tidy 的衔接
+
+本例是独立 LibTooling 工具，不会自动成为 clang-tidy 的检查项。clang-tidy 将类似的
+匹配逻辑放入 `ClangTidyCheck::registerMatchers` 和 `check`，由模块注册检查名称，再统一
+处理配置、诊断和修复。例如先使用内置检查观察完整流程：
+
+```bash
+clang-tidy example.cpp -checks='-*,modernize-use-nullptr' -p build
+```
+
+`--fix` 是实际写文件的操作，查看诊断和 patch 后再使用。结构检查不能单凭 AST 中出现
+了 `close` 或 `free` 就推断资源重复释放：同一行可能位于互斥分支，别名和所有权也需要
+路径状态来描述，下一篇的 Checker 才处理这种问题。

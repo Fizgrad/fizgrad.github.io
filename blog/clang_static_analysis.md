@@ -235,3 +235,133 @@ scan-build cmake --build build --clean-first
 误报是报告了不真实的错误，漏报是没有发现真实错误。增强 Domain、保留调用上下文可能减少误报，却增加时间和内存；为了预算限制路径，又可能增加漏报。静态分析、Sanitizer、单元测试和模糊测试互相补充，不存在一个配置开关替代所有验证。
 
 与 LLVM 优化相关的 AA、SCEV、MemorySSA，以及修改 IR 后的分析失效和维护，见 [LLVM 基础与优化，第 7 章](post.html?slug=llvm_review)。
+
+# 8. 用资源状态实现一个 Checker
+
+文件指针非空不代表它还处于打开状态。为每个资源符号保存 `Open` 或 `Closed`，可以把
+重复关闭和泄漏转成状态机问题。完整插件是
+[FileStateChecker.cpp](../tools/compiler-lab/clang-tools/FileStateChecker.cpp)，测试在
+[files.c](../tools/compiler-lab/clang-tools/files.c)。
+
+## 8.1 先定义被分析 API 的契约
+
+示例使用三个文件资源包装接口，避免与系统库自带模型混淆：
+
+```c
+typedef struct TutorialFile TutorialFile;
+TutorialFile *tutorial_open(void);
+void tutorial_close(TutorialFile *);
+void tutorial_take(TutorialFile *);
+```
+
+`tutorial_open()` 失败返回空指针，成功返回一个调用者拥有的新资源；`tutorial_close(p)`
+消费一个尚未关闭的资源；`tutorial_take(p)` 把释放责任交给被调用方。它们是本例明确
+规定的 C API，不是 Analyzer 自动从函数名字猜出来的业务语义。
+
+```mermaid
+flowchart TD
+    A["调用 open"] --> B{"返回值是否为空"}
+    B -->|是| F["未获得资源，不建立关闭义务"]
+    B -->|否| O["Open：调用者负责关闭"]
+    O -->|close| C["Closed"]
+    C -->|再次 close| D["报告重复关闭"]
+    O -->|符号不再存活| L["报告未关闭资源"]
+    O -->|take 或未知所有权逃逸| E["移出本检查器的责任范围"]
+```
+
+移出责任范围不等于资源已经关闭，只表示本检查器不再对它是否泄漏作确定判断。
+
+## 8.2 状态应放进 ProgramState
+
+Checker 自身可能被多个探索路径复用，不能在成员 `std::map` 中保存“当前路径有哪些
+文件”。否则一条分支的关闭会污染另一条分支。示例声明不可变状态映射：
+
+```cpp
+enum class FileState { Open, Closed };
+REGISTER_MAP_WITH_PROGRAMSTATE(Files, SymbolRef, FileState)
+
+ProgramStateRef Next = State->set<Files>(Sym, FileState::Closed);
+C.addTransition(Next);
+```
+
+`SymbolRef` 标识分析中的符号资源，不是运行期地址。`State->set` 返回更新后的状态，
+`addTransition` 把它交回探索引擎；只构造 `Next` 而不提交，不会让后续路径使用新事实。
+
+`alias = p` 通常让两个表达式指向同一资源符号，因此通过 alias 关闭后，再通过 p 关闭，
+仍能查询到 `Closed`。反过来，同名局部变量不是同一资源；内存区域、符号与源码名字
+不能混为一谈。[Checker 的状态存储与回调](https://clang-analyzer.llvm.org/checker_dev_manual.html)
+
+## 8.3 在哪些事件处更新状态
+
+| 回调 | 本例的行为 | 关键条件 |
+|---|---|---|
+| `check::PostCall` | 打开成功后记录 Open | 用 `assume` 区分空与非空返回值，失败路径没有关闭义务 |
+| `check::PreCall` | 关闭时转 Closed，或在重复关闭时告警 | 只处理已建模接口、正确参数数量和已追踪符号 |
+| `check::DeadSymbols` | 符号不再存活时检查 Open，并清理映射 | 不能把一个局部变量离开作用域直接等同于对象已不可达 |
+| `check::PointerEscape` | 未知调用或存储导致所有权逸出时丢弃追踪 | 不能既承认外部可能持有对象，又坚持由当前函数负责释放 |
+
+打开操作会显式分出成功和失败状态，不会把 `if (!p) return;` 错算成泄漏。死亡符号回调
+通过 SymbolReaper 判断符号活性，清理 Closed 项也能防止状态无限积累。泄漏用非终止
+错误节点报告；违反重复关闭契约的路径则终止继续探索。告警节点、BugType 和
+PathSensitiveBugReport 共同生成路径诊断，不是简单向终端打印一条字符串。
+
+未知函数还可能改写参数指向的内容、释放对象或保存别名，相关 Store 和约束需要引擎
+失效处理，Checker 自己维护的附加状态也必须跟着调整。仅有“不保存指针”的保证，
+并不能证明函数不会关闭资源；想在一个只读检查函数之后继续保留 Open，需要为它建立
+正确且完整的模型。
+
+## 8.4 加载插件和固定正反例
+
+使用前端篇的 CMake 工程，构建独立的 `FileState` Target：
+
+```bash
+cmake --build /tmp/clang-lab --target FileState
+
+clang -cc1 -load /tmp/clang-lab/FileState.so -analyze \
+  -analyzer-checker=core,lab.FileState -verify \
+  tools/compiler-lab/clang-tools/files.c
+```
+
+这里的 `.so` 加载方式面向 Linux/ELF。插件导出 `clang_registerCheckers` 和
+`clang_analyzerAPIVersionString`；编译所用头文件、ABI 和实际加载它的 Clang 必须匹配。
+不能随意把另一份 Clang/LLVM 静态库打进插件，否则可能重复注册全局选项或破坏类型身份。
+
+`-verify` 将源码的 `expected-warning` 注释与诊断逐项匹配。本例覆盖正常关闭、打开失败、
+别名重复关闭、完全遗漏关闭、只在部分路径关闭、显式所有权转移和未知调用逃逸。
+不该告警的函数也必须留在回归测试里，否则一个“遇到 open 就报告”的错误实现同样
+可能通过只含错误程序的测试。
+
+这是针对已声明包装 API 的有限模型，不处理全部 `FILE*`、整数 fd、引用计数、`dup`、
+`realloc` 或自定义 RAII。对这些资源，需要分别定义成功条件、共享/独占所有权、别名与
+释放关系。预算截断、未识别的符号和逃逸后的状态丢弃也可能漏报；测试通过不代表资源
+管理已经被整体证明正确。
+
+# 9. 内存建模决定能保留多少事实
+
+## 9.1 从变量名走向对象和字段
+
+```c
+struct Pair { int *left; int *right; } pair;
+pair.left = &x;
+pair.right = &y;
+```
+
+Field-sensitive，字段敏感，分析把 `pair.left` 与 `pair.right` 分开记录；字段不敏感的
+模型可能把它们合成一个区域，得到两者都可能指向 x 或 y。前者精度更高，但数组下标、
+union、字节访问和指针运算会使区域划分复杂。堆对象还可能按分配位置归纳：循环中同一
+个 `malloc` 对应的抽象节点，可能代表很多次不同分配，并非一个真实对象。
+
+## 9.2 强更新和弱更新
+
+对 `*p = value`，若能证明 p 在当前状态下唯一指向一个非汇总、可强更新的对象，可以
+替换该对象先前的抽象内容，这叫 Strong Update，强更新。若 p 可能指向多个对象，通常
+只能把新值合入候选对象的内容，保留旧可能性，这叫 Weak Update，弱更新。
+
+“Points-to 集合只有一个元素”仍不充分：那个元素可能是代表多次分配的堆汇总节点。
+不能为了得到精确结果就删除其他真实对象的可能状态。别名、内存偏移和访问大小也会影响
+更新范围，写结构体一个字段不应无条件清空其他字段，重叠字节写却不能忽略。
+
+流不敏感分析把不同程序位置的指向关系合并，通常只增不减；流敏感分析按程序位置维护
+状态，才有机会用后一次确定赋值覆盖前一次事实。路径敏感进一步保留分支约束，但不
+意味着所有内存和跨函数关系都已经精确。包含式指针分析的方程与实现见
+[编译器算法第 10 章](post.html?slug=compiler_algorithms)。

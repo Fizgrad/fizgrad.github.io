@@ -1,0 +1,1806 @@
+{
+  "version": 1,
+  "source": "GRE_Words.txt",
+  "words": [
+    {
+      "id": "aberrant",
+      "word": "aberrant",
+      "definition": "adj. deviating from what is normal",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "abeyance",
+      "word": "abeyance",
+      "definition": "n. temporary suppression or suspension",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "abscond",
+      "word": "abscond",
+      "definition": "v. to depart secretly",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "abstemious",
+      "word": "abstemious",
+      "definition": "adj. moderate in appetite",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "admonish",
+      "word": "admonish",
+      "definition": "v. to caution or reprimand",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "aesthetic",
+      "word": "aesthetic",
+      "definition": "adj. relating to beauty or art",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "aggregate",
+      "word": "aggregate",
+      "definition": "adj. amounting to a whole; total",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "alacrity",
+      "word": "alacrity",
+      "definition": "n. cheerful willingness; eagerness; speed",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "amalgamate",
+      "word": "amalgamate",
+      "definition": "v. to combine into a unified whole",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "ambiguous",
+      "word": "ambiguous",
+      "definition": "adj. unclear or doubtful in meaning",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "ambivalence",
+      "word": "ambivalence",
+      "definition": "n. the state of having conflicting emotional attitudes",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "ameliorate",
+      "word": "ameliorate",
+      "definition": "v. improve",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "anachronism",
+      "word": "anachronism",
+      "definition": "n. something out of proper time",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "analogous",
+      "word": "analogous",
+      "definition": "adj. comparable",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "anomalous",
+      "word": "anomalous",
+      "definition": "adj. irregular; deviating from the norm",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "antipathy",
+      "word": "antipathy",
+      "definition": "n. dislike; hostility",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "apprise",
+      "word": "apprise",
+      "definition": "v. to inform",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "approbation",
+      "word": "approbation",
+      "definition": "n. praise; approval",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "appropriate",
+      "word": "appropriate",
+      "definition": "v. to take possession for ones own use; confiscate",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "artless",
+      "word": "artless",
+      "definition": "adj. guileless; natural",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "ascetic",
+      "word": "ascetic",
+      "definition": "n. one who practices self denial",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "assiduous",
+      "word": "assiduous",
+      "definition": "adj. diligent; hardworking",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "assuage",
+      "word": "assuage",
+      "definition": "v. to make less sever",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "attenuate",
+      "word": "attenuate",
+      "definition": "v. to weaken",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "audacious",
+      "word": "audacious",
+      "definition": "adj. bold; daring",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "austere",
+      "word": "austere",
+      "definition": "adj. stern; unadorned",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "autonomous",
+      "word": "autonomous",
+      "definition": "adj. self-governing; independent",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "aver",
+      "word": "aver",
+      "definition": "v. to affirm; declare to be true",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "banal",
+      "word": "banal",
+      "definition": "adj. commonplace; trite",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "belie",
+      "word": "belie",
+      "definition": "v. to contradict; misrepresent; give a false impression",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "beneficent",
+      "word": "beneficent",
+      "definition": "adj. kindly; doing good",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "bombastic",
+      "word": "bombastic",
+      "definition": "adj. pompous; using inflated language",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "boorish",
+      "word": "boorish",
+      "definition": "adj. rude; insensitive",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "burgeon",
+      "word": "burgeon",
+      "definition": "v. to flourish",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "burnish",
+      "word": "burnish",
+      "definition": "v. to polish",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "buttress",
+      "word": "buttress",
+      "definition": "v. to reinforce; support",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "cacophonous",
+      "word": "cacophonous",
+      "definition": "adj. unpleasant or harsh sounding",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "capricious",
+      "word": "capricious",
+      "definition": "adj. fickle",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "castigation",
+      "word": "castigation",
+      "definition": "n. punishment; chastisement; criticism",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "catalyst",
+      "word": "catalyst",
+      "definition": "n. something causing change",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "causality",
+      "word": "causality",
+      "definition": "adj. involving a cause",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "chicanery",
+      "word": "chicanery",
+      "definition": "n. trickery; fraud",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "coagulate",
+      "word": "coagulate",
+      "definition": "v. thicken; congeal",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "coda",
+      "word": "coda",
+      "definition": "n. concluding part of a literary or musical composition; something that summarizes or concludes",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "commensurate",
+      "word": "commensurate",
+      "definition": "adj. proportional",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "compendium",
+      "word": "compendium",
+      "definition": "n. brief, comprehensive summary",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "complaisant",
+      "word": "complaisant",
+      "definition": "adj. overly polite; willing to please; obliging",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "conciliatory",
+      "word": "conciliatory",
+      "definition": "adj. overcoming distrust or hostility",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "confound",
+      "word": "confound",
+      "definition": "v. to baffle; perplex; mix-up",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "connoisseur",
+      "word": "connoisseur",
+      "definition": "n. a person possessing expert knowledge or training; a person of informed or discriminating taste",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "contention",
+      "word": "contention",
+      "definition": "n. assertion",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "contentious",
+      "word": "contentious",
+      "definition": "adj. quarrelsome; causing quarrels",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "conundrum",
+      "word": "conundrum",
+      "definition": "n. riddle; puzzle with no solution",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "conventional",
+      "word": "conventional",
+      "definition": "adj. customary; commonplace",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "convoluted",
+      "word": "convoluted",
+      "definition": "adj. twisted; complicated",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "craven",
+      "word": "craven",
+      "definition": "adj. cowardly",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "decorum",
+      "word": "decorum",
+      "definition": "n. proper behavior",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "deference",
+      "word": "deference",
+      "definition": "n. respect; regard for another's wish",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "delineate",
+      "word": "delineate",
+      "definition": "v. to represent or depict",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "denigrate",
+      "word": "denigrate",
+      "definition": "v. to slur someones reputation",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "derivative",
+      "word": "derivative",
+      "definition": "n. something derived; unoriginal",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "desiccate",
+      "word": "desiccate",
+      "definition": "v. to dry completely",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "desultory",
+      "word": "desultory",
+      "definition": "adj. random; disconnected; rambling",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "diatribe",
+      "word": "diatribe",
+      "definition": "n. bitter verbal attack",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "dichotomy",
+      "word": "dichotomy",
+      "definition": "n. division into two usually contradictory parts",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "diffidence",
+      "word": "diffidence",
+      "definition": "n. shyness; lack of confidence",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "diffuse",
+      "word": "diffuse",
+      "definition": "v. to spread out",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "digression",
+      "word": "digression",
+      "definition": "n. act of straying from the main point",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "dirge",
+      "word": "dirge",
+      "definition": "n. funeral hymn",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "disabuse",
+      "word": "disabuse",
+      "definition": "v. to free from a misconception",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "discerning",
+      "word": "discerning",
+      "definition": "adj. perceptive; exhibiting keen insight and good judgement",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "discordant",
+      "word": "discordant",
+      "definition": "adj. not in tune",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "discredit",
+      "word": "discredit",
+      "definition": "v. to dishonor; disgrace; cause to be doubted",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "discrepancy",
+      "word": "discrepancy",
+      "definition": "n. difference between",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "discrete",
+      "word": "discrete",
+      "definition": "adj. constituting a separate thing; distinct",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "disingenuous",
+      "word": "disingenuous",
+      "definition": "adj. not candid; crafty",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "disinterested",
+      "word": "disinterested",
+      "definition": "adj. unprejudiced; objective",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "disjointed",
+      "word": "disjointed",
+      "definition": "adj. lacking order or coherence; dislocated",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "dismiss",
+      "word": "dismiss",
+      "definition": "v. put away from consideration; reject",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "disparage",
+      "word": "disparage",
+      "definition": "v. to belittle",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "disparate",
+      "word": "disparate",
+      "definition": "adj. dissimilar",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "dissemble",
+      "word": "dissemble",
+      "definition": "v.to pretend; disguise ones motive",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "disseminate",
+      "word": "disseminate",
+      "definition": "v. to spread; scatter; disperse",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "dissolution",
+      "word": "dissolution",
+      "definition": "n. disintegration; debauchery",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "dissonance",
+      "word": "dissonance",
+      "definition": "n. discord; lack of harmony",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "distend",
+      "word": "distend",
+      "definition": "v. to expand; swell out",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "distill",
+      "word": "distill",
+      "definition": "v. extract the essential elements",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "doctrinaire",
+      "word": "doctrinaire",
+      "definition": "adj. relating to a person who cannot compromise about points of a theory or doctrine; dogmatic; unyielding",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "dogmatic",
+      "word": "dogmatic",
+      "definition": "adj. stating opinions without proof",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "dupe",
+      "word": "dupe",
+      "definition": "v. to deceive; trick",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "ebullient",
+      "word": "ebullient",
+      "definition": "adj. exhilarated; enthusiastic",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "eclectic",
+      "word": "eclectic",
+      "definition": "adj. selecting from various sources",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "efficacy",
+      "word": "efficacy",
+      "definition": "n. efficiency; effectiveness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "effrontery",
+      "word": "effrontery",
+      "definition": "n. shameless boldness; presumptuousness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "elegy",
+      "word": "elegy",
+      "definition": "n. a poem or song expressing lamentation",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "elicit",
+      "word": "elicit",
+      "definition": "v. to provoke; draw out",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "embellish",
+      "word": "embellish",
+      "definition": "v. to adorn; decorate; enhance; make more attractive by adding details",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "empirical",
+      "word": "empirical",
+      "definition": "adj. derived from observation or experiment",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "emulate",
+      "word": "emulate",
+      "definition": "v. to imitate; copy",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "endemic",
+      "word": "endemic",
+      "definition": "adj. inherent; belonging to an area",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "enervate",
+      "word": "enervate",
+      "definition": "v. to weaken",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "engender",
+      "word": "engender",
+      "definition": "v. to cause; produce",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "ephemeral",
+      "word": "ephemeral",
+      "definition": "adj. short-lived; fleeting",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "equanimity",
+      "word": "equanimity",
+      "definition": "n. composure; calmness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "equivocate",
+      "word": "equivocate",
+      "definition": "v. to intentionally use vague language",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "erudite",
+      "word": "erudite",
+      "definition": "adj. learned; scholarly",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "esoteric",
+      "word": "esoteric",
+      "definition": "adj. hard to understand; known only to a few",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "eulogy",
+      "word": "eulogy",
+      "definition": "n. a high praise, especially of a person who has recently died",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "euphemism",
+      "word": "euphemism",
+      "definition": "n. use of agreeable or inoffensive language in place of unpleasant or offensive language",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "exacerbate",
+      "word": "exacerbate",
+      "definition": "v. to aggravate; make worse",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "exculpate",
+      "word": "exculpate",
+      "definition": "v. to clear of blame; vindicate",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "exigency",
+      "word": "exigency",
+      "definition": "n. crisis; urgent requirements",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "extraneous",
+      "word": "extraneous",
+      "definition": "adj. not essential",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "facetious",
+      "word": "facetious",
+      "definition": "adj. humorous",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "facilitate",
+      "word": "facilitate",
+      "definition": "v. to make less difficult",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "fallacious",
+      "word": "fallacious",
+      "definition": "adj. based on a false idea or fact; misleading",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "fatuous",
+      "word": "fatuous",
+      "definition": "adj. foolishly self-satisfied",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "fawning",
+      "word": "fawning",
+      "definition": "adj. seeking favor by flattery",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "felicitous",
+      "word": "felicitous",
+      "definition": "adj. suitably expressed; appropriate; well-chosen",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "flag",
+      "word": "flag",
+      "definition": "v. to droop; grow weak",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "fledgling",
+      "word": "fledgling",
+      "definition": "n. beginner; novice",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "flout",
+      "word": "flout",
+      "definition": "v. to treat scornfully",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "foment",
+      "word": "foment",
+      "definition": "v. to incite; arouse",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "forestall",
+      "word": "forestall",
+      "definition": "v. to prevent; delay",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "frugality",
+      "word": "frugality",
+      "definition": "n. thrift",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "gainsay",
+      "word": "gainsay",
+      "definition": "v. to deny; dispute; oppose",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "garrulous",
+      "word": "garrulous",
+      "definition": "adj. very talkative; wordy",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "goad",
+      "word": "goad",
+      "definition": "v. to prod; urge on",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "gouge",
+      "word": "gouge",
+      "definition": "v. to tear out; scoop out; overcharge",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "grandiloquent",
+      "word": "grandiloquent",
+      "definition": "adj. pompous; bombastic",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "gregarious",
+      "word": "gregarious",
+      "definition": "adj. sociable",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "guileless",
+      "word": "guileless",
+      "definition": "adj. free of cunning or deceit; artless",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "gullible",
+      "word": "gullible",
+      "definition": "adj. easily deceived",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "harangue",
+      "word": "harangue",
+      "definition": "n. long pompous speech; tirade",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "homogeneous",
+      "word": "homogeneous",
+      "definition": "adj. composed of identical parts; uniform in composition",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "hyperbole",
+      "word": "hyperbole",
+      "definition": "n. purposeful exaggeration for effect",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "iconoclastic",
+      "word": "iconoclastic",
+      "definition": "adj. attacking cherished traditions",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "idolatry",
+      "word": "idolatry",
+      "definition": "n. idol worship; blind or excessive devotion",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "immutable",
+      "word": "immutable",
+      "definition": "adj. unchangeable",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "impair",
+      "word": "impair",
+      "definition": "v. to damage; injure",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "impassive",
+      "word": "impassive",
+      "definition": "adj. showing no emotion",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "impede",
+      "word": "impede",
+      "definition": "v. to hinder; block",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "impermeable",
+      "word": "impermeable",
+      "definition": "adj. impossible to penetrate",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "imperturbable",
+      "word": "imperturbable",
+      "definition": "adj. not easily disturbed",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "impervious",
+      "word": "impervious",
+      "definition": "adj. impossible to penetrate; incapable of being affected",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "implacable",
+      "word": "implacable",
+      "definition": "adj. inflexible; incapable of being pleased",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "implicit",
+      "word": "implicit",
+      "definition": "adj. implied; understood but not stated",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "implode",
+      "word": "implode",
+      "definition": "v. to collapse inward violenty",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "inadvertently",
+      "word": "inadvertently",
+      "definition": "adv. carelessly; unintentionally",
+      "partOfSpeech": "adv."
+    },
+    {
+      "id": "inchoate",
+      "word": "inchoate",
+      "definition": "adj. imperfectly formed or formulated",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "incongruity",
+      "word": "incongruity",
+      "definition": "n. state of not fitting",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "inconsequential",
+      "word": "inconsequential",
+      "definition": "adj. insignificant; unimportant",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "incorporate",
+      "word": "incorporate",
+      "definition": "v. to introduce something into another thing already in existence; combine",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "indeterminate",
+      "word": "indeterminate",
+      "definition": "adj, uncertain; indefinite",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "indigence",
+      "word": "indigence",
+      "definition": "n. poverty",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "indolent",
+      "word": "indolent",
+      "definition": "adj. habitually lazy; idle",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "inert",
+      "word": "inert",
+      "definition": "adj. unable to move; sluggish",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "ingenuous",
+      "word": "ingenuous",
+      "definition": "adj. naive and trusting; lacking sophistication",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "inherent",
+      "word": "inherent",
+      "definition": "adj. firmly established by nature or habit",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "innocuous",
+      "word": "innocuous",
+      "definition": "adj. harmless",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "insensible",
+      "word": "insensible",
+      "definition": "adj. unconscious; unresponsive",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "insinuate",
+      "word": "insinuate",
+      "definition": "v. to suggest; say indirectly; imply",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "insipid",
+      "word": "insipid",
+      "definition": "adj. lacking in flavor; dull",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "insularity",
+      "word": "insularity",
+      "definition": "n. narrow-mindedness; isolation",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "intractable",
+      "word": "intractable",
+      "definition": "adj. not easily managed",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "intransigence",
+      "word": "intransigence",
+      "definition": "n. stubbornness; refusal to compromise",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "inundate",
+      "word": "inundate",
+      "definition": "v. to cover with water; to overwhelm",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "inured",
+      "word": "inured",
+      "definition": "v. hardened; accustomed; used to",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "invective",
+      "word": "invective",
+      "definition": "n. verbal abuse",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "irascible",
+      "word": "irascible",
+      "definition": "adj. easily angered",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "irresolute",
+      "word": "irresolute",
+      "definition": "adj. unsure of how to act; weak",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "laconic",
+      "word": "laconic",
+      "definition": "adj. using few words",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "lassitude",
+      "word": "lassitude",
+      "definition": "n. lethargy; sluggishness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "laud",
+      "word": "laud",
+      "definition": "v. to praise",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "lethargic",
+      "word": "lethargic",
+      "definition": "adj. inactive",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "levee",
+      "word": "levee",
+      "definition": "n. an embankment that prevents a river from overflowing",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "levity",
+      "word": "levity",
+      "definition": "n. light manner or attitude",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "log",
+      "word": "log",
+      "definition": "n. record of a voyage or daily activities",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "loquacious",
+      "word": "loquacious",
+      "definition": "adj. talkative",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "lucid",
+      "word": "lucid",
+      "definition": "adj. bright; clear; intelligible",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "magnanimity",
+      "word": "magnanimity",
+      "definition": "n. generosity; nobility",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "malinger",
+      "word": "malinger",
+      "definition": "v. to feign illness to escape duty",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "malleable",
+      "word": "malleable",
+      "definition": "adj. capable of being shaped by pounding; impressionable",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "maverick",
+      "word": "maverick",
+      "definition": "n. dissenter",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "mendacious",
+      "word": "mendacious",
+      "definition": "adj. dishonest",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "metamorphosis",
+      "word": "metamorphosis",
+      "definition": "n. change; transformation",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "meticulous",
+      "word": "meticulous",
+      "definition": "adj. very careful; fastidious",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "misanthrope",
+      "word": "misanthrope",
+      "definition": "n. one who hates humanity",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "mitigate",
+      "word": "mitigate",
+      "definition": "v. to cause to become less harsh, severe, or painful; alleviate",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "mollify",
+      "word": "mollify",
+      "definition": "v. soothe",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "mundane",
+      "word": "mundane",
+      "definition": "adj. worldly as opposed to spiritual; concerned with the ordinary",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "morose",
+      "word": "morose",
+      "definition": "adj. ill-humored; sullen",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "negate",
+      "word": "negate",
+      "definition": "v. to cancel out; nullify",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "neophyte",
+      "word": "neophyte",
+      "definition": "n. novice; beginner",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "obdurate",
+      "word": "obdurate",
+      "definition": "adj. stubborn",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "obsequious",
+      "word": "obsequious",
+      "definition": "adj. overly submissive",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "obviate",
+      "word": "obviate",
+      "definition": "v. to make unnecessary; to anticipate and prevent",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "occlude",
+      "word": "occlude",
+      "definition": "v. to shut; block",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "officious",
+      "word": "officious",
+      "definition": "adj. too helpful; meddlesome",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "onerous",
+      "word": "onerous",
+      "definition": "adj. burdensome",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "opprobrium",
+      "word": "opprobrium",
+      "definition": "n. disgrace; contempt",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "oscillate",
+      "word": "oscillate",
+      "definition": "v. to move back and forth",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "ostentatious",
+      "word": "ostentatious",
+      "definition": "adj. showy; trying to attract attention; pretentious",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "paragon",
+      "word": "paragon",
+      "definition": "n. model of excellence or perfection",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "partisan",
+      "word": "partisan",
+      "definition": "adj. one-sided;committed to a party, group, or cause; prejudiced",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "pathological",
+      "word": "pathological",
+      "definition": "adj. departing from normal condition",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "paucity",
+      "word": "paucity",
+      "definition": "n. scarcity",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "pedantic",
+      "word": "pedantic",
+      "definition": "adj. showing off learning",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "penchant",
+      "word": "penchant",
+      "definition": "n. inclination",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "penury",
+      "word": "penury",
+      "definition": "n. extreme poverty",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "perennial",
+      "word": "perennial",
+      "definition": "adj. present throughout the years; persistent",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "perfidious",
+      "word": "perfidious",
+      "definition": "adj. faithless; disloyal; untrustworthy",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "perfunctory",
+      "word": "perfunctory",
+      "definition": "adj. superficial; not thorough; performed really as a duty",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "permeable",
+      "word": "permeable",
+      "definition": "adj. penetrable",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "pervasive",
+      "word": "pervasive",
+      "definition": "adj. spread throughout every part",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "phlegmatic",
+      "word": "phlegmatic",
+      "definition": "calm in temperament; sluggish",
+      "partOfSpeech": ""
+    },
+    {
+      "id": "piety",
+      "word": "piety",
+      "definition": "n. devoutness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "placate",
+      "word": "placate",
+      "definition": "v. to lessen another's anger; to pacify",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "plasticity",
+      "word": "plasticity",
+      "definition": "n. condition of being able to be shaped or formed; pliability",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "platitude",
+      "word": "platitude",
+      "definition": "n. stale, overused expression",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "plethora",
+      "word": "plethora",
+      "definition": "n. excess; overabundance",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "plummet",
+      "word": "plummet",
+      "definition": "v. to fall; plunge",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "pragmatic",
+      "word": "pragmatic",
+      "definition": "adj. practical",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "precarious",
+      "word": "precarious",
+      "definition": "adj. uncertain",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "precipitate",
+      "word": "precipitate",
+      "definition": "v. to cause to happen; to throw down from a height adj. rash; hasty; sudden",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "precursor",
+      "word": "precursor",
+      "definition": "n. forerunner; predecessor",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "presumptuous",
+      "word": "presumptuous",
+      "definition": "adj. rude; improperly bold",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "prevaricate",
+      "word": "prevaricate",
+      "definition": "v. to quibble, evade the truth",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "pristine",
+      "word": "pristine",
+      "definition": "adj. untouched; uncorrupted",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "probity",
+      "word": "probity",
+      "definition": "n. honesty; high-mindedness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "problematic",
+      "word": "problematic",
+      "definition": "adj. posing a problem; doubtful; unsettled",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "prodigal",
+      "word": "prodigal",
+      "definition": "adj. wasteful; extravagant; lavish",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "proliferate",
+      "word": "proliferate",
+      "definition": "v. to increase rapidly",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "propensity",
+      "word": "propensity",
+      "definition": "n. inclination; tendency",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "propitiate",
+      "word": "propitiate",
+      "definition": "v. to win over; appease",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "propriety",
+      "word": "propriety",
+      "definition": "n. correct conduct; fitness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "proscribe",
+      "word": "proscribe",
+      "definition": "v. to condemn; forbid; outlaw",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "pungent",
+      "word": "pungent",
+      "definition": "adj. strong or sharp in smell and taste; penetrating; caustic",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "qualified",
+      "word": "qualified",
+      "definition": "adj. limited; restricted",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "quibble",
+      "word": "quibble",
+      "definition": "v. to argue over insignificant and irrelevant details",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "quiescent",
+      "word": "quiescent",
+      "definition": "adj. inactive; still",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "rarefied",
+      "word": "rarefied",
+      "definition": "adj. refined",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "recalcitrant",
+      "word": "recalcitrant",
+      "definition": "adj. resisting authority or control",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "recant",
+      "word": "recant",
+      "definition": "v. to retract a statement or opinion",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "recondite",
+      "word": "recondite",
+      "definition": "adj. abstruse; profound",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "refractory",
+      "word": "refractory",
+      "definition": "adj. stubborn; unmanageable;resisting ordinary methods of treatment",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "refute",
+      "word": "refute",
+      "definition": "v. to contradict; to disprove",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "relegate",
+      "word": "relegate",
+      "definition": "v. to confine to an inferior position",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "reproach",
+      "word": "reproach",
+      "definition": "v. to find fault with; to blame",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "reprobate",
+      "word": "reprobate",
+      "definition": "n. morally unprincipled person",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "repudiate",
+      "word": "repudiate",
+      "definition": "v. reject as having no authority",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "rescind",
+      "word": "rescind",
+      "definition": "v. to cancel",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "resolution",
+      "word": "resolution",
+      "definition": "n. determination; resolve",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "reticent",
+      "word": "reticent",
+      "definition": "adj. not speaking freely; reserved; reluctant",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "reverent",
+      "word": "reverent",
+      "definition": "adj. expressing deep respect; worshipful",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "sage",
+      "word": "sage",
+      "definition": "adj. wise",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "salubrious",
+      "word": "salubrious",
+      "definition": "adj. healthful",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "sanction",
+      "word": "sanction",
+      "definition": "v. to approve; ratify; permit",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "satiate",
+      "word": "satiate",
+      "definition": "v. to satisfy",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "saturate",
+      "word": "saturate",
+      "definition": "v. to soak thoroughly; imbue throughout",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "secrete",
+      "word": "secrete",
+      "definition": "v. to produce and release substance into organism",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "shard",
+      "word": "shard",
+      "definition": "n. a piece of broken glass or pottery",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "skeptic",
+      "word": "skeptic",
+      "definition": "n. one who doubts",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "solicitous",
+      "word": "solicitous",
+      "definition": "adj. attentive; eager; concerned",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "soporific",
+      "word": "soporific",
+      "definition": "adj. sleep producing",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "specious",
+      "word": "specious",
+      "definition": "adj. seeming to be logical and sound, but not really so",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "spectrum",
+      "word": "spectrum",
+      "definition": "n. band of colors produced when sunlight passes through a prism; a broad range of related ideas or objects",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "sporadic",
+      "word": "sporadic",
+      "definition": "adj. irregular",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "stigma",
+      "word": "stigma",
+      "definition": "n. mark of disgrace or inferiority",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "stint",
+      "word": "stint",
+      "definition": "v. to be sparing n. period of time spent doing something",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "stipulate",
+      "word": "stipulate",
+      "definition": "v. to specify as an essential condition",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "stolid",
+      "word": "stolid",
+      "definition": "adj. having or showing little emotion",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "striated",
+      "word": "striated",
+      "definition": "adj. marked with thin narrow grooves or channels",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "strut",
+      "word": "strut",
+      "definition": "v. to swagger; display to impress others",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "subpoena",
+      "word": "subpoena",
+      "definition": "n. notice ordering someone to appear in court",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "substantiate",
+      "word": "substantiate",
+      "definition": "v. to support with proof or evidence",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "supersede",
+      "word": "supersede",
+      "definition": "v. to replace, especially to displace as inferior or antiquated",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "supposition",
+      "word": "supposition",
+      "definition": "n. the act of assuming to be true or real",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "tacit",
+      "word": "tacit",
+      "definition": "adj. silently understood; implied",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "tangential",
+      "word": "tangential",
+      "definition": "adj. peripheral; digressing",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "tenuous",
+      "word": "tenuous",
+      "definition": "adj. weak; insubstantial",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "tirade",
+      "word": "tirade",
+      "definition": "n. long, violent speech, verbal assualt",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "torpor",
+      "word": "torpor",
+      "definition": "n. lethargy; dormancy; sluggishness",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "tortuous",
+      "word": "tortuous",
+      "definition": "adj. having many twists and turns; highly complex",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "tractable",
+      "word": "tractable",
+      "definition": "adj. obedient; yielding",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "transgression",
+      "word": "transgression",
+      "definition": "n. act of of trespassing or violating a law or rule",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "truculence",
+      "word": "truculence",
+      "definition": "n. aggressiveness; ferocity",
+      "partOfSpeech": "n."
+    },
+    {
+      "id": "vacillate",
+      "word": "vacillate",
+      "definition": "v. to waver; oscillate",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "venerate",
+      "word": "venerate",
+      "definition": "v. to adore; honor; respect",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "veracious",
+      "word": "veracious",
+      "definition": "adj. truthful; accurate",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "verbose",
+      "word": "verbose",
+      "definition": "adj. wordy",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "viable",
+      "word": "viable",
+      "definition": "adj. practicable; capable of developing",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "viscous",
+      "word": "viscous",
+      "definition": "adj. thick, syrupy, and sticky",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "vituperative",
+      "word": "vituperative",
+      "definition": "adj. using or containing harsh, abusive censure",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "volatile",
+      "word": "volatile",
+      "definition": "adj. tending to vary frequently; fickle",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "warranted",
+      "word": "warranted",
+      "definition": "adj. justified",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "wary",
+      "word": "wary",
+      "definition": "adj. careful; cautious",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "welter",
+      "word": "welter",
+      "definition": "v. to wallow or roll; toss about; be in turmoil",
+      "partOfSpeech": "v."
+    },
+    {
+      "id": "whimsical",
+      "word": "whimsical",
+      "definition": "adj. fanciful; unpredictable",
+      "partOfSpeech": "adj."
+    },
+    {
+      "id": "zealot",
+      "word": "zealot",
+      "definition": "n. one who is fanatically devoted to a cause",
+      "partOfSpeech": "n."
+    }
+  ]
+}

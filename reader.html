@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="assets/css/fonts.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.9.0/github-markdown-dark.css" integrity="sha384-nlth4oyFjBlAziFH2oypWWsE00W7j/6uVR4/Fz1++oPhaqeF8LujWsaX3ChXZw/1" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/reader.css" />
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js" integrity="sha384-piCcpDdJ7qVeK4Tv8Z6Hpcr3ZBIgP16TxQTPVfsLFdZ5uDgwc3Y8Ho7oUnqf12qu" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.4/marked.min.js" integrity="sha384-2NndlFAl0twi2nmu3w9mixodZFiN2fbxlakcYJF86bn1JeS1VB87/XqA7cqymzS+" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -37,24 +38,63 @@
     <nav class="nav-links">
       <a href="./" data-i18n-aria="homeAria" aria-label="返回主页"><span class="nav-back-full" data-i18n="home">← 主页</span><span class="nav-back-short" aria-hidden="true">←</span></a>
       <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
-      <button id="reader-new" class="lang-btn" type="button" data-i18n="newFile" data-i18n-aria="newFileAria" aria-label="上传新文件">新文件</button>
+      <button id="reader-edit" class="lang-btn reader-nav-button" type="button" data-i18n-aria="edit" aria-label="返回编辑" hidden>
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="m13 3 4 4-9 9-5 1 1-5 9-9Zm-2 2 4 4"/></svg>
+        <span data-i18n="edit">返回编辑</span>
+      </button>
+      <button id="reader-new" class="lang-btn reader-nav-button" type="button" data-i18n-aria="newFileAria" aria-label="打开新文档" hidden>
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M11 2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-6-6Zm0 0v6h6M7 12h6m-3-3v6"/></svg>
+        <span data-i18n="newFile">新文档</span>
+      </button>
     </nav>
   </header>
 
-  <main id="main" class="post-page">
-    <div id="reader-dropzone" class="reader-dropzone">
-      <input type="file" id="reader-file-input" accept=".md,.markdown,.txt" hidden />
-      <div class="reader-dropzone-inner">
-        <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M14 3v4a1 1 0 0 0 1 1h4M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2zM12 11v6M9 14l3-3 3 3"/></svg>
-        <p class="reader-dropzone-title" data-i18n="dropTitle">拖拽 Markdown 文件到此处</p>
-        <p class="reader-dropzone-sub" data-i18n="dropSub">或点击选择文件</p>
-        <div class="reader-divider"><span data-i18n="pasteLabel">或粘贴 / 输入文本</span></div>
-        <textarea id="reader-textarea" class="reader-textarea" data-i18n-ph="pastePlaceholder" placeholder="# 在这里粘贴 Markdown 文本&#10;&#10;支持公式 $E=mc^2$、代码块、Mermaid 图表等" spellcheck="false"></textarea>
-        <button id="reader-render-btn" class="reader-render-btn" type="button" data-i18n="render">渲染</button>
+  <main id="main" class="post-page reader-page">
+    <section id="reader-input" class="reader-input" aria-labelledby="reader-title">
+      <div class="reader-heading">
+        <h1 id="reader-title" data-i18n="readerTitle">Markdown 阅读器</h1>
+        <button id="reader-example" class="reader-text-button" type="button" data-i18n="example">载入示例</button>
       </div>
-    </div>
 
-    <div class="post-layout" id="reader-view" style="display:none;">
+      <div class="reader-workspace">
+        <div id="reader-dropzone" class="reader-file-drop">
+          <input type="file" id="reader-file-input" accept=".md,.markdown,.txt" hidden />
+          <svg class="reader-file-icon" viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">
+            <path d="M28 6H14a4 4 0 0 0-4 4v28a4 4 0 0 0 4 4h20a4 4 0 0 0 4-4V16L28 6Z"/>
+            <path d="M28 6v10h10M24 33V22m-5 5 5-5 5 5"/>
+          </svg>
+          <h2 data-i18n="openTitle">打开本地文件</h2>
+          <p data-i18n="dropHint">拖放到这里，或选择文件</p>
+          <button id="reader-open-file" class="reader-file-button" type="button" data-i18n="chooseFile">选择文件</button>
+          <span class="reader-file-types">.md / .markdown / .txt</span>
+        </div>
+
+        <div class="reader-editor-panel">
+          <div class="reader-editor-bar">
+            <label for="reader-textarea" data-i18n="sourceLabel">Markdown 源文本</label>
+            <span id="reader-filename" class="reader-filename">untitled.md</span>
+          </div>
+          <textarea id="reader-textarea" class="reader-editor" data-i18n-ph="pastePlaceholder" placeholder="# 文档标题&#10;&#10;在这里粘贴或编写 Markdown…" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="reader-count"></textarea>
+          <div class="reader-editor-bottom">
+            <span id="reader-count" class="reader-count"></span>
+            <button id="reader-clear" class="reader-text-button" type="button" data-i18n="clear" disabled>清空</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="reader-actions">
+        <p id="reader-status" class="reader-status" role="status" aria-live="polite"></p>
+        <div class="reader-preview-action">
+          <span class="reader-shortcut" aria-hidden="true"><kbd id="reader-shortcut-key">Ctrl</kbd> + <kbd>Enter</kbd></span>
+          <button id="reader-render-btn" class="reader-primary" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" disabled>
+            <span data-i18n="render">开始阅读</span>
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="post-layout" id="reader-view" hidden>
       <article class="markdown-body post-wrap post-main" id="post-content"></article>
       <aside class="toc-sidebar" id="toc-sidebar">
         <div class="toc-title" data-i18n="tocTitle">目录</div>
@@ -158,8 +198,13 @@
       var I18N = {
         zh: {
           lang: "zh-CN", title: "Markdown 阅读器 - Fizgrad", home: "← 主页", homeAria: "返回主页",
-          newFile: "新文件", newFileAria: "上传新文件", dropTitle: "拖拽 Markdown 文件到此处", dropSub: "或点击选择文件",
-          pasteLabel: "或粘贴 / 输入文本", pastePlaceholder: "# 在这里粘贴 Markdown 文本\n\n支持公式 $E=mc^2$、代码块、Mermaid 图表等", render: "渲染",
+          newFile: "新文档", newFileAria: "打开新文档", edit: "返回编辑", readerTitle: "Markdown 阅读器",
+          openTitle: "打开本地文件", dropHint: "拖放到这里，或选择文件", chooseFile: "选择文件",
+          sourceLabel: "Markdown 源文本", pastePlaceholder: "# 文档标题\n\n在这里粘贴或编写 Markdown…", render: "开始阅读",
+          example: "载入示例", clear: "清空", count: "{lines} 行 · {chars} 字符", reading: "正在读取文件…",
+          unsupportedFile: "请选择 .md、.markdown 或 .txt 文件。", readFailed: "文件读取失败，请重新选择。",
+          oneFile: "请每次打开一个文件。", replaceConfirm: "替换当前编辑的内容？",
+          exampleTitle: "一份 Markdown 示例", exampleBody: "用简洁的文本组织内容。", exampleSection: "代码与公式", exampleDiagram: "图表", exampleInput: "输入", exampleRead: "阅读",
           tocTitle: "目录", footerBuilt: "使用 GLM-5.2 构建", backHome: "← 返回主页",
           copy: "复制", copied: "已复制", copyFailed: "复制失败", zoomIn: "放大图表", zoomOut: "缩小图表",
           fullscreen: "网页全屏查看图表", exitFullscreen: "返回正文", diagramControls: "图表控制",
@@ -168,8 +213,13 @@
         },
         en: {
           lang: "en", title: "Markdown Reader - Fizgrad", home: "← Home", homeAria: "Back to home",
-          newFile: "New File", newFileAria: "Upload a new file", dropTitle: "Drop a Markdown file here", dropSub: "or click to select",
-          pasteLabel: "or paste / type text", pastePlaceholder: "# Paste Markdown here\n\nSupports math $E=mc^2$, code blocks, Mermaid diagrams", render: "Render",
+          newFile: "New document", newFileAria: "Open a new document", edit: "Back to editor", readerTitle: "Markdown Reader",
+          openTitle: "Open a local file", dropHint: "Drop it here, or choose a file", chooseFile: "Choose file",
+          sourceLabel: "Markdown source", pastePlaceholder: "# Document title\n\nPaste or write Markdown here…", render: "Start reading",
+          example: "Load example", clear: "Clear", count: "{lines} lines · {chars} characters", reading: "Reading file…",
+          unsupportedFile: "Choose an .md, .markdown, or .txt file.", readFailed: "Could not read the file. Please try again.",
+          oneFile: "Open one file at a time.", replaceConfirm: "Replace the content currently in the editor?",
+          exampleTitle: "A Markdown example", exampleBody: "Organize ideas with plain text.", exampleSection: "Code and math", exampleDiagram: "Diagram", exampleInput: "Input", exampleRead: "Read",
           tocTitle: "Contents", footerBuilt: "Built with GLM-5.2", backHome: "← Back to home",
           copy: "Copy", copied: "Copied!", copyFailed: "Failed", zoomIn: "Zoom in", zoomOut: "Zoom out",
           fullscreen: "Expand diagram to fill page", exitFullscreen: "Back to document", diagramControls: "Diagram controls",
@@ -236,8 +286,8 @@
           btn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
         }
         updateDynamicLabels();
+        updateEditorState();
       }
-      applyI18n();
       document.getElementById("lang-toggle").addEventListener("click", function () {
         lang = lang === "zh" ? "en" : "zh";
         try { localStorage.setItem("lang", lang); } catch (e) {}
@@ -245,11 +295,59 @@
       });
 
       var dropzone = document.getElementById("reader-dropzone");
+      var inputView = document.getElementById("reader-input");
       var fileInput = document.getElementById("reader-file-input");
       var readerView = document.getElementById("reader-view");
       var textarea = document.getElementById("reader-textarea");
       var renderBtn = document.getElementById("reader-render-btn");
       var tocScrollHandler = null;
+      var pendingReader = null;
+      var fileReadSequence = 0;
+      var statusKey = "";
+      var filename = "untitled.md";
+
+      function updateEditorState() {
+        var editor = document.getElementById("reader-textarea");
+        var text = editor.value;
+        var reading = Boolean(pendingReader);
+        document.getElementById("reader-count").textContent = t("count")
+          .replace("{lines}", text ? text.split(/\r\n|\r|\n/).length : 0)
+          .replace("{chars}", Array.from(text).length);
+        document.getElementById("reader-render-btn").disabled = !text.trim() || reading;
+        document.getElementById("reader-clear").disabled = !text || reading;
+        document.getElementById("reader-example").disabled = reading;
+        document.getElementById("reader-filename").textContent = filename || "untitled.md";
+        document.getElementById("reader-status").textContent = statusKey ? t(statusKey) : "";
+        document.getElementById("reader-status").classList.toggle("is-error", Boolean(statusKey && statusKey !== "reading"));
+      }
+
+      function setStatus(key) {
+        statusKey = key || "";
+        updateEditorState();
+      }
+
+      function showEditor() {
+        resetTOC();
+        readerView.hidden = true;
+        inputView.hidden = false;
+        document.getElementById("reader-edit").hidden = true;
+        document.getElementById("reader-new").hidden = true;
+        window.scrollTo(0, 0);
+        textarea.focus({ preventScroll: true });
+      }
+
+      function cancelFileRead() {
+        fileReadSequence++;
+        if (pendingReader) pendingReader.abort();
+        pendingReader = null;
+      }
+
+      function replaceDraft() {
+        return !textarea.value.trim() || window.confirm(t("replaceConfirm"));
+      }
+
+      document.getElementById("reader-shortcut-key").textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+      applyI18n();
 
       function resetTOC() {
         if (tocScrollHandler) {
@@ -263,8 +361,10 @@
       function renderMarkdown(md) {
         var container = document.getElementById("post-content");
         resetTOC();
-        dropzone.style.display = "none";
-        readerView.style.display = "";
+        inputView.hidden = true;
+        readerView.hidden = false;
+        document.getElementById("reader-edit").hidden = false;
+        document.getElementById("reader-new").hidden = false;
         window.scrollTo(0, 0);
 
         if (markedReady && sanitizerReady) {
@@ -477,47 +577,108 @@
 
       function readFile(file) {
         if (!file) return;
+        cancelFileRead();
+        if (!/\.(md|markdown|txt)$/i.test(file.name)) {
+          setStatus("unsupportedFile");
+          return;
+        }
+        if (!replaceDraft()) { setStatus(""); return; }
+        var sequence = fileReadSequence;
         var reader = new FileReader();
+        pendingReader = reader;
+        setStatus("reading");
         reader.onload = function (e) {
-          renderMarkdown(e.target.result);
+          if (sequence !== fileReadSequence) return;
+          pendingReader = null;
+          filename = file.name;
+          textarea.value = e.target.result;
+          setStatus("");
+          if (textarea.value.trim()) renderMarkdown(textarea.value);
+          else textarea.focus();
+        };
+        reader.onerror = function () {
+          if (sequence !== fileReadSequence) return;
+          pendingReader = null;
+          setStatus("readFailed");
         };
         reader.readAsText(file);
       }
 
-      dropzone.addEventListener("click", function (e) {
-        if (e.target === textarea || e.target === renderBtn) return;
+      document.getElementById("reader-open-file").addEventListener("click", function () {
+        fileInput.value = "";
         fileInput.click();
       });
       fileInput.addEventListener("change", function (e) {
         readFile(e.target.files[0]);
       });
 
-      dropzone.addEventListener("dragover", function (e) {
+      var dragDepth = 0;
+      inputView.addEventListener("dragenter", function (e) {
+        if (Array.from(e.dataTransfer.types).indexOf("Files") === -1) return;
         e.preventDefault();
-        dropzone.classList.add("reader-dragover");
+        dragDepth++;
+        dropzone.classList.add("is-dragover");
       });
-      dropzone.addEventListener("dragleave", function () {
-        dropzone.classList.remove("reader-dragover");
-      });
-      dropzone.addEventListener("drop", function (e) {
+      inputView.addEventListener("dragover", function (e) {
+        if (Array.from(e.dataTransfer.types).indexOf("Files") === -1) return;
         e.preventDefault();
-        dropzone.classList.remove("reader-dragover");
-        var file = e.dataTransfer.files[0];
-        if (file) readFile(file);
+        e.dataTransfer.dropEffect = "copy";
+      });
+      inputView.addEventListener("dragleave", function () {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (!dragDepth) dropzone.classList.remove("is-dragover");
+      });
+      inputView.addEventListener("drop", function (e) {
+        if (Array.from(e.dataTransfer.types).indexOf("Files") === -1) return;
+        e.preventDefault();
+        dragDepth = 0;
+        dropzone.classList.remove("is-dragover");
+        if (e.dataTransfer.files.length !== 1) { setStatus("oneFile"); return; }
+        readFile(e.dataTransfer.files[0]);
       });
 
       renderBtn.addEventListener("click", function () {
-        var text = textarea.value.trim();
-        if (text) renderMarkdown(text);
+        if (textarea.value.trim() && !pendingReader) renderMarkdown(textarea.value);
       });
 
-      document.getElementById("reader-new").addEventListener("click", function () {
-        resetTOC();
-        readerView.style.display = "none";
-        dropzone.style.display = "";
+      textarea.addEventListener("input", function () {
+        // Typing takes precedence over a file that is still loading.
+        cancelFileRead();
+        setStatus("");
+      });
+      textarea.addEventListener("keydown", function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !e.isComposing) {
+          e.preventDefault();
+          renderBtn.click();
+        }
+      });
+
+      function clearDraft() {
+        cancelFileRead();
         textarea.value = "";
         fileInput.value = "";
-        window.scrollTo(0, 0);
+        filename = "untitled.md";
+        setStatus("");
+      }
+      document.getElementById("reader-clear").addEventListener("click", function () {
+        clearDraft();
+        textarea.focus();
+      });
+      document.getElementById("reader-example").addEventListener("click", function () {
+        if (!replaceDraft()) return;
+        clearDraft();
+        textarea.value = "# " + t("exampleTitle") + "\n\n" + t("exampleBody")
+          + "\n\n## " + t("exampleSection") + "\n\n```cpp\nint answer = 42;\n```\n\n$$E = mc^2$$\n\n## "
+          + t("exampleDiagram") + "\n\n```mermaid\nflowchart LR\n  A[\"Markdown\"] --> B[\""
+          + t("exampleInput") + "\"] --> C[\"" + t("exampleRead") + "\"]\n```\n";
+        updateEditorState();
+        textarea.focus();
+      });
+      document.getElementById("reader-edit").addEventListener("click", showEditor);
+      document.getElementById("reader-new").addEventListener("click", function () {
+        if (!replaceDraft()) return;
+        clearDraft();
+        showEditor();
       });
     })();
   </script>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GRE 单词练习：选择释义、看释义拼写与错词复习。" />
+  <title>单词练习 - Fizgrad</title>
+  <link rel="icon" href="assets/img/avatar.png" />
+  <link rel="stylesheet" href="assets/css/fonts.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/words.css" />
+</head>
+<body>
+  <div class="grid-overlay" aria-hidden="true"></div>
+  <a class="skip-link" href="#main" data-word-i18n="skip">跳到主内容</a>
+  <header class="nav scrolled">
+    <a href="./" class="nav-logo">&lt;fizgrad/&gt;</a>
+    <nav class="nav-links">
+      <a href="./" data-word-aria="homeAria" aria-label="返回主页"><span class="nav-back-full" data-word-i18n="home">← 主页</span><span class="nav-back-short" aria-hidden="true">←</span></a>
+      <button id="lang-toggle" class="lang-btn" type="button" aria-label="Switch to English">EN</button>
+    </nav>
+  </header>
+
+  <main id="main" class="words-page">
+    <div class="words-heading">
+      <div>
+        <p class="words-eyebrow" id="words-source">GRE</p>
+        <h1 data-word-i18n="title">单词练习</h1>
+      </div>
+      <a class="words-library-link" href="#word-library" id="words-library-link" data-word-i18n="library">查看词表 ↗</a>
+    </div>
+
+    <div id="words-loading" class="words-message" role="status" aria-live="polite">
+      <span id="words-loading-text" data-word-i18n="loading">正在加载词表…</span>
+      <button id="words-retry" class="words-button words-secondary" type="button" data-word-i18n="retry" hidden>重新加载</button>
+    </div>
+
+    <div id="words-app" hidden>
+      <dl class="words-stats">
+        <div><dt data-word-i18n="todayCount">今日练过</dt><dd><span id="words-today-count">0</span><small data-word-i18n="wordUnit">词</small></dd></div>
+        <div><dt data-word-i18n="seenCount">本模式已练</dt><dd><span id="words-seen-count">0</span><small id="words-total-count">/ 300</small></dd></div>
+        <div><dt data-word-i18n="mistakeCount">本模式待复习</dt><dd><span id="words-mistake-count">0</span><small data-word-i18n="wordUnit">词</small></dd></div>
+      </dl>
+
+      <div class="words-toolbar">
+        <div class="words-modes" role="group" data-word-aria="modeLabel" aria-label="练习模式">
+          <button type="button" data-mode="choice" aria-pressed="true" data-word-i18n="choice">选择释义</button>
+          <button type="button" data-mode="spelling" aria-pressed="false" data-word-i18n="spelling">释义拼写</button>
+        </div>
+        <div class="words-scope">
+          <label class="words-visually-hidden" for="words-pool" data-word-i18n="poolLabel">练习范围</label>
+          <select id="words-pool">
+            <option value="today" data-word-i18n="poolToday">今日 10 词</option>
+            <option value="all" data-word-i18n="poolAll">全部词表</option>
+            <option value="mistakes" data-word-i18n="poolMistakes">错词复习</option>
+          </select>
+          <button id="words-restart" class="words-text-button" type="button" data-word-i18n="restart">重新组题</button>
+        </div>
+      </div>
+
+      <section id="words-quiz" class="words-quiz" aria-labelledby="words-question-title">
+        <div class="words-question-meta"><span id="words-question-label"></span><span id="words-question-count"></span></div>
+        <div class="words-progress" role="progressbar" data-word-aria="roundProgress" aria-label="本轮进度" aria-valuemin="0" aria-valuenow="0" aria-valuemax="10"><span id="words-progress-fill"></span></div>
+        <h2 id="words-question-title" class="words-question" lang="en"></h2>
+        <p id="words-part" class="words-part" lang="en"></p>
+        <div id="words-options" class="words-options" role="group" aria-labelledby="words-question-title"></div>
+        <form id="words-spell-form" class="words-spell-form" hidden>
+          <label for="words-answer" class="words-visually-hidden" data-word-i18n="spellLabel">输入英文单词</label>
+          <input id="words-answer" name="answer" type="text" lang="en" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-word-placeholder="spellPlaceholder" placeholder="输入英文单词" aria-describedby="words-feedback" />
+          <button id="words-submit" class="words-button words-primary" type="submit" data-word-i18n="check" disabled>检查答案</button>
+        </form>
+        <div id="words-feedback" class="words-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+        <div class="words-question-actions">
+          <button id="words-skip" class="words-text-button" type="button" data-word-i18n="forgot">想不起来</button>
+          <button id="words-next" class="words-button words-primary" type="button" data-word-i18n="next" hidden>下一词 →</button>
+        </div>
+      </section>
+
+      <section id="words-empty" class="words-empty words-quiz" hidden>
+        <h2 data-word-i18n="emptyTitle">还没有待复习的错词</h2>
+        <p data-word-i18n="emptyText">这个模式下答错的单词会出现在这里。</p>
+        <button id="words-empty-start" class="words-button words-primary" type="button" data-word-i18n="startToday">练习今日单词</button>
+      </section>
+
+      <section id="words-summary" class="words-summary words-quiz" aria-labelledby="words-summary-title" hidden>
+        <p class="words-eyebrow" data-word-i18n="roundDone">本轮完成</p>
+        <h2 id="words-summary-title" tabindex="-1"></h2>
+        <p id="words-summary-text"></p>
+        <div class="words-summary-actions">
+          <button id="words-again" class="words-button words-primary" type="button" data-word-i18n="again">再练一轮</button>
+          <button id="words-review-round" class="words-button words-secondary" type="button" data-word-i18n="reviewRound" hidden>再练本轮错词</button>
+        </div>
+        <ul id="words-round-mistakes" class="words-round-mistakes"></ul>
+      </section>
+
+      <p id="words-storage-note" class="words-storage-note" data-word-i18n="storageNote">进度仅保存在当前浏览器；选择与拼写分别记录。</p>
+
+      <details id="word-library" class="word-library">
+        <summary><span data-word-i18n="libraryTitle">单词表</span><span id="words-library-count">300</span></summary>
+        <div class="words-library-body">
+          <label for="words-search" class="words-visually-hidden" data-word-i18n="searchLabel">搜索单词或释义</label>
+          <input id="words-search" type="search" data-word-placeholder="searchPlaceholder" placeholder="搜索单词或英文释义…" autocomplete="off" />
+          <p id="words-search-count" class="words-search-count" role="status" aria-live="polite"></p>
+          <ul id="words-library-list" class="words-library-list"></ul>
+          <p id="words-search-empty" class="words-search-empty" data-word-i18n="searchEmpty" hidden>没有匹配的单词。</p>
+        </div>
+      </details>
+    </div>
+  </main>
+
+  <footer class="footer"><p>&copy; <span id="year"></span> Fizgrad</p><a href="./" class="back-top" data-word-i18n="backHome">← 返回主页</a></footer>
+  <script src="assets/js/words-core.js"></script>
+  <script src="assets/js/words.js"></script>
+</body>
+</html>

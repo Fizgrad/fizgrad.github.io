@@ -144,6 +144,14 @@
     "descriptionEn": "Abstract domains, intervals, widening, path and context sensitivity, interprocedural analysis, and taint tracking."
   },
   {
+    "title": "目标文件、链接与装载",
+    "titleEn": "Object Files, Linking, and Loading",
+    "slug": "object_linking",
+    "category": "compilers",
+    "description": "从 ELF 符号与重定位到静态库、共享库、GOT/PLT、COMDAT 与进程装载",
+    "descriptionEn": "ELF symbols and relocations, archives, shared libraries, GOT/PLT, COMDAT, and process loading."
+  },
+  {
     "title": "Linux 系统基础复习",
     "titleEn": "Linux System Fundamentals Review",
     "slug": "os_review",

@@ -8,6 +8,7 @@
   <link rel="icon" href="assets/img/avatar.png" />
   <link rel="stylesheet" href="assets/css/fonts.css" />
   <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/words.css" />
 </head>
 <body>
   <canvas id="bg-canvas" aria-hidden="true"></canvas>
@@ -58,6 +59,15 @@
             </a>
           </li>
          </ul>
+        <section class="daily-word" id="daily-word" aria-labelledby="daily-word-title">
+          <div class="daily-word-top">
+            <h2 id="daily-word-title">今日单词</h2>
+            <a id="daily-word-link" href="words.html">练一练 →</a>
+          </div>
+          <p id="daily-word-term" class="daily-word-term" lang="en"></p>
+          <p id="daily-word-meaning" class="daily-word-meaning" lang="en" role="status">Loading…</p>
+          <button id="daily-word-retry" class="daily-word-retry" type="button" hidden>重新加载</button>
+        </section>
         <div class="hero-scroll">
           <a href="#projects" data-i18n-aria="scrollAria" aria-label="向下滚动查看项目">
             <span class="mouse"><span class="wheel"></span></span>
@@ -120,5 +130,7 @@
 
   <script src="assets/js/blog-catalog.js"></script>
   <script src="assets/js/main.js"></script>
+  <script src="assets/js/words-core.js"></script>
+  <script src="assets/js/daily-word.js"></script>
 </body>
 </html>
